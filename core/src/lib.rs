@@ -9,6 +9,12 @@ pub use runtime::{ModuleRuntime, ModuleHost, ModuleHandle, ExecutionModel, Prior
 
 pub mod adapters;
 pub use adapters::{SourceAdapter, SinkAdapter};
+
+pub mod ring_buffer;
+pub use ring_buffer::{SPSCRingBuffer, RingBufferSender, RingBufferReceiver};
+
+pub mod audio_frame;
+pub use audio_frame::AudioFrame;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutConfig {
     pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"
@@ -147,11 +153,19 @@ pub enum Signal {
         mime_type: String,
         bytes: Vec<u8>,
     },
-    /// Audio Signal (PCM)
+    /// Audio Signal (PCM) - buffered, for non-real-time processing
     Audio {
         sample_rate: u32,
         channels: u16,
         data: Vec<f32>,
+    },
+    /// Real-time audio stream handle (ring buffer for minimal latency)
+    /// Contains receiver end - modules can poll for audio frames
+    #[serde(skip)]
+    AudioStream {
+        sample_rate: u32,
+        channels: u16,
+        receiver: RingBufferReceiver<AudioFrame>,
     },
     /// A control signal for the system (e.g., "Shutdown", "Reload")
     Control(ControlSignal),
