@@ -1,0 +1,98 @@
+# -----------------------------------------
+# Rust / Cargo
+# -----------------------------------------
+/target/
+/**/target/
+# Build output for workspaces, crates, examples, benches
+
+# Cargo backups
+**/*.rs.bk
+
+# -----------------------------------------
+# WASM / Web Tooling
+# -----------------------------------------
+pkg/
+wasm-pack.log
+*/pkg/
+*.wasm
+*.wat
+
+# Trunk / wasm-bindgen / bundlers
+dist/
+build/
+node_modules/
+*.lock
+*.map
+
+# Web temp files
+*.temp
+*.cache/
+.cache/
+.DS_Store
+
+# -----------------------------------------
+# Slint / UI (generated metadata)
+# -----------------------------------------
+slint-build/
+slint-out/
+
+# -----------------------------------------
+# Logs
+# -----------------------------------------
+*.log
+log/
+logs/
+
+# -----------------------------------------
+# IDE / Editor files
+# -----------------------------------------
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains (CLion, RustRover)
+.idea/
+*.iml
+
+# Sublime / Vim / Emacs
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# -----------------------------------------
+# System files
+# -----------------------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------------------
+# Python (if any leftover tools/scripts)
+# -----------------------------------------
+__pycache__/
+*.pyc
+.env
+venv/
+.venv/
+
+# -----------------------------------------
+# Mobile (Android/iOS) — optional
+# -----------------------------------------
+
+# Android
+android/app/build/
+android/.gradle/
+android/.idea/
+android/local.properties
+*.apk
+*.aab
+
+# iOS
+ios/Pods/
+ios/DerivedData/
+ios/build/
+*.xcworkspace
+*.xcuserdata/
