@@ -12,6 +12,8 @@ aphrodite = { path = "../../crates/aphrodite" }
 logos = { path = "../../crates/logos" }
 kamea = { path = "../../crates/kamea" }
 talisman_core = { path = "../../core" }
+text_tools = { path = "../../crates/text_tools" }
+nannou_egui = "0.19.0"
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 async-trait = "0.1"

@@ -1,0 +1,9 @@
+[package]
+name = "text_tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+talisman_core = { path = "../../core" }
+async-trait = "0.1"
+regex = "1.5"

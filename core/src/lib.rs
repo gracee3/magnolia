@@ -33,6 +33,11 @@ pub enum Signal {
     },
     /// A control signal for the system (e.g., "Shutdown", "Reload")
     Control(ControlSignal),
+    /// Computed/Processed Data (Source, Content)
+    Computed {
+        source: String,
+        content: String,
+    },
     /// Empty signal, used for heartbeat or triggers
     Pulse,
 }
