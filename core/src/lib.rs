@@ -8,6 +8,10 @@ pub struct LayoutConfig {
     pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"
     pub rows: Vec<String>,
     pub tiles: Vec<TileConfig>,
+    #[serde(default)]
+    pub patches: Vec<Patch>,
+    #[serde(default)]
+    pub is_sleeping: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

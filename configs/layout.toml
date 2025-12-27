@@ -1,45 +1,82 @@
-# Grid Definitions
-# 3 Columns: Editor | Sigil | Stats
-# Widened editor to 40%
-columns = ["40%", "1fr", "250px"] 
+columns = [
+    "40%",
+    "1fr",
+    "250px",
+]
+rows = [
+    "1fr",
+    "1fr",
+    "1fr",
+]
+is_sleeping = false
 
-# Rows: Main area mostly, but right column needs split.
-# We can use nested grids (future?) or just multiple rows in the main grid.
-# If we have 3 rows for the right column, we can use 3 rows for the whole grid 
-# and span the others.
-rows = ["1fr", "1fr", "1fr"]
-
-# LEFT COLUMN: Text Editor (Spans all 3 rows)
 [[tiles]]
 id = "editor_pane"
 col = 0
 row = 0
-rowspan = 3
+colspan = 1
+rowspan = 2
 module = "editor"
+enabled = true
 
-# MIDDLE COLUMN: Sigil (Spans all 3 rows)
-[[tiles]]
-id = "sigil_pane"
-col = 1
-row = 0
-rowspan = 3
-module = "kamea_sigil"
-
-# RIGHT COLUMN: Stats (1 Row each)
 [[tiles]]
 id = "dvwl_pane"
 col = 2
 row = 0
+colspan = 1
+rowspan = 1
 module = "devowelizer"
+enabled = true
 
 [[tiles]]
 id = "audio_pane"
 col = 2
 row = 1
+colspan = 1
+rowspan = 1
 module = "audio_input"
+enabled = true
 
 [[tiles]]
-id = "astro_pane"
-col = 2
-row = 2
-module = "astrology"
+id = "word_count_new"
+col = 1
+row = 1
+colspan = 1
+rowspan = 2
+module = "word_count"
+enabled = true
+
+[[patches]]
+id = "patch_1"
+source_module = "editor"
+source_port = "text_out"
+sink_module = "word_count"
+sink_port = "text_in"
+
+[[patches]]
+id = "patch_2"
+source_module = "editor"
+source_port = "text_out"
+sink_module = "devowelizer"
+sink_port = "text_in"
+
+[[patches]]
+id = "patch_3"
+source_module = "editor"
+source_port = "text_out"
+sink_module = "kamea_printer"
+sink_port = "text_in"
+
+[[patches]]
+id = "patch_4"
+source_module = "aphrodite"
+source_port = "astro_out"
+sink_module = "kamea_printer"
+sink_port = "astro_in"
+
+[[patches]]
+id = "patch_5"
+source_module = "aphrodite"
+source_port = "astro_out"
+sink_module = "astrology_display"
+sink_port = "astro_in"

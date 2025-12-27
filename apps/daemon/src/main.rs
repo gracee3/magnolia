@@ -9,7 +9,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use std::thread;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use audio_input::AudioInputSource;
 use text_tools::{SaveFileSink, OutputFormat};
@@ -47,12 +47,13 @@ struct Model {
     
     // Patch Bay State
     patch_bay: PatchBay,
-    disabled_tiles: HashSet<String>,
+    // disabled_tiles removed
     show_patch_bay: bool,
     
     // Settings & Controls
     show_global_settings: bool,
     show_tile_settings: Option<String>,  // tile_id if showing settings for that tile
+    show_layout_manager: bool,
     is_sleeping: bool,
     
     // Audio State
@@ -113,8 +114,37 @@ impl Layout {
     fn update(&mut self, win_rect: Rect) {
         self.window_rect = win_rect;
     }
-    
-    
+
+    fn save(&self) {
+         let config = self.config.clone();
+         std::thread::spawn(move || {
+             match toml::to_string_pretty(&config) {
+                 Ok(c) => {
+                     if let Err(e) = std::fs::write("configs/layout.toml", c) {
+                         log::error!("Failed to save layout.toml: {}", e);
+                     } else {
+                         log::info!("Saved layout.toml (async body)");
+                     }
+                 },
+                 Err(e) => log::error!("Failed to serialize layout config: {}", e),
+             }
+         });
+    }
+
+    fn get_tile_at(&self, col: usize, row: usize) -> Option<&TileConfig> {
+        for tile in &self.config.tiles {
+            let t_col = tile.col;
+            let t_row = tile.row;
+            let t_cols = tile.colspan.unwrap_or(1);
+            let t_rows = tile.rowspan.unwrap_or(1);
+            
+            if col >= t_col && col < t_col + t_cols && row >= t_row && row < t_row + t_rows {
+                return Some(tile);
+            }
+        }
+        None
+    }
+
     // Helper to calculate Grid Rect directly from Col/Row
     fn calculate_rect(&self, tile: &TileConfig) -> Option<Rect> {
         let cols = self.resolve_tracks(&self.config.columns, self.window_rect.w());
@@ -289,6 +319,9 @@ fn model(app: &App) -> Model {
     // 7. Init Patch Bay and register module schemas
     let mut patch_bay = PatchBay::new();
     
+    // Load layout config early to access saved patches
+    let layout = Layout::new(app.window_rect());
+
     // Register all module schemas
     let logos_source = LogosSource::new();
     let aphrodite_source = AphroditeSource::new(10);
@@ -382,22 +415,25 @@ fn model(app: &App) -> Model {
     };
     patch_bay.register_module(astro_display_schema);
     
-    // Establish default patches (the existing signal flow)
-    // Editor → WordCount
-    if let Err(e) = patch_bay.connect("editor", "text_out", "word_count", "text_in") {
-        log::warn!("Failed to connect editor→word_count: {}", e);
-    }
-    // Editor → Devowelizer
-    if let Err(e) = patch_bay.connect("editor", "text_out", "devowelizer", "text_in") {
-        log::warn!("Failed to connect editor→devowelizer: {}", e);
-    }
-    // Editor → Kamea Sigil
-    if let Err(e) = patch_bay.connect("editor", "text_out", "kamea_printer", "text_in") {
-        log::warn!("Failed to connect editor→kamea: {}", e);
-    }
-    // Aphrodite → Kamea (astrology input)
-    if let Err(e) = patch_bay.connect("aphrodite", "astro_out", "kamea_printer", "astro_in") {
-        log::warn!("Failed to connect aphrodite→kamea: {}", e);
+    // Establish default patches ONLY if no patches loaded from config
+    if layout.config.patches.is_empty() {
+        log::info!("No patches found in config, applying factory defaults.");
+        // Editor → WordCount
+        if let Err(e) = patch_bay.connect("editor", "text_out", "word_count", "text_in") {
+            log::warn!("Failed to connect editor→word_count: {}", e);
+        }
+        // Editor → Devowelizer
+        if let Err(e) = patch_bay.connect("editor", "text_out", "devowelizer", "text_in") {
+            log::warn!("Failed to connect editor→devowelizer: {}", e);
+        }
+        // Editor → Kamea Sigil
+        if let Err(e) = patch_bay.connect("editor", "text_out", "kamea_printer", "text_in") {
+            log::warn!("Failed to connect editor→kamea: {}", e);
+        }
+        // Aphrodite → Kamea (astrology input)
+        if let Err(e) = patch_bay.connect("aphrodite", "astro_out", "kamea_printer", "astro_in") {
+            log::warn!("Failed to connect aphrodite→kamea: {}", e);
+        }
     }
     // Aphrodite → Astrology Display
     if let Err(e) = patch_bay.connect("aphrodite", "astro_out", "astrology_display", "astro_in") {
@@ -407,7 +443,31 @@ fn model(app: &App) -> Model {
     log::info!("Patch Bay initialized with {} modules, {} patches", 
         patch_bay.get_modules().len(), 
         patch_bay.get_patches().len());
+    
+    // Apply patches from layout config
+    for patch in &layout.config.patches {
+        if let Err(e) = patch_bay.connect(
+            &patch.source_module, 
+            &patch.source_port, 
+            &patch.sink_module, 
+            &patch.sink_port
+        ) {
+            log::warn!("Failed to apply patch from config: {}", e);
+        }
+    }
 
+    // Sync initial enabled/disabled state from layout tiles
+    for tile in &layout.config.tiles {
+        if !tile.enabled {
+            let module_id = tile_to_module(&tile.id);
+            patch_bay.disable_module(&module_id);
+            log::info!("Disabled module '{}' based on layout config", module_id);
+        }
+    }
+
+
+    // Extract sleep state before moving layout into Model
+    let initial_sleep_state = layout.config.is_sleeping;
 
     Model {
         receiver: rx_ui,
@@ -421,7 +481,7 @@ fn model(app: &App) -> Model {
         word_count: "0".to_string(),
         devowel_text: "".to_string(),
         config,
-        layout: Layout::new(app.window_rect()),
+        layout,
         selected_tile: None,
         maximized_tile: None,
         last_click_time: std::time::Instant::now(),
@@ -430,11 +490,12 @@ fn model(app: &App) -> Model {
         clipboard,
         context_menu: None,
         patch_bay,
-        disabled_tiles: HashSet::new(),
+
         show_patch_bay: false,
         show_global_settings: false,
         show_tile_settings: None,
-        is_sleeping: false,
+        show_layout_manager: false,
+        is_sleeping: initial_sleep_state,
         audio_buffer: VecDeque::with_capacity(2048),
     }
 }
@@ -685,30 +746,41 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 ui.add(egui::Separator::default().spacing(10.0));
                 
                 // Toggle button text based on disabled state
-                let is_disabled = model.disabled_tiles.contains(&tile_id);
-                let disable_text = if is_disabled { "ENABLE" } else { "DISABLE" };
+                // Toggle button text based on disabled state
+                // Use a block to avoid creating a double borrow if we did this inline, 
+                // but actually we need to find the tile index first.
+                let tile_idx = model.layout.config.tiles.iter().position(|t| t.id == tile_id);
                 
-                let res = ui.add_sized(btn_size, egui::Button::new(disable_text));
-                if res.clicked() || res.secondary_clicked() {
-                    // Get corresponding module ID for this tile
-                    let module_id = tile_to_module(&tile_id);
+                if let Some(idx) = tile_idx {
+                    let is_disabled = !model.layout.config.tiles[idx].enabled;
+                    let disable_text = if is_disabled { "ENABLE" } else { "DISABLE" };
                     
-                    if is_disabled {
-                        model.disabled_tiles.remove(&tile_id);
-                        model.patch_bay.enable_module(&module_id);
-                        log::info!("Enabled Tile/Module: {} / {}", tile_id, module_id);
-                    } else {
-                        model.disabled_tiles.insert(tile_id.clone());
-                        model.patch_bay.disable_module(&module_id);
-                        log::info!("Disabled Tile/Module: {} / {}", tile_id, module_id);
+                    let res = ui.add_sized(btn_size, egui::Button::new(disable_text));
+                    if res.clicked() || res.secondary_clicked() {
+                         let module_id = tile_to_module(&tile_id);
+                         
+                         // Toggle state
+                         let new_state = is_disabled; // if was disabled, new state is enabled (true)
+                         model.layout.config.tiles[idx].enabled = new_state;
+
+                         if new_state {
+                             model.patch_bay.enable_module(&module_id);
+                             log::info!("Enabled Tile/Module: {} / {}", tile_id, module_id);
+                         } else {
+                             model.patch_bay.disable_module(&module_id);
+                             log::info!("Disabled Tile/Module: {} / {}", tile_id, module_id);
+                         }
+                         model.layout.save();
+                         open = false;
                     }
-                    open = false;
                 }
+
                 
                 let res = ui.add_sized(btn_size, egui::Button::new("REMOVE"));
                 if res.clicked() || res.secondary_clicked() {
                     // Remove from layout config
                     model.layout.config.tiles.retain(|t| t.id != tile_id);
+                    model.layout.save();
                     open = false;
                 }
                 
@@ -731,6 +803,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 let res = ui.add_sized(btn_size, egui::Button::new(sleep_text));
                 if res.clicked() || res.secondary_clicked() {
                     model.is_sleeping = !model.is_sleeping;
+                    model.layout.config.is_sleeping = model.is_sleeping;
+                    model.layout.save();
                     log::info!("Engine {}", if model.is_sleeping { "sleeping" } else { "awake" });
                     open = false;
                 }
@@ -903,6 +977,13 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 if ui.button(if model.is_sleeping { "WAKE ENGINE" } else { "SLEEP ENGINE" }).clicked() {
                     model.is_sleeping = !model.is_sleeping;
+                    model.layout.config.is_sleeping = model.is_sleeping;
+                    model.layout.save();
+                }
+                
+                if ui.button("OPEN LAYOUT MANAGER").clicked() {
+                    model.show_layout_manager = true;
+                    model.show_global_settings = false;
                 }
                 
                 ui.add_space(10.0);
@@ -911,7 +992,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 ui.label(egui::RichText::new("MODULES").small().color(egui::Color32::GRAY));
                 ui.label(format!("Registered: {}", model.patch_bay.get_modules().len()));
                 ui.label(format!("Active Patches: {}", model.patch_bay.get_patches().len()));
-                ui.label(format!("Disabled: {}", model.disabled_tiles.len()));
+                ui.label(format!("Disabled: {}", model.layout.config.tiles.iter().filter(|t| !t.enabled).count()));
             });
     }
 
@@ -1003,7 +1084,9 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 // Enabled state
                 ui.label(egui::RichText::new("STATE").small().color(egui::Color32::GRAY));
-                let is_disabled = model.disabled_tiles.contains(&tile_id);
+                // Find tile config to check enabled state
+                let tile_config = model.layout.config.tiles.iter().find(|t| t.id == tile_id);
+                let is_disabled = tile_config.map(|t| !t.enabled).unwrap_or(false);
                 let state_text = if is_disabled { "DISABLED" } else { "ENABLED" };
                 let state_color = if is_disabled { 
                     egui::Color32::from_rgb(255, 100, 100) 
@@ -1011,6 +1094,120 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     egui::Color32::from_rgb(100, 255, 100) 
                 };
                 ui.label(egui::RichText::new(state_text).color(state_color));
+            });
+    }
+
+    // Layout Manager Modal
+    if model.show_layout_manager {
+        let screen_rect = ctx.screen_rect();
+        egui::Window::new("LAYOUT MANAGER")
+            .fixed_pos(egui::pos2(screen_rect.center().x - 250.0, screen_rect.center().y - 300.0))
+            .fixed_size(egui::vec2(500.0, 600.0))
+            .resizable(true)
+            .show(&ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("GRID MANAGER");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("CLOSE & SAVE").clicked() {
+                            // Sync patches from PatchBay to Layout Config
+                            model.layout.config.patches = model.patch_bay.get_patches().to_vec();
+                            // Sync global state
+                            model.layout.config.is_sleeping = model.is_sleeping;
+                            model.layout.save();
+                            model.show_layout_manager = false;
+                        }
+                    });
+                });
+                
+                ui.separator();
+                
+                // 1. Grid Definition (Rows/Cols)
+                ui.collapsing("Grid Dimensions", |ui| {
+                    ui.label("Columns:");
+                    let mut cols_to_remove = None;
+                    for (i, col) in model.layout.config.columns.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Col {}:", i));
+                            ui.text_edit_singleline(col);
+                            if ui.button("x").clicked() { cols_to_remove = Some(i); }
+                        });
+                    }
+                    if let Some(i) = cols_to_remove { model.layout.config.columns.remove(i); }
+                    if ui.button("+ Add Column").clicked() { model.layout.config.columns.push("1fr".to_string()); }
+
+                    ui.label("Rows:");
+                    let mut rows_to_remove = None;
+                    for (i, row) in model.layout.config.rows.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Row {}:", i));
+                            ui.text_edit_singleline(row);
+                            if ui.button("x").clicked() { rows_to_remove = Some(i); }
+                        });
+                    }
+                    if let Some(i) = rows_to_remove { model.layout.config.rows.remove(i); }
+                    if ui.button("+ Add Row").clicked() { model.layout.config.rows.push("1fr".to_string()); }
+                });
+
+                ui.separator();
+                
+                // 2. Active Tiles
+                ui.label("Active Tiles:");
+                egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| {
+                    let mut tile_to_remove = None;
+                    for (i, tile) in model.layout.config.tiles.iter_mut().enumerate() {
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.colored_label(egui::Color32::from_rgb(0, 255, 255), &tile.id);
+                                ui.label(format!("({})", tile.module));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("DELETE").clicked() { tile_to_remove = Some(i); }
+                                });
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Pos:");
+                                ui.add(egui::DragValue::new(&mut tile.col).prefix("Col:"));
+                                ui.add(egui::DragValue::new(&mut tile.row).prefix("Row:"));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Span:");
+                                let mut cs = tile.colspan.unwrap_or(1);
+                                let mut rs = tile.rowspan.unwrap_or(1);
+                                ui.add(egui::DragValue::new(&mut cs).prefix("Col:"));
+                                ui.add(egui::DragValue::new(&mut rs).prefix("Row:"));
+                                tile.colspan = Some(cs);
+                                tile.rowspan = Some(rs);
+                            });
+                            
+                            ui.checkbox(&mut tile.enabled, "Enabled");
+                        });
+                    }
+                    if let Some(i) = tile_to_remove { model.layout.config.tiles.remove(i); }
+                });
+
+                ui.separator();
+
+                // 3. Add New Tile
+                ui.menu_button("ADD NEW TILE...", |ui| {
+                   // Clone module list to avoid borrow checker issues with patch_bay
+                   let modules: Vec<_> = model.patch_bay.get_modules().iter().map(|m| (*m).clone()).collect();
+                   for module in modules {
+                       if ui.button(&module.name).clicked() {
+                           // Add to layout
+                           model.layout.config.tiles.push(TileConfig {
+                               id: format!("{}_new", module.id),
+                               col: 0,
+                               row: 0,
+                               colspan: Some(1),
+                               rowspan: Some(1),
+                               module: module.id.clone(),
+                               enabled: true,
+                           });
+                           ui.close_menu();
+                       }
+                   }
+                });
             });
     }
 
@@ -1124,6 +1321,29 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
         }
         
         if !hit {
+            // Check for empty cells to open Layout Manager
+            if model.maximized_tile.is_none() {
+                let cols = model.layout.config.columns.len();
+                let rows = model.layout.config.rows.len();
+                for c in 0..cols {
+                    for r in 0..rows {
+                         if model.layout.get_tile_at(c, r).is_none() {
+                             let temp_tile = TileConfig {
+                                 id: String::new(), col: c, row: r, colspan: Some(1), rowspan: Some(1),
+                                 module: String::new(), enabled: true
+                             };
+                             
+                             if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
+                                  if rect.contains(mouse_pos) {
+                                      model.show_layout_manager = true;
+                                      return;
+                                  }
+                             }
+                         }
+                    }
+                }
+            }
+
             model.selected_tile = None;
             if model.maximized_tile.is_some() {
                  model.is_closing = true;
@@ -1223,6 +1443,29 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
     draw.background().color(bg_color);
 
+    // Draw Empty Cell Placeholders
+    if model.maximized_tile.is_none() {
+        let cols = model.layout.config.columns.len();
+        let rows = model.layout.config.rows.len();
+        for c in 0..cols {
+            for r in 0..rows {
+                 if model.layout.get_tile_at(c, r).is_none() {
+                     let temp_tile = TileConfig {
+                         id: String::new(), col: c, row: r, colspan: Some(1), rowspan: Some(1),
+                         module: String::new(), enabled: true
+                     };
+                     if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
+                         draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.05, 0.05, 0.05, 0.5)).stroke(stroke_color).stroke_weight(1.0); // Use stroke_color to match theme
+                         draw.text("+")
+                             .xy(rect.xy())
+                             .color(stroke_color)
+                             .font_size(24);
+                     }
+                 }
+            }
+        }
+    }
+
     // Iterate over all tiles and render
     for tile in &model.layout.config.tiles {
         if model.maximized_tile.as_ref() == Some(&tile.id) {
@@ -1284,7 +1527,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 // Helper to render tile content
 fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_color: LinSrgba, fg_color: Srgb<u8>, drawing_maximized: bool) {
     let is_selected = model.selected_tile.as_ref() == Some(&tile.id);
-    let is_disabled = model.disabled_tiles.contains(&tile.id);
+    let is_disabled = !tile.enabled;
     
     // Visualize Borders - use dim red for disabled tiles
     let final_border = if is_disabled {
