@@ -1,0 +1,31 @@
+# Grid Definitions
+# Supported units: "px", "%", "fr" (fractional)
+columns = ["250px", "1fr"]
+rows = ["40px", "1fr", "30px"]
+
+# Tile Definitions
+[[tiles]]
+id = "header"
+col = 0
+row = 0
+colspan = 2
+module = "header"
+
+[[tiles]]
+id = "sidebar"
+col = 0
+row = 1
+module = "editor"
+
+[[tiles]]
+id = "main"
+col = 1
+row = 1
+module = "kamea_sigil"
+
+[[tiles]]
+id = "footer"
+col = 0
+row = 2
+colspan = 2
+module = "status_bar"

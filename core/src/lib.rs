@@ -1,5 +1,22 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LayoutConfig {
+    pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"
+    pub rows: Vec<String>,
+    pub tiles: Vec<TileConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TileConfig {
+    pub id: String,
+    pub col: usize,
+    pub row: usize,
+    pub colspan: Option<usize>,
+    pub rowspan: Option<usize>,
+    pub module: String, // e.g. "editor", "word_count"
+}
 use std::fmt::Debug;
 use schemars::JsonSchema;
 

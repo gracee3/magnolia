@@ -6,13 +6,14 @@ use kamea::{self, SigilConfig};
 use text_tools::{WordCountSink, DevowelizerSink};
 use nannou_egui::{self, Egui, egui};
 use tokio::runtime::Runtime;
-use std::sync::mpsc;
+use tokio::sync::mpsc; // Use Tokio mpsc for async-await support in orchestrator
 use std::thread;
 
 // --- MODEL ---
 struct Model {
-    receiver: mpsc::Receiver<Signal>,
-    orchestrator_tx: mpsc::Sender<Signal>, // Channel to send GUI events to Orchestrator (or Sinks)
+    // We use a non-blocking channel for the UI thread to receive updates
+    receiver: std::sync::mpsc::Receiver<Signal>,
+    orchestrator_tx: mpsc::Sender<Signal>, 
     
     // UI State
     egui: Egui,
@@ -26,10 +27,147 @@ struct Model {
     word_count: String,
     devowel_text: String,
     config: SigilConfig,
+    
+    // Layout
+    layout: Layout,
 }
 
-const CLI_GREEN: &str = "\x1b[32m";
+// --- LAYOUT ENGINE ---
+use talisman_core::{LayoutConfig, TileConfig};
+use std::fs;
 
+struct Layout {
+    window_rect: Rect,
+    config: LayoutConfig,
+    // Add cache for resolved rects? For now, recalculate is cheap.
+}
+
+impl Layout {
+    fn new(win_rect: Rect) -> Self {
+        // Load config
+        // Try multiple paths (repo root vs crate dir)
+        let paths = ["configs/layout.toml", "../../configs/layout.toml"];
+        let mut content = None;
+        for p in &paths {
+            if let Ok(c) = fs::read_to_string(p) {
+                content = Some(c);
+                break;
+            }
+        }
+        
+        let content = content.unwrap_or_else(|| {
+                println!("Warning: Could not load layout.toml from {:?}, using default.", paths);
+                r#"
+                columns = ["250px", "1fr"]
+                rows = ["40px", "1fr", "30px"]
+                
+                [[tiles]]
+                id = "header"
+                col = 0
+                row = 0
+                colspan = 2
+                module = "header"
+                "# .to_string()
+            });
+            
+        let config: LayoutConfig = toml::from_str(&content).expect("Failed to parse layout.toml");
+        
+        Self { 
+            window_rect: win_rect,
+            config,
+        }
+    }
+    
+    fn update(&mut self, win_rect: Rect) {
+        self.window_rect = win_rect;
+    }
+    
+    // Resolve a specific tile by ID
+    fn get_rect(&self, tile_id: &str) -> Option<Rect> {
+        let tile = self.config.tiles.iter().find(|t| t.id == tile_id)?;
+        self.calculate_rect(tile)
+    }
+    
+    // Helper to calculate Grid Rect directly from Col/Row
+    fn calculate_rect(&self, tile: &TileConfig) -> Option<Rect> {
+        let cols = self.resolve_tracks(&self.config.columns, self.window_rect.w());
+        let rows = self.resolve_tracks(&self.config.rows, self.window_rect.h());
+        
+        let start_x = cols.iter().take(tile.col).sum::<f32>();
+        let width = cols.iter().skip(tile.col).take(tile.colspan.unwrap_or(1)).sum::<f32>();
+        
+        // Nannou Y is bottom-to-top, but Grid is usually Top-to-Bottom.
+        // Let's assume Row 0 is Top.
+        // total_h = self.window_rect.h()
+        // row 0 height = rows[0]
+        // y_top = self.window_rect.top()
+        // row 0 y = y_top - rows[0]/2 ? Nannou coords are center based?
+        // Let's map 0..H to window.top()..window.bottom().
+        
+        let start_y_from_top = rows.iter().take(tile.row).sum::<f32>();
+        let height = rows.iter().skip(tile.row).take(tile.rowspan.unwrap_or(1)).sum::<f32>();
+        
+        // Nannou Coordinate Conversion
+        // Left = self.window_rect.left() + start_x
+        // Top = self.window_rect.top() - start_y_from_top
+        // Center X = Left + w/2
+        // Center Y = Top - h/2
+        
+        let cx = self.window_rect.left() + start_x + width / 2.0;
+        let cy = self.window_rect.top() - start_y_from_top - height / 2.0;
+        
+        Some(Rect::from_x_y_w_h(cx, cy, width, height))
+    }
+    
+    fn resolve_tracks(&self, tracks: &[String], total_size: f32) -> Vec<f32> {
+        let mut resolved = vec![0.0; tracks.len()];
+        let mut used_px = 0.0;
+        let mut total_fr = 0.0;
+        
+        // First pass: PX and FR sum
+        for (i, track) in tracks.iter().enumerate() {
+            if track.ends_with("px") {
+                let val = track.trim_end_matches("px").parse::<f32>().unwrap_or(0.0);
+                resolved[i] = val;
+                used_px += val;
+            } else if track.ends_with("fr") {
+                let val = track.trim_end_matches("fr").parse::<f32>().unwrap_or(1.0);
+                total_fr += val;
+            } else {
+                 // Assume px if number, or Fr? 
+                 // Let's assume px default or 1fr default?
+                 // Let's assume "1fr" if strictly "1fr", otherwise try parse as px.
+                 // Actually common CSS is "250px", "1fr".
+                 if track.contains("fr") {
+                      let val = track.replace("fr","").parse::<f32>().unwrap_or(1.0);
+                      total_fr += val;
+                 } else {
+                      let val = track.replace("px","").parse::<f32>().unwrap_or(0.0);
+                      resolved[i] = val;
+                      used_px += val;
+                 }
+            }
+        }
+        
+        let remaining = (total_size - used_px).max(0.0);
+        
+        // Second pass: Resolve FR
+        if total_fr > 0.0 {
+            for (i, track) in tracks.iter().enumerate() {
+                 let is_fr = track.contains("fr"); // Loose check
+                 if is_fr {
+                      let val = track.trim_end_matches("fr").parse::<f32>().unwrap_or(1.0);
+                      resolved[i] = (val / total_fr) * remaining;
+                 }
+            }
+        }
+        
+        resolved
+    }
+}
+
+
+const CLI_GREEN: &str = "\x1b[32m";
 const CLI_RESET: &str = "\x1b[0m";
 
 fn main() {
@@ -39,67 +177,39 @@ fn main() {
 }
 
 fn model(app: &App) -> Model {
-    // 1. Setup Channels
-    let (tx_to_ui, rx_from_orch) = mpsc::channel();
-    let (tx_to_orch, rx_from_ui) = mpsc::channel::<Signal>();
-
-    // 2. Clone sender for Orchestrator thread
-    let tx_to_ui_clone = tx_to_ui.clone();
+    // 1. Setup Channels (High Perf Core)
+    let (tx_ui, rx_ui) = std::sync::mpsc::channel::<Signal>();
+    let (tx_orch, mut rx_orch) = mpsc::channel::<Signal>(100);
     
-    // 3. Spawn Orchestrator (The Patch Bay)
+    let tx_ui_for_orch = tx_ui.clone();
+    let tx_ui_for_sinks = tx_ui.clone();
+    let tx_orch_for_sources = tx_orch.clone();
+    
     thread::spawn(move || {
-        let rt = Runtime::new().expect("Failed to create Tokio runtime");
+        let rt = Runtime::new().expect("Tokio");
         rt.block_on(async move {
-            println!("{}TALISMAN ORCHESTRATOR ONLINE{}", CLI_GREEN, CLI_RESET);
+            println!("{}TALISMAN HIGH-PERF CORE ONLINE{}", CLI_GREEN, CLI_RESET);
             
-            // --- MODULES ---
-            let mut sources: Vec<Box<dyn Source>> = vec![
-                Box::new(AphroditeSource::new(10)),
-                Box::new(LogosSource::new()),
-            ];
-            
-            // We need a channel for Sinks to talk back to Orchestrator/UI
-            // Actually, we can just reuse the UI channel 'tx_to_ui_clone' for simplicity?
-            // Yes, because Computed signals go to UI.
-            
-            // We need to wrap it because `Sender` receives a value, it doesn't await. 
-            // Sinks are async trait, but the send is blocking or sync. 
-            // We used `mpsc` which is sync.
-            // Let's create new clones for them.
-            
+            // 1. Sinks (Consumer Layer)
             let sinks: Vec<Box<dyn Sink>> = vec![
-                Box::new(WordCountSink::new(Some(tx_to_ui_clone.clone()))),
-                Box::new(DevowelizerSink::new(Some(tx_to_ui_clone.clone()))),
+                Box::new(WordCountSink::new(Some(tx_ui_for_sinks.clone()))),
+                Box::new(DevowelizerSink::new(Some(tx_ui_for_sinks.clone()))),
             ];
-
-            // --- EVENT LOOP ---
-            loop {
-                // A. Check Sources
-                for source in &mut sources {
-                    if let Some(signal) = source.poll().await {
-                         // broadcast to UI
-                         let _ = tx_to_ui_clone.send(signal.clone());
-                         // broadcast to sinks
-                         for sink in &sinks {
-                             let _ = sink.consume(signal.clone()).await;
-                         }
-                    }
-                }
+            
+            // 2. Spawn Sources (Producer Layer)
+            spawn_source(Box::new(AphroditeSource::new(10)), tx_orch_for_sources.clone());
+            spawn_source(Box::new(LogosSource::new()), tx_orch_for_sources.clone());
+            
+            // 3. Event Loop (Router)
+            // No sleep! Just await content.
+            while let Some(signal) = rx_orch.recv().await {
+                // Route to UI
+                let _ = tx_ui_for_orch.send(signal.clone());
                 
-                // B. Check GUI Inputs (acting as a Source)
-                while let Ok(signal) = rx_from_ui.try_recv() {
-                    // broadcast to UI local loop (for sigil gen) - though it originated there, we might want loopback
-                    // actually, for this architecture, let's say the Orchestrator is the hub.
-                    // So we bounce it back to the UI channel.
-                    let _ = tx_to_ui_clone.send(signal.clone());
-                    
-                    // forward to sinks
-                    for sink in &sinks {
-                        let _ = sink.consume(signal.clone()).await;
-                    }
+                // Route to Sinks
+                for sink in &sinks {
+                    let _ = sink.consume(signal.clone()).await;
                 }
-                
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }
         });
     });
@@ -125,8 +235,8 @@ fn model(app: &App) -> Model {
     };
 
     Model {
-        receiver: rx_from_orch,
-        orchestrator_tx: tx_to_orch,
+        receiver: rx_ui,
+        orchestrator_tx: tx_orch,
         egui,
         text_buffer: String::new(),
         current_intent: "AWAITING SIGNAL".to_string(),
@@ -135,38 +245,80 @@ fn model(app: &App) -> Model {
         word_count: "0".to_string(),
         devowel_text: "".to_string(),
         config,
+        layout: Layout::new(app.window_rect()),
     }
 }
 
-fn update(_app: &App, model: &mut Model, update: Update) {
+// Helper to spawn a source into a generic loop
+fn spawn_source(mut source: Box<dyn Source>, tx: mpsc::Sender<Signal>) {
+    tokio::spawn(async move {
+        loop {
+            // Poll the source
+            if let Some(signal) = source.poll().await {
+                 if tx.send(signal).await.is_err() {
+                     break; // Channel closed
+                 }
+            } else {
+                // Source exhausted (unlikely for our sources, but possible)
+                // For now, if poll returns None, we assume it's done. 
+                // But Logos might return None on EOF. Aphrodite never returns None (unless error).
+                // Let's just loop.
+                // Wait, if poll returns None, we should stop? 
+                // Logos returns None on EOF (ctrl-D).
+                // Sleep briefly to avoid busy loop if source is broken (returns None repeatedly)
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        }
+    });
+}
+
+fn update(app: &App, model: &mut Model, update: Update) {
+    // Update Layout dimensions
+    model.layout.update(app.window_rect());
+
     // 1. UPDATE GUI
     model.egui.set_elapsed_time(update.since_start);
     let ctx = model.egui.begin_frame();
+    
+    // Position Egui Window via Layout
+    if let Some(rect) = model.layout.get_rect("sidebar") {
+        egui::Window::new("Source: Text Editor")
+            .default_pos(egui::pos2(rect.left() + 10.0, model.layout.window_rect.top() - rect.top() + 10.0)) // Nannou Top is +Y, Egui Top is 0
+            // Nannou: Y grows Up. Egui: Y grows Down?
+            // Nannou: Center (0,0). 
+            // rect.left() is OK (-X).
+            // Nannou Top is +H/2. Egui Y=0 is Top.
+            // So Egui Y = (Window.Top - Rect.Top) ? or just convert coords.
+            // Let's use simple math:
+            // Egui X = rect.x + W/2 + OFFSET? 
+            // Actually, we can just use the rect size. Egui pos is tricky with Nannou coords.
+            // Let's simplistic mapping: 
+            // Nannou Window Top Left = (-W/2, +H/2).
+            // Egui Top Left = (0, 0).
+            // Egui X = Nannou X + Window.W/2.
+            // Egui Y = Window.H/2 - Nannou Y.
+            .fixed_pos(egui::pos2(
+                rect.left() + app.window_rect().w()/2.0, 
+                app.window_rect().h()/2.0 - rect.top()
+            ))
+            .fixed_size(egui::vec2(rect.w(), rect.h()))
+            .show(&ctx, |ui| {
+                ui.label("Type your intent below:");
+                let response = ui.add(egui::TextEdit::multiline(&mut model.text_buffer).desired_width(ui.available_width()));
+                
+                if response.changed() {
+                    let signal = Signal::Text(model.text_buffer.clone());
+                    let _ = model.orchestrator_tx.try_send(signal);
+                }
+            });
+    }
 
-    egui::Window::new("Source: Text Editor").show(&ctx, |ui| {
-        ui.label("Type your intent below:");
-        let response = ui.add(egui::TextEdit::multiline(&mut model.text_buffer).desired_width(300.0));
-        
-        if response.changed() {
-            // Act as a Source: Emit Signal
-            // We strip newlines to simple single intents for now, or just send the whole block
-            // Taking the last line or just the whole buffer? Let's send the whole buffer.
-            let signal = Signal::Text(model.text_buffer.clone());
-            let _ = model.orchestrator_tx.send(signal);
-        }
-    });
-
-    // 2. PROCESS SIGNALS from Orchestrator
+    // 2. PROCESS SIGNALS from Orchestrator (High speed!)
     while let Ok(signal) = model.receiver.try_recv() {
         match signal {
             Signal::Text(text) => {
-                // If it came from us (GUI), we might ignore updating text_buffer to avoid loop, 
-                // but we usually want to update the Sigil.
-                // If it came from Stdin (Logos), we might mistakenly overwrite GUI? 
-                // Let's just update the Intent Display and Sigil.
                 model.current_intent = text.clone();
                 
-                // Sigil Logic
                 let mut hasher = sha2::Sha256::new();
                 use sha2::Digest;
                 hasher.update(text.as_bytes());
@@ -178,7 +330,12 @@ fn update(_app: &App, model: &mut Model, update: Update) {
                 let size = if len_factor > 10 { 5 } else { 4 };
                 model.config.grid_rows = size;
                 model.config.grid_cols = size;
-                model.config.spacing = 300.0 / (size as f32);
+                
+                if let Some(main_rect) = model.layout.get_rect("main") {
+                     model.config.spacing = main_rect.w() / (size as f32 * 2.0); 
+                } else {
+                     model.config.spacing = 30.0;
+                }
 
                 model.path_points = kamea::generate_path(seed, model.config)
                     .into_iter()
@@ -208,46 +365,53 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
     draw.background().color(BLACK);
 
-    // Sigil Area (Right side)
-    let draw = draw.x(200.0); // Offset to the right
+    // Grid Lines (Debug)
+    // ...
 
-    // Header
-    draw.text("TALISMAN // PATCH BAY")
-        .xy(pt2(0.0, 300.0))
-        .color(WHITE)
-        .font_size(16);
+    // HEADER
+    if let Some(header) = model.layout.get_rect("header") {
+        draw.text("TALISMAN // PATCH BAY")
+            .xy(header.xy())
+            .color(WHITE)
+            .font_size(16);
+    }
 
-    // Astro Data
-    draw.text(&model.astro_data)
-        .xy(pt2(0.0, 280.0))
-        .color(GRAY)
-        .font_size(12);
-
-    // Intent
-    draw.text(&model.current_intent)
-        .xy(pt2(0.0, -250.0))
-        .color(CYAN)
-        .font_size(14);
+    // MAIN CONTENT (Sigil)
+    if let Some(main) = model.layout.get_rect("main") {
+        if !model.path_points.is_empty() {
+            let offset = main.xy();
+            let translated_points: Vec<Point2> = model.path_points.iter()
+                .map(|p| *p + offset) 
+                .collect();
+                
+            draw.polyline()
+                .weight(model.config.stroke_weight)
+                .join_round()
+                .caps_round()
+                .points(translated_points)
+                .color(CYAN);
+        }
         
-    // Computed Results
-    draw.text(&format!("WORDS: {}", model.word_count))
-        .xy(pt2(-200.0, -280.0)) // Bottom Left
-        .color(YELLOW)
-        .font_size(12);
-        
-    draw.text(&format!("DVWL: {}", model.devowel_text))
-        .xy(pt2(200.0, -280.0)) // Bottom Right
-        .color(MAGENTA)
-        .font_size(12);
+        // INTENT
+        draw.text(&model.current_intent)
+            .xy(pt2(main.x(), main.top() - 20.0))
+            .color(CYAN)
+            .font_size(14);
+    }
 
-    // Sigil
-    if !model.path_points.is_empty() {
-        draw.polyline()
-            .weight(model.config.stroke_weight)
-            .join_round()
-            .caps_round()
-            .points(model.path_points.clone())
-            .color(CYAN);
+    // FOOTER (Sinks / Status)
+    if let Some(footer) = model.layout.get_rect("footer") {
+        // Astro (Left side of footer)
+        draw.text(&model.astro_data)
+            .xy(pt2(footer.left() + 150.0, footer.y()))
+            .color(GRAY)
+            .font_size(12);
+
+        // Computed (Right side of footer)
+        draw.text(&format!("WORDS: {} | DVWL: {}", model.word_count, model.devowel_text))
+            .xy(pt2(footer.right() - 200.0, footer.y()))
+            .color(YELLOW)
+            .font_size(12);
     }
 
     draw.to_frame(app, &frame).unwrap();
