@@ -7,6 +7,9 @@ use talisman_core::{
 };
 use tokio::sync::mpsc;
 
+pub mod realtime;
+pub use realtime::AudioInputSourceRT;
+
 struct SendStream(cpal::Stream);
 unsafe impl Send for SendStream {}
 unsafe impl Sync for SendStream {}

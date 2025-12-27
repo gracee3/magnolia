@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub mod patch_bay;
 pub use patch_bay::{PatchBay, PatchBayError};
@@ -15,6 +16,9 @@ pub use ring_buffer::{SPSCRingBuffer, RingBufferSender, RingBufferReceiver};
 
 pub mod audio_frame;
 pub use audio_frame::AudioFrame;
+
+pub mod shared_data;
+pub use shared_data::{AudioData, BlobData};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutConfig {
     pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"
@@ -153,20 +157,29 @@ pub enum Signal {
         mime_type: String,
         bytes: Vec<u8>,
     },
-    /// Audio Signal (PCM) - buffered, for non-real-time processing
+    /// Audio Signal (PCM) - buffered, copied to each module
     Audio {
         sample_rate: u32,
         channels: u16,
         data: Vec<f32>,
     },
+    /// Shared audio data (Arc-wrapped) - one allocation, many readers
+    /// Use this for large audio buffers to avoid copying overhead
+    #[serde(skip)]
+    SharedAudio(Arc<AudioData>),
     /// Real-time audio stream handle (ring buffer for minimal latency)
-    /// Contains receiver end - modules can poll for audio frames
+    /// Contains receiver end - SPSC: only ONE module can consume this!
+    /// First module to receive this signal gets exclusive access
     #[serde(skip)]
     AudioStream {
         sample_rate: u32,
         channels: u16,
         receiver: RingBufferReceiver<AudioFrame>,
     },
+    /// Shared blob data (Arc-wrapped) - one allocation, many readers
+    /// Use this for large files/images to avoid copying overhead  
+    #[serde(skip)]
+    SharedBlob(Arc<BlobData>),
     /// A control signal for the system (e.g., "Shutdown", "Reload")
     Control(ControlSignal),
     /// Computed/Processed Data (Source, Content)
