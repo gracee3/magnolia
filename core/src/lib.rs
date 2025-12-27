@@ -19,6 +19,9 @@ pub use audio_frame::AudioFrame;
 
 pub mod shared_data;
 pub use shared_data::{AudioData, BlobData};
+
+pub mod plugin_loader;
+pub use plugin_loader::{PluginLoader, PluginLibrary};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutConfig {
     pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"

@@ -1,0 +1,10 @@
+[package]
+name = "hello_plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+talisman-plugin-abi = { path = "../../crates/talisman-plugin-abi" }

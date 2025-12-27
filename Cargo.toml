@@ -3,5 +3,6 @@ resolver = "2"
 members = [
     "crates/*",
     "apps/*",
-    "core"
+    "core",
+    "examples/hello_plugin",
 ]
