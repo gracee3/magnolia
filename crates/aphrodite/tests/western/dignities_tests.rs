@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use aphrodite_core::western::dignities::*;
+    use aphrodite::western::dignities::*;
 
     #[test]
     fn test_get_dignities_sun() {

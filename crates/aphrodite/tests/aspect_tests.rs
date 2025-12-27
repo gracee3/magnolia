@@ -1,5 +1,5 @@
-use aphrodite_core::aspects::{AspectCalculator, AspectSettings};
-use aphrodite_core::ephemeris::{LayerPositions, PlanetPosition};
+use aphrodite::aspects::{AspectCalculator, AspectSettings};
+use aphrodite::ephemeris::{LayerPositions, PlanetPosition};
 use std::collections::HashMap;
 
 #[test]

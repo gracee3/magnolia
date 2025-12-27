@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use aphrodite_core::ephemeris::{EphemerisSettings, GeoLocation, SwissEphemerisAdapter};
+use aphrodite::ephemeris::{EphemerisSettings, GeoLocation, SwissEphemerisAdapter};
 use chrono::Utc;
 
 fn bench_calc_positions(c: &mut Criterion) {

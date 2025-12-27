@@ -1,5 +1,5 @@
 [package]
-name = "aphrodite-core"
+name = "aphrodite"
 version = "0.1.0"
 edition = "2021"
 authors = ["Gaia Tools"]

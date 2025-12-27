@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use aphrodite_core::aspects::{AspectCalculator, AspectSettings};
-use aphrodite_core::ephemeris::{LayerPositions, PlanetPosition};
+use aphrodite::aspects::{AspectCalculator, AspectSettings};
+use aphrodite::ephemeris::{LayerPositions, PlanetPosition};
 use std::collections::HashMap;
 
 fn bench_calculate_aspect(c: &mut Criterion) {

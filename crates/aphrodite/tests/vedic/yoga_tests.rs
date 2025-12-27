@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use aphrodite_core::vedic::yogas::*;
-    use aphrodite_core::ephemeris::types::{LayerPositions, PlanetPosition, HousePositions};
+    use aphrodite::vedic::yogas::*;
+    use aphrodite::ephemeris::types::{LayerPositions, PlanetPosition, HousePositions};
     use std::collections::HashMap;
 
     #[test]

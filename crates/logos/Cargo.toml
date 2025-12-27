@@ -1,0 +1,11 @@
+[package]
+name = "logos"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+enigo = { version = "0.3", default-features = false, features = ["x11rb"] }
+sha2 = "0.10.9"
+hex = "0.4.3"
+
+kamea = { path = "../kamea" }

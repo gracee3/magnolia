@@ -1,4 +1,4 @@
-use aphrodite_core::ephemeris::{EphemerisSettings, GeoLocation, SwissEphemerisAdapter};
+use aphrodite::ephemeris::{EphemerisSettings, GeoLocation, SwissEphemerisAdapter};
 use chrono::Utc;
 
 #[tokio::test]

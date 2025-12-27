@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use aphrodite_core::vedic::dashas::*;
-    use aphrodite_core::ephemeris::types::{LayerPositions, PlanetPosition};
+    use aphrodite::vedic::dashas::*;
+    use aphrodite::ephemeris::types::{LayerPositions, PlanetPosition};
     use chrono::Utc;
     use std::collections::HashMap;
 

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use aphrodite_core::western::decans::*;
+    use aphrodite::western::decans::*;
 
     #[test]
     fn test_get_decan_index() {

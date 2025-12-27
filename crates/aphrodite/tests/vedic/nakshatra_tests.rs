@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use aphrodite_core::vedic::nakshatra::*;
+    use aphrodite::vedic::nakshatra::*;
 
     #[test]
     fn test_get_nakshatra_for_longitude() {
