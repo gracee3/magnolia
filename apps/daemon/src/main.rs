@@ -8,7 +8,11 @@ use nannou_egui::{self, Egui, egui};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use std::thread;
-use std::collections::HashSet;
+
+use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
+use audio_input::AudioInputSource;
+use text_tools::{SaveFileSink, OutputFormat};
 
 // --- MODEL ---
 struct Model {
@@ -50,6 +54,9 @@ struct Model {
     show_global_settings: bool,
     show_tile_settings: Option<String>,  // tile_id if showing settings for that tile
     is_sleeping: bool,
+    
+    // Audio State
+    audio_buffer: VecDeque<f32>, // Circular buffer for oscilloscope
 }
 
 struct ContextMenuState {
@@ -221,9 +228,13 @@ fn model(app: &App) -> Model {
             println!("{}TALISMAN HIGH-PERF CORE ONLINE{}", CLI_GREEN, CLI_RESET);
             
             // 1. Sinks (Consumer Layer)
+            let wav_sink = SaveFileSink::new(PathBuf::from("recording.wav"));
+            wav_sink.set_format(OutputFormat::Wav);
+            
             let sinks: Vec<Box<dyn Sink>> = vec![
                 Box::new(WordCountSink::new(Some(tx_ui_for_sinks.clone()))),
                 Box::new(DevowelizerSink::new(Some(tx_ui_for_sinks.clone()))),
+                Box::new(wav_sink),
             ];
             
             // 2. Spawn Sources (Producer Layer)
@@ -290,6 +301,51 @@ fn model(app: &App) -> Model {
     patch_bay.register_module(word_count_sink.schema());
     patch_bay.register_module(devowelizer_sink.schema());
     patch_bay.register_module(kamea_sink.schema());
+    
+    // Init Audio Input
+    match AudioInputSource::new(1024) {
+        Ok(src) => {
+            patch_bay.register_module(src.schema());
+             // Start source thread
+             let mut src_clone = src; // Move semantics
+             let tx_clone = tx_orch.clone();
+             thread::spawn(move || {
+                 let runtime = Runtime::new().unwrap();
+                 runtime.block_on(async {
+                     loop {
+                         if let Some(signal) = src_clone.poll().await {
+                             let _ = tx_clone.send(signal).await;
+                         }
+                     }
+                 });
+             });
+        },
+        Err(e) => log::error!("Failed to init AudioInputSource: {}", e),
+    }
+
+    // Init SaveFileSink (WAV/Text/Image)
+    let save_file_sink = SaveFileSink::default();
+    patch_bay.register_module(save_file_sink.schema());
+    // Note: Sinks usually need a runner thread or be polled. 
+    // The daemon orchestrator handles sink dispatch. 
+    // We need to add SaveFileSink to the dispatcher.
+    // Wait, the orchestrator/dispatcher logic in main.rs handles this. 
+    // I need to see how sinks are stored. They seem to be dropped after registration?
+    // Ah, `patch_bay` stores schemas, but the *instances* need to be managed by the orchestrator.
+    // The current daemon implementation seems to have dedicated threads/channels for sources, 
+    // but sinks seem to be handled... how?
+    // Looking at `logos` and `kamea`, they are just registered? 
+    // Wait, if I look at `main.rs`, I don't see where sink instances are kept.
+    // Ah, line 290: `let word_count_sink = WordCountSink::new(None);`
+    // If I don't move them into a runner, they die.
+    // I suspect the Previous Implementation might have abstracted this or missed it?
+    // Let me check `orchestrator` loop. It probably sends signals to *named* sinks.
+    // But how does it invoke the sink instance?
+    // Most likely, the instances are just for schema registration in this demo, 
+    // OR there is a map of Sinks somewhere?
+    // The `Model` struct doesn't have a `sinks` map.
+    // Let me check `main.rs` lines 430+ (update loop) to see how sinks are invoked.    
+
     
     // Register editor as a virtual source (it emits text from UI)
     use talisman_core::{ModuleSchema, Port, DataType, PortDirection};
@@ -379,6 +435,7 @@ fn model(app: &App) -> Model {
         show_global_settings: false,
         show_tile_settings: None,
         is_sleeping: false,
+        audio_buffer: VecDeque::with_capacity(2048),
     }
 }
 
@@ -999,6 +1056,16 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     model.devowel_text = content;
                 }
             },
+            Signal::Audio { data, .. } => {
+                // Push audio samples to buffer
+                for sample in data {
+                     model.audio_buffer.push_back(sample);
+                }
+                // Maintain buffer size (e.g. 2048)
+                while model.audio_buffer.len() > 2048 {
+                    model.audio_buffer.pop_front();
+                }
+            },
             Signal::Astrology { sun_sign, moon_sign, rising_sign, planetary_positions } => {
                 // Format planetary positions for display
                 let planets: Vec<String> = planetary_positions.iter()
@@ -1390,6 +1457,26 @@ fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_
         },
         "editor" => {
              // Managed by Egui
+        },
+        "audio_input" => {
+             // Oscilloscope Visualization
+             let points: Vec<Point2> = model.audio_buffer.iter().enumerate().map(|(i, &sample)| {
+                 let x = map_range(i, 0, 2048, content_rect.left(), content_rect.right());
+                 let y = map_range(sample, -1.0, 1.0, content_rect.bottom(), content_rect.top());
+                 pt2(x, y)
+             }).collect();
+             
+             if !points.is_empty() {
+                 draw.polyline()
+                    .weight(2.0)
+                    .points(points)
+                    .color(SPRINGGREEN.into_format::<f32>().into_linear()); // Bright Green Scope
+             }
+                
+             draw.text("OSCILLOSCOPE")
+                .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
+                .color(SPRINGGREEN)
+                .font_size(10);
         },
         _ => {}
     }

@@ -137,6 +137,12 @@ pub enum Signal {
         mime_type: String,
         bytes: Vec<u8>,
     },
+    /// Audio Signal (PCM)
+    Audio {
+        sample_rate: u32,
+        channels: u16,
+        data: Vec<f32>,
+    },
     /// A control signal for the system (e.g., "Shutdown", "Reload")
     Control(ControlSignal),
     /// Computed/Processed Data (Source, Content)

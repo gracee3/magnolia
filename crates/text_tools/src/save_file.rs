@@ -12,16 +12,20 @@ pub enum OutputFormat {
     Text,
     Png,
     Bmp,
+    Wav,
 }
 
 /// A sink that saves incoming signals to files.
 /// - Text signals are saved as .txt files
 /// - Blob signals (images) are saved as .png or .bmp files
+/// - Audio signals are saved as .wav files
 pub struct SaveFileSink {
     enabled: bool,
     output_path: Arc<Mutex<PathBuf>>,
     output_format: Arc<Mutex<OutputFormat>>,
     last_saved: Arc<Mutex<Option<String>>>,
+    // Persistent writer to avoid re-opening/overwriting WAV headers for every chunk
+    audio_writer: Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<File>>>>>,
 }
 
 impl SaveFileSink {
@@ -31,6 +35,7 @@ impl SaveFileSink {
             output_path: Arc::new(Mutex::new(path)),
             output_format: Arc::new(Mutex::new(OutputFormat::Text)),
             last_saved: Arc::new(Mutex::new(None)),
+            audio_writer: Arc::new(Mutex::new(None)),
         }
     }
     
@@ -83,6 +88,12 @@ impl Sink for SaveFileSink {
                     data_type: DataType::Blob,
                     direction: PortDirection::Input,
                 },
+                Port {
+                    id: "audio_in".to_string(),
+                    label: "Audio Input".to_string(),
+                    data_type: DataType::Audio,
+                    direction: PortDirection::Input,
+                },
             ],
             settings_schema: Some(serde_json::json!({
                 "type": "object",
@@ -94,7 +105,7 @@ impl Sink for SaveFileSink {
                     },
                     "format": { 
                         "type": "string", 
-                        "enum": ["text", "png", "bmp"],
+                        "enum": ["text", "png", "bmp", "wav"],
                         "title": "Output Format",
                         "default": "text"
                     }
@@ -163,6 +174,48 @@ impl Sink for SaveFileSink {
                     _ => {
                         log::warn!("SaveFileSink: Received Blob but format is {:?}, ignoring", format);
                     }
+                }
+            },
+
+            Signal::Audio { sample_rate, channels, data } => {
+                let mut guard = self.audio_writer.lock().unwrap();
+                
+                // Initialize writer if None or if we should check path changes (simplified here)
+                // Realistically we should check if path changed, but for now assuming session consistency
+                if guard.is_none() {
+                    let spec = hound::WavSpec {
+                        channels: channels,
+                        sample_rate: sample_rate,
+                        bits_per_sample: 32,
+                        sample_format: hound::SampleFormat::Float,
+                    };
+                    
+                    match File::create(&path) {
+                        Ok(file) => {
+                            let buf_writer = std::io::BufWriter::new(file);
+                             match hound::WavWriter::new(buf_writer, spec) {
+                                Ok(writer) => {
+                                    *guard = Some(writer);
+                                    log::info!("SaveFileSink: Started WAV recording to {:?}", path);
+                                },
+                                Err(e) => log::error!("SaveFileSink: Failed to create WavWriter: {}", e),
+                            }
+                        },
+                        Err(e) => log::error!("SaveFileSink: Failed to create WAV file: {}", e),
+                    }
+                }
+
+                if let Some(writer) = guard.as_mut() {
+                    for sample in data {
+                        if let Err(e) = writer.write_sample(sample) {
+                            log::error!("SaveFileSink: Error writing sample: {}", e);
+                            break;
+                        }
+                    }
+                    // Try to flush frequently so data is safe? 
+                    // WavWriter doesn't have explicit flush that updates header length easily without finalize.
+                    // But we depend on Drop to finalize or manual finalize.
+                    // For continuous streaming, we just keep writing.
                 }
             },
             _ => {

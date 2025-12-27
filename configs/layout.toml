@@ -33,10 +33,10 @@ row = 0
 module = "devowelizer"
 
 [[tiles]]
-id = "wc_pane"
+id = "audio_pane"
 col = 2
 row = 1
-module = "word_count"
+module = "audio_input"
 
 [[tiles]]
 id = "astro_pane"
