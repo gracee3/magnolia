@@ -38,6 +38,12 @@ struct Model {
     anim_factor: f32, // 0.0 to 1.0
     is_closing: bool,
     clipboard: Option<arboard::Clipboard>,
+    context_menu: Option<ContextMenuState>,
+}
+
+struct ContextMenuState {
+    tile_id: String,
+    position: Point2,
 }
 
 // --- LAYOUT ENGINE ---
@@ -277,6 +283,7 @@ fn model(app: &App) -> Model {
         anim_factor: 0.0,
         is_closing: false,
         clipboard,
+        context_menu: None,
     }
 }
 
@@ -409,6 +416,141 @@ fn update(app: &App, model: &mut Model, update: Update) {
          }
     }
 
+    // Context Menu
+    if let Some(menu) = &model.context_menu {
+        let win_w = app.window_rect().w();
+        let win_h = app.window_rect().h();
+        
+        let egui_x = menu.position.x + win_w / 2.0;
+        let egui_y = win_h / 2.0 - menu.position.y;
+        
+        let mut open = true;
+        let tile_id = menu.tile_id.clone();
+        
+        egui::Window::new("context_menu")
+            .fixed_pos(egui::pos2(egui_x, egui_y))
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .min_width(140.0)
+            .default_width(140.0)
+            .frame(egui::Frame {
+                fill: egui::Color32::BLACK,
+                stroke: egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255)),
+                inner_margin: egui::Margin::same(10.0),
+                ..Default::default()
+            })
+            .show(&ctx, |ui| {
+                // Custom Style for Flat/Transparent buttons
+                let mut style = (*ctx.style()).clone();
+                // Normal State
+                style.visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                style.visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
+                style.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                style.visuals.widgets.inactive.rounding = egui::Rounding::ZERO;
+                
+                // Hovered State
+                style.visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+                style.visuals.widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
+                style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
+                style.visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
+                style.visuals.widgets.hovered.rounding = egui::Rounding::ZERO;
+                
+                // Active/Clicked State
+                style.visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+                style.visuals.widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
+                style.visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)); // Thicker stroke for active
+                style.visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
+                style.visuals.widgets.active.rounding = egui::Rounding::ZERO;
+                
+                ui.set_style(style);
+                
+                ui.label(egui::RichText::new(format!("TILE: {}", tile_id)).strong().color(egui::Color32::from_rgb(0, 255, 255)));
+                ui.add(egui::Separator::default().spacing(10.0));
+                
+                let btn_size = egui::vec2(ui.available_width(), 20.0);
+
+                if ui.add_sized(btn_size, egui::Button::new("SETTINGS")).clicked() {
+                    log::info!("Settings clicked for {}", tile_id);
+                    open = false;
+                }
+                
+                if ui.add_sized(btn_size, egui::Button::new("COPY")).clicked() {
+                     // logic duplicated from key_pressed for now
+                     let content = if tile_id == "wc_pane" {
+                         Some(model.word_count.clone())
+                    } else if tile_id == "dvwl_pane" {
+                         Some(model.devowel_text.clone())
+                    } else if tile_id == "astro_pane" {
+                         Some(model.astro_data.clone())
+                    } else if tile_id == "editor_pane" {
+                         Some(model.text_buffer.clone())
+                    } else {
+                         None
+                    };
+                    
+                    if let Some(text) = content {
+                         if let Some(cb) = &mut model.clipboard {
+                             let _ = cb.set_text(text);
+                             log::info!("Copied via Menu");
+                         }
+                    }
+                    open = false;
+                }
+                
+                if ui.add_sized(btn_size, egui::Button::new("PASTE")).clicked() {
+                     if tile_id == "editor_pane" {
+                         if let Some(cb) = &mut model.clipboard {
+                             if let Ok(text) = cb.get_text() {
+                                  model.text_buffer.push_str(&text);
+                                  let _ = model.orchestrator_tx.try_send(Signal::Text(model.text_buffer.clone()));
+                             }
+                        }
+                     }
+                     open = false;
+                }
+                
+                ui.add(egui::Separator::default().spacing(10.0));
+                
+                if ui.add_sized(btn_size, egui::Button::new("DISABLE")).clicked() {
+                    log::info!("Disable Tile: {}", tile_id);
+                    open = false;
+                }
+                
+                if ui.add_sized(btn_size, egui::Button::new("REMOVE")).clicked() {
+                    // Remove from layout config
+                    model.layout.config.tiles.retain(|t| t.id != tile_id);
+                    open = false;
+                }
+                
+                ui.add(egui::Separator::default().spacing(10.0));
+                 if ui.add_sized(btn_size, egui::Button::new("PATCH BAY")).clicked() {
+                    log::info!("Open Patch Bay");
+                    open = false;
+                }
+                if ui.add_sized(btn_size, egui::Button::new("GLOBAL SETTINGS")).clicked() {
+                    log::info!("Global Settings");
+                    open = false;
+                }
+                 if ui.add_sized(btn_size, egui::Button::new("SLEEP")).clicked() {
+                    log::info!("Sleep Engine");
+                    // maybe toggle a global pause?
+                     open = false;
+                }
+                
+                ui.add(egui::Separator::default().spacing(10.0));
+                
+                if ui.add_sized(btn_size, egui::Button::new("EXIT DAEMON")).clicked() {
+                    std::process::exit(0);
+                }
+            });
+            
+        if !open {
+            model.context_menu = None;
+        }
+    }
+
     // 2. PROCESS SIGNALS from Orchestrator (High speed!)
     while let Ok(signal) = model.receiver.try_recv() {
         match signal {
@@ -461,6 +603,9 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
 fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
     if button == MouseButton::Left {
+        // Close Context Menu if clicking elsewhere
+        model.context_menu = None;
+
         let mouse_pos = app.mouse.position();
         let now = std::time::Instant::now();
         let delta = now.duration_since(model.last_click_time);
@@ -496,6 +641,22 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
                  model.is_closing = true;
             }
         }
+    } else if button == MouseButton::Right {
+         let mouse_pos = app.mouse.position();
+         
+         for tile in &model.layout.config.tiles {
+            if let Some(rect) = model.layout.calculate_rect(tile) {
+                if rect.contains(mouse_pos) {
+                    model.context_menu = Some(ContextMenuState {
+                        tile_id: tile.id.clone(),
+                        position: mouse_pos,
+                    });
+                     // Also select it
+                    model.selected_tile = Some(tile.id.clone());
+                    break;
+                }
+            }
+         }
     }
 }
 
