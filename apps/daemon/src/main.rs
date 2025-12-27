@@ -130,17 +130,23 @@ impl Layout {
                 let val = track.trim_end_matches("px").parse::<f32>().unwrap_or(0.0);
                 resolved[i] = val;
                 used_px += val;
+            } else if track.ends_with("%") {
+                let val = track.trim_end_matches("%").parse::<f32>().unwrap_or(0.0);
+                let px = (val / 100.0) * total_size;
+                resolved[i] = px;
+                used_px += px;
             } else if track.ends_with("fr") {
                 let val = track.trim_end_matches("fr").parse::<f32>().unwrap_or(1.0);
                 total_fr += val;
             } else {
-                 // Assume px if number, or Fr? 
-                 // Let's assume px default or 1fr default?
-                 // Let's assume "1fr" if strictly "1fr", otherwise try parse as px.
-                 // Actually common CSS is "250px", "1fr".
                  if track.contains("fr") {
                       let val = track.replace("fr","").parse::<f32>().unwrap_or(1.0);
                       total_fr += val;
+                 } else if track.contains("%") {
+                      let val = track.replace("%","").parse::<f32>().unwrap_or(0.0);
+                      let px = (val / 100.0) * total_size;
+                      resolved[i] = px;
+                      used_px += px;
                  } else {
                       let val = track.replace("px","").parse::<f32>().unwrap_or(0.0);
                       resolved[i] = val;
@@ -171,6 +177,10 @@ const CLI_GREEN: &str = "\x1b[32m";
 const CLI_RESET: &str = "\x1b[0m";
 
 fn main() {
+    // Init Logger
+    // Default: warn for everything, but silence wgpu warnings (buffer drops), debug for our crates.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,wgpu_core=error,wgpu_hal=error,nannou=error,daemon=debug,text_tools=debug,aphrodite=debug,logos=debug,kamea=debug")).init();
+    
     nannou::app(model)
         .update(update)
         .run();
@@ -281,36 +291,29 @@ fn update(app: &App, model: &mut Model, update: Update) {
     let ctx = model.egui.begin_frame();
     
     // Position Egui Window via Layout
-    if let Some(rect) = model.layout.get_rect("sidebar") {
-        egui::Window::new("Source: Text Editor")
-            .default_pos(egui::pos2(rect.left() + 10.0, model.layout.window_rect.top() - rect.top() + 10.0)) // Nannou Top is +Y, Egui Top is 0
-            // Nannou: Y grows Up. Egui: Y grows Down?
-            // Nannou: Center (0,0). 
-            // rect.left() is OK (-X).
-            // Nannou Top is +H/2. Egui Y=0 is Top.
-            // So Egui Y = (Window.Top - Rect.Top) ? or just convert coords.
-            // Let's use simple math:
-            // Egui X = rect.x + W/2 + OFFSET? 
-            // Actually, we can just use the rect size. Egui pos is tricky with Nannou coords.
-            // Let's simplistic mapping: 
-            // Nannou Window Top Left = (-W/2, +H/2).
-            // Egui Top Left = (0, 0).
-            // Egui X = Nannou X + Window.W/2.
-            // Egui Y = Window.H/2 - Nannou Y.
-            .fixed_pos(egui::pos2(
-                rect.left() + app.window_rect().w()/2.0, 
-                app.window_rect().h()/2.0 - rect.top()
-            ))
-            .fixed_size(egui::vec2(rect.w(), rect.h()))
-            .show(&ctx, |ui| {
-                ui.label("Type your intent below:");
-                let response = ui.add(egui::TextEdit::multiline(&mut model.text_buffer).desired_width(ui.available_width()));
-                
-                if response.changed() {
-                    let signal = Signal::Text(model.text_buffer.clone());
-                    let _ = model.orchestrator_tx.try_send(signal);
-                }
-            });
+    // Position Egui Window via Layout
+    // Find the tile assigned to 'editor' module
+    let editor_tile = model.layout.config.tiles.iter().find(|t| t.module == "editor");
+    
+    if let Some(tile) = editor_tile {
+        if let Some(rect) = model.layout.calculate_rect(tile) {
+            egui::Window::new("Source: Text Editor")
+                .default_pos(egui::pos2(rect.left() + 10.0, model.layout.window_rect.top() - rect.top() + 10.0))
+                .fixed_pos(egui::pos2(
+                    rect.left() + app.window_rect().w()/2.0, 
+                    app.window_rect().h()/2.0 - rect.top()
+                ))
+                .fixed_size(egui::vec2(rect.w(), rect.h()))
+                .show(&ctx, |ui| {
+                    ui.label("Type your intent below:");
+                    let response = ui.add(egui::TextEdit::multiline(&mut model.text_buffer).desired_width(ui.available_width()));
+                    
+                    if response.changed() {
+                        let signal = Signal::Text(model.text_buffer.clone());
+                        let _ = model.orchestrator_tx.try_send(signal);
+                    }
+                });
+        }
     }
 
     // 2. PROCESS SIGNALS from Orchestrator (High speed!)
@@ -331,8 +334,14 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 model.config.grid_rows = size;
                 model.config.grid_cols = size;
                 
-                if let Some(main_rect) = model.layout.get_rect("main") {
-                     model.config.spacing = main_rect.w() / (size as f32 * 2.0); 
+                // Find tile for kamea
+                let sigil_tile = model.layout.config.tiles.iter().find(|t| t.module == "kamea_sigil");
+                if let Some(tile) = sigil_tile {
+                     if let Some(rect) = model.layout.calculate_rect(tile) {
+                         model.config.spacing = rect.w() / (size as f32 * 2.0); 
+                     } else {
+                         model.config.spacing = 30.0;
+                     }
                 } else {
                      model.config.spacing = 30.0;
                 }
@@ -365,53 +374,73 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
     draw.background().color(BLACK);
 
-    // Grid Lines (Debug)
-    // ...
-
-    // HEADER
-    if let Some(header) = model.layout.get_rect("header") {
-        draw.text("TALISMAN // PATCH BAY")
-            .xy(header.xy())
-            .color(WHITE)
-            .font_size(16);
-    }
-
-    // MAIN CONTENT (Sigil)
-    if let Some(main) = model.layout.get_rect("main") {
-        if !model.path_points.is_empty() {
-            let offset = main.xy();
-            let translated_points: Vec<Point2> = model.path_points.iter()
-                .map(|p| *p + offset) 
-                .collect();
-                
-            draw.polyline()
-                .weight(model.config.stroke_weight)
-                .join_round()
-                .caps_round()
-                .points(translated_points)
-                .color(CYAN);
+    // Iterate over all tiles in the config and render based on assigned module
+    for tile in &model.layout.config.tiles {
+        if let Some(rect) = model.layout.calculate_rect(tile) {
+            // Visualize Borders (Light)
+            draw.rect()
+                .xy(rect.xy())
+                .wh(rect.wh())
+                .color(rgba(0.1, 0.1, 0.1, 1.0)) // Dark Gray Background
+                .stroke(GRAY)
+                .stroke_weight(1.0);
+            
+            // Content Padding
+            let content_rect = rect.pad(10.0);
+            
+            match tile.module.as_str() {
+                "header" => {
+                    draw.text("TALISMAN // PATCH BAY")
+                        .xy(content_rect.xy())
+                        .color(WHITE)
+                        .font_size(16);
+                },
+                "kamea_sigil" => {
+                     if !model.path_points.is_empty() {
+                         // Center logic
+                         let offset = content_rect.xy();
+                         let points: Vec<Point2> = model.path_points.iter()
+                            .map(|p| *p + offset)
+                            .collect();
+                            
+                        draw.polyline()
+                            .weight(model.config.stroke_weight)
+                            .join_round()
+                            .caps_round()
+                            .points(points)
+                            .color(CYAN);
+                     }
+                     // Label
+                     draw.text(&model.current_intent)
+                        .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
+                        .color(CYAN)
+                        .font_size(14);
+                },
+                "word_count" => {
+                    draw.text(&format!("WORD COUNT: {}", model.word_count))
+                        .xy(content_rect.xy())
+                        .color(YELLOW)
+                        .font_size(12);
+                },
+                "devowelizer" => {
+                    draw.text(&format!("DEVOWELIZER: {}", model.devowel_text))
+                        .xy(content_rect.xy())
+                        .color(MAGENTA)
+                        .font_size(12);
+                },
+                "astrology" => {
+                    draw.text(&format!("ASTROLOGY: {}", model.astro_data))
+                        .xy(content_rect.xy())
+                        .color(GRAY)
+                        .font_size(12);
+                },
+                "editor" => {
+                    // Handled by Egui, but we can draw a placeholder back/border if needed.
+                    // Egui is drawn on top.
+                },
+                _ => {}
+            }
         }
-        
-        // INTENT
-        draw.text(&model.current_intent)
-            .xy(pt2(main.x(), main.top() - 20.0))
-            .color(CYAN)
-            .font_size(14);
-    }
-
-    // FOOTER (Sinks / Status)
-    if let Some(footer) = model.layout.get_rect("footer") {
-        // Astro (Left side of footer)
-        draw.text(&model.astro_data)
-            .xy(pt2(footer.left() + 150.0, footer.y()))
-            .color(GRAY)
-            .font_size(12);
-
-        // Computed (Right side of footer)
-        draw.text(&format!("WORDS: {} | DVWL: {}", model.word_count, model.devowel_text))
-            .xy(pt2(footer.right() - 200.0, footer.y()))
-            .color(YELLOW)
-            .font_size(12);
     }
 
     draw.to_frame(app, &frame).unwrap();

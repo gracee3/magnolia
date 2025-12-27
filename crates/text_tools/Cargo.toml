@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 talisman_core = { path = "../../core" }
 async-trait = "0.1"
-regex = "1.5"
+regex = "1.10"
+log = "0.4"

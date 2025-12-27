@@ -24,7 +24,8 @@ impl Sink for WordCountSink {
     async fn consume(&self, signal: Signal) -> Result<()> {
         if let Signal::Text(text) = signal {
             let count = text.split_whitespace().count();
-            println!("\x1b[33m[WORD_COUNT]\x1b[0m Count: {} | Text: '{}'", count, text);
+            // println!("\x1b[33m[WORD_COUNT]\x1b[0m Count: {} | Text: '{}'", count, text);
+            log::debug!("[WORD_COUNT] Count: {} | Text: '{}'", count, text);
             
             if let Some(tx) = &self.tx {
                 // Emit computed signal back
@@ -60,7 +61,8 @@ impl Sink for DevowelizerSink {
     async fn consume(&self, signal: Signal) -> Result<()> {
         if let Signal::Text(text) = signal {
             let devoweled = self.re.replace_all(&text, "").to_string().to_uppercase();
-            println!("\x1b[35m[DEVOWELIZER]\x1b[0m '{}'", devoweled);
+            // println!("\x1b[35m[DEVOWELIZER]\x1b[0m '{}'", devoweled);
+            log::debug!("[DEVOWELIZER] '{}'", devoweled);
             
             if let Some(tx) = &self.tx {
                 let _ = tx.lock().unwrap().send(Signal::Computed {
