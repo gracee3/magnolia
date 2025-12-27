@@ -332,6 +332,8 @@ fn model(app: &App) -> Model {
         .raw_event(raw_window_event)
         .key_pressed(key_pressed)
         .mouse_pressed(mouse_pressed)
+        .mouse_released(mouse_released)
+        .mouse_moved(mouse_moved)
         .size(900, 600)
         .title("TALISMAN // DIGITAL LAB")
         .build()
@@ -1377,6 +1379,54 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
     // Clear context menu if clicking away (and egui didn't want it)
     model.context_menu = None;
 
+    // Phase 5: Edit mode mouse handling
+    if model.layout_editor.edit_mode && button == MouseButton::Left {
+        let mouse_pos = app.mouse.position();
+        let col_sizes = model.layout.resolve_tracks(&model.layout.config.columns, app.window_rect().w());
+        let row_sizes = model.layout.resolve_tracks(&model.layout.config.rows, app.window_rect().h());
+        
+        // Check if clicking on a resize handle (8px tolerance)
+        let mut x_accum = app.window_rect().left();
+        for (i, &width) in col_sizes.iter().enumerate() {
+            x_accum += width;
+            let handle_x = x_accum;
+            if (mouse_pos.x - handle_x).abs() < 8.0 && i < col_sizes.len() - 1 {
+                model.layout_editor.start_resize_column(i, mouse_pos.x);
+                log::info!("Started resizing column {}", i);
+                return;
+            }
+        }
+        
+        let mut y_accum = app.window_rect().top();
+        for (i, &height) in row_sizes.iter().enumerate() {
+            y_accum -= height;
+            let handle_y = y_accum;
+            if (mouse_pos.y - handle_y).abs() < 8.0 && i < row_sizes.len() - 1 {
+                model.layout_editor.start_resize_row(i, mouse_pos.y);
+                log::info!("Started resizing row {}", i);
+                return;
+            }
+        }
+        
+        // Check if clicking on a tile to start dragging
+        for tile in &model.layout.config.tiles {
+            if let Some(rect) = model.layout.calculate_rect(tile) {
+                if rect.contains(mouse_pos) {
+                    let offset = pt2(mouse_pos.x - rect.x(), mouse_pos.y - rect.y());
+                    model.layout_editor.start_drag(
+                        tile.id.clone(),
+                        tile.col,
+                        tile.row,
+                        offset
+                    );
+                    log::info!("Started dragging tile: {}", tile.id);
+                    return;
+                }
+            }
+        }
+    }
+    
+
     if button == MouseButton::Left {
 
         let mouse_pos = app.mouse.position();
@@ -1456,6 +1506,68 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
     }
 }
 
+
+fn mouse_released(app: &App, model: &mut Model, button: MouseButton) {
+    if button == MouseButton::Left && model.layout_editor.edit_mode {
+        let mouse_pos = app.mouse.position();
+        let col_sizes = model.layout.resolve_tracks(&model.layout.config.columns, app.window_rect().w());
+        let row_sizes = model.layout.resolve_tracks(&model.layout.config.rows, app.window_rect().h());
+        
+        // End resize if resizing
+        if let Some(handle) = &model.layout_editor.resize_handle {
+            match handle {
+                layout_editor::ResizeHandle::Column { index, .. } => {
+                    // Calculate new column sizes
+                    // For now, just cancel - full implementation needs track recalculation
+                    model.layout_editor.cancel_resize();
+                    log::info!("Column resize released (calculation TODO)");
+                },
+                layout_editor::ResizeHandle::Row { index, .. } => {
+                    model.layout_editor.cancel_resize();
+                    log::info!("Row resize released (calculation TODO)");
+                }
+            }
+            model.layout.save();
+            return;
+        }
+        
+        // End tile drag if dragging
+        if model.layout_editor.dragging_tile.is_some() {
+            // Get grid cell under mouse
+            if let Some((col, row)) = model.layout_editor.get_grid_cell(
+                mouse_pos,
+                app.window_rect(),
+                &col_sizes,
+                &row_sizes
+            ) {
+                if model.layout_editor.end_drag(col, row, &mut model.layout.config) {
+                    log::info!("Moved tile to col={}, row={}", col, row);
+                    model.layout.save();
+                }
+            } else {
+                model.layout_editor.cancel_drag();
+            }
+        }
+    }
+}
+
+fn mouse_moved(app: &App, model: &mut Model, pos: Point2) {
+    if !model.layout_editor.edit_mode {
+        return;
+    }
+    
+    // Update resize preview if resizing
+    if model.layout_editor.resize_handle.is_some() {
+        // Preview resize would update here
+        // For now, just acknowledge movement
+    }
+    
+    // Update drag preview if dragging
+    if model.layout_editor.dragging_tile.is_some() {
+        // Drag preview updates automatically via render logic
+    }
+}
+
 fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     let ctrl = _app.keys.mods.ctrl();
     
@@ -1510,6 +1622,33 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                           }
                      }
                  }
+            },
+            _ => {}
+        }
+    } else {
+        // Non-Ctrl keys
+        match key {
+            Key::E => {
+                model.layout_editor.toggle_edit_mode();
+                if model.layout_editor.edit_mode {
+                    log::info!("Layout edit mode: ENABLED");
+                } else {
+                    log::info!("Layout edit mode: DISABLED");
+                    model.layout.save();
+                }
+            },
+            Key::Escape => {
+                if model.layout_editor.edit_mode {
+                    if model.layout_editor.dragging_tile.is_some() {
+                        model.layout_editor.cancel_drag();
+                    } else if model.layout_editor.resize_handle.is_some() {
+                        model.layout_editor.cancel_resize();
+                    } else {
+                        model.layout_editor.toggle_edit_mode();
+                        log::info!("Layout edit mode: DISABLED");
+                        model.layout.save();
+                    }
+                }
             },
             _ => {}
         }
@@ -1606,6 +1745,39 @@ fn view(app: &App, model: &Model, frame: Frame) {
              .xy(pt2(app.window_rect().right() - 30.0, app.window_rect().bottom() + 30.0))
              .color(rgba(0.5, 0.5, 1.0, 0.5))
              .font_size(24);
+    }
+
+    
+    // Render layout editor overlay (Phase 5)
+    if model.layout_editor.edit_mode {
+        let col_sizes = model.layout.resolve_tracks(&model.layout.config.columns, app.window_rect().w());
+        let row_sizes = model.layout.resolve_tracks(&model.layout.config.rows, app.window_rect().h());
+        
+        // Render grid overlay
+        layout_editor::render_edit_overlay(&draw, app.window_rect(), &col_sizes, &row_sizes);
+        
+        // Render resize handles
+        layout_editor::render_resize_handles(&draw, app.window_rect(), &col_sizes, &row_sizes);
+        
+        // Render ghost tile if dragging
+        if let Some(drag_state) = &model.layout_editor.dragging_tile {
+            if let Some(tile) = model.layout.config.tiles.iter().find(|t| t.id == drag_state.tile_id) {
+                if let Some(rect) = model.layout.calculate_rect(tile) {
+                    layout_editor::render_tile_ghost(&draw, rect);
+                }
+            }
+        }
+    }
+    
+    // Render patch cables (always visible if not maximized)
+    if model.maximized_tile.is_none() && !model.layout.config.patches.is_empty() {
+        let mut tile_rects = Vec::new();
+        for tile in &model.layout.config.tiles {
+            if let Some(rect) = model.layout.calculate_rect(tile) {
+                tile_rects.push((tile.module.clone(), rect));
+            }
+        }
+        patch_visualizer::render_patches(&draw, &model.layout.config.patches, &tile_rects);
     }
 
     draw.to_frame(app, &frame).unwrap();

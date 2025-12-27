@@ -30,7 +30,7 @@ enabled = true
 
 [[tiles]]
 id = "audio_pane"
-col = 2
+col = 0
 row = 1
 colspan = 1
 rowspan = 1
@@ -39,8 +39,8 @@ enabled = true
 
 [[tiles]]
 id = "word_count_new"
-col = 1
-row = 1
+col = 2
+row = 2
 colspan = 1
 rowspan = 2
 module = "word_count"
@@ -48,35 +48,35 @@ enabled = true
 
 [[patches]]
 id = "patch_1"
+source_module = "aphrodite"
+source_port = "astro_out"
+sink_module = "astrology_display"
+sink_port = "astro_in"
+
+[[patches]]
+id = "patch_2"
 source_module = "editor"
 source_port = "text_out"
 sink_module = "word_count"
 sink_port = "text_in"
 
 [[patches]]
-id = "patch_2"
+id = "patch_3"
 source_module = "editor"
 source_port = "text_out"
 sink_module = "devowelizer"
 sink_port = "text_in"
 
 [[patches]]
-id = "patch_3"
+id = "patch_4"
 source_module = "editor"
 source_port = "text_out"
 sink_module = "kamea_printer"
 sink_port = "text_in"
 
 [[patches]]
-id = "patch_4"
-source_module = "aphrodite"
-source_port = "astro_out"
-sink_module = "kamea_printer"
-sink_port = "astro_in"
-
-[[patches]]
 id = "patch_5"
 source_module = "aphrodite"
 source_port = "astro_out"
-sink_module = "astrology_display"
+sink_module = "kamea_printer"
 sink_port = "astro_in"
