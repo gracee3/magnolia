@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use talisman_core::{Source, Signal};
+use talisman_core::{Source, Signal, ModuleSchema, Port, DataType, PortDirection};
 use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation};
 use std::time::Duration;
 use tokio::time::{sleep, Instant};
@@ -11,6 +11,7 @@ pub struct AphroditeSource {
     location: Option<GeoLocation>,
     interval: Duration,
     last_poll: Option<Instant>,
+    enabled: bool,
 }
 
 impl AphroditeSource {
@@ -31,7 +32,14 @@ impl AphroditeSource {
         // Defaulting to Greenwich for now if no config
         let location = Some(GeoLocation { lat: 51.48, lon: 0.0 });
 
-        Self { adapter, settings, location, interval: Duration::from_secs(interval_secs), last_poll: None }
+        Self { 
+            adapter, 
+            settings, 
+            location, 
+            interval: Duration::from_secs(interval_secs), 
+            last_poll: None,
+            enabled: true,
+        }
     }
 }
 
@@ -46,7 +54,33 @@ fn get_sign(lon: f64) -> String {
 impl Source for AphroditeSource {
     fn name(&self) -> &str { "aphrodite" }
     
+    fn schema(&self) -> ModuleSchema {
+        ModuleSchema {
+            id: "aphrodite".to_string(),
+            name: "Aphrodite (Astrology)".to_string(),
+            description: "Provides real-time astrological data via Swiss Ephemeris".to_string(),
+            ports: vec![
+                Port {
+                    id: "astro_out".to_string(),
+                    label: "Astrology Data".to_string(),
+                    data_type: DataType::Astrology,
+                    direction: PortDirection::Output,
+                },
+            ],
+            settings_schema: None, // TODO: Location/timezone settings
+        }
+    }
+    
+    fn is_enabled(&self) -> bool { self.enabled }
+    
+    fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
+    
     async fn poll(&mut self) -> Option<Signal> {
+        if !self.enabled {
+            sleep(self.interval).await;
+            return Some(Signal::Pulse);
+        }
+        
         // Simple throttling
         if let Some(last) = self.last_poll {
             let elapsed = last.elapsed();
@@ -76,12 +110,9 @@ impl Source for AphroditeSource {
             },
             Err(e) => {
                 eprintln!("Aphrodite error: {}", e);
-                // Return Pulse as error/keepalive? Or just None to stop? 
-                // Let's return Pulse for now to indicate aliveness but failure
-                // Or better, just log and loop next time. But poll returns one item.
-                // We'll return Pulse.
                 Some(Signal::Pulse)
             }
         }
     }
 }
+

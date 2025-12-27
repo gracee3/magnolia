@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use talisman_core::{Sink, Signal, Result};
+use talisman_core::{Sink, Signal, Result, ModuleSchema, Port, DataType, PortDirection};
 use regex::Regex;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -7,12 +7,16 @@ use std::sync::{Arc, Mutex};
 // --- Word Count Sink ---
 pub struct WordCountSink {
     tx: Option<Arc<Mutex<Sender<Signal>>>>,
+    enabled: bool,
+    last_count: Arc<Mutex<usize>>,
 }
 
 impl WordCountSink {
     pub fn new(tx: Option<Sender<Signal>>) -> Self { 
         Self { 
-            tx: tx.map(|t| Arc::new(Mutex::new(t))) 
+            tx: tx.map(|t| Arc::new(Mutex::new(t))),
+            enabled: true,
+            last_count: Arc::new(Mutex::new(0)),
         } 
     }
 }
@@ -20,11 +24,47 @@ impl WordCountSink {
 #[async_trait]
 impl Sink for WordCountSink {
     fn name(&self) -> &str { "word_count" }
+    
+    fn schema(&self) -> ModuleSchema {
+        ModuleSchema {
+            id: "word_count".to_string(),
+            name: "Word Counter".to_string(),
+            description: "Counts words in text input and emits the count".to_string(),
+            ports: vec![
+                Port {
+                    id: "text_in".to_string(),
+                    label: "Text Input".to_string(),
+                    data_type: DataType::Text,
+                    direction: PortDirection::Input,
+                },
+                Port {
+                    id: "count_out".to_string(),
+                    label: "Word Count".to_string(),
+                    data_type: DataType::Numeric,
+                    direction: PortDirection::Output,
+                },
+            ],
+            settings_schema: None,
+        }
+    }
+    
+    fn is_enabled(&self) -> bool { self.enabled }
+    
+    fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
+    
+    fn render_output(&self) -> Option<String> {
+        let count = *self.last_count.lock().unwrap();
+        Some(count.to_string())
+    }
 
     async fn consume(&self, signal: Signal) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        
         if let Signal::Text(text) = signal {
             let count = text.split_whitespace().count();
-            // println!("\x1b[33m[WORD_COUNT]\x1b[0m Count: {} | Text: '{}'", count, text);
+            *self.last_count.lock().unwrap() = count;
             log::debug!("[WORD_COUNT] Count: {} | Text: '{}'", count, text);
             
             if let Some(tx) = &self.tx {
@@ -43,6 +83,8 @@ impl Sink for WordCountSink {
 pub struct DevowelizerSink {
     re: Regex,
     tx: Option<Arc<Mutex<Sender<Signal>>>>,
+    enabled: bool,
+    last_output: Arc<Mutex<String>>,
 }
 
 impl DevowelizerSink {
@@ -50,6 +92,8 @@ impl DevowelizerSink {
         Self {
             re: Regex::new(r"(?i)[aeiou]").expect("Invalid regex"),
             tx: tx.map(|t| Arc::new(Mutex::new(t))),
+            enabled: true,
+            last_output: Arc::new(Mutex::new(String::new())),
         }
     }
 }
@@ -57,11 +101,47 @@ impl DevowelizerSink {
 #[async_trait]
 impl Sink for DevowelizerSink {
     fn name(&self) -> &str { "devowelizer" }
+    
+    fn schema(&self) -> ModuleSchema {
+        ModuleSchema {
+            id: "devowelizer".to_string(),
+            name: "Devowelizer".to_string(),
+            description: "Removes vowels from text and converts to uppercase".to_string(),
+            ports: vec![
+                Port {
+                    id: "text_in".to_string(),
+                    label: "Text Input".to_string(),
+                    data_type: DataType::Text,
+                    direction: PortDirection::Input,
+                },
+                Port {
+                    id: "text_out".to_string(),
+                    label: "Devoweled Text".to_string(),
+                    data_type: DataType::Text,
+                    direction: PortDirection::Output,
+                },
+            ],
+            settings_schema: None,
+        }
+    }
+    
+    fn is_enabled(&self) -> bool { self.enabled }
+    
+    fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
+    
+    fn render_output(&self) -> Option<String> {
+        let output = self.last_output.lock().unwrap().clone();
+        if output.is_empty() { None } else { Some(output) }
+    }
 
     async fn consume(&self, signal: Signal) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        
         if let Signal::Text(text) = signal {
             let devoweled = self.re.replace_all(&text, "").to_string().to_uppercase();
-            // println!("\x1b[35m[DEVOWELIZER]\x1b[0m '{}'", devoweled);
+            *self.last_output.lock().unwrap() = devoweled.clone();
             log::debug!("[DEVOWELIZER] '{}'", devoweled);
             
             if let Some(tx) = &self.tx {
@@ -74,3 +154,4 @@ impl Sink for DevowelizerSink {
         Ok(())
     }
 }
+

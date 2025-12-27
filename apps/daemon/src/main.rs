@@ -1,13 +1,14 @@
 use nannou::prelude::*;
-use talisman_core::{Source, Sink, Signal};
+use talisman_core::{Source, Sink, Signal, PatchBay};
 use aphrodite::AphroditeSource;
 use logos::LogosSource;
 use kamea::{self, SigilConfig};
 use text_tools::{WordCountSink, DevowelizerSink};
 use nannou_egui::{self, Egui, egui};
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc; // Use Tokio mpsc for async-await support in orchestrator
+use tokio::sync::mpsc;
 use std::thread;
+use std::collections::HashSet;
 
 // --- MODEL ---
 struct Model {
@@ -39,6 +40,11 @@ struct Model {
     is_closing: bool,
     clipboard: Option<arboard::Clipboard>,
     context_menu: Option<ContextMenuState>,
+    
+    // Patch Bay State
+    patch_bay: PatchBay,
+    disabled_tiles: HashSet<String>,
+    show_patch_bay: bool,
 }
 
 struct ContextMenuState {
@@ -264,6 +270,24 @@ fn model(app: &App) -> Model {
         }
     };
 
+    // 7. Init Patch Bay and register module schemas
+    let mut patch_bay = PatchBay::new();
+    
+    // Register all module schemas
+    let logos_source = LogosSource::new();
+    let aphrodite_source = AphroditeSource::new(10);
+    let word_count_sink = WordCountSink::new(None);
+    let devowelizer_sink = DevowelizerSink::new(None);
+    let kamea_sink = kamea::KameaSink::new();
+    
+    patch_bay.register_module(logos_source.schema());
+    patch_bay.register_module(aphrodite_source.schema());
+    patch_bay.register_module(word_count_sink.schema());
+    patch_bay.register_module(devowelizer_sink.schema());
+    patch_bay.register_module(kamea_sink.schema());
+    
+    log::info!("Patch Bay initialized with {} modules", patch_bay.get_modules().len());
+
     Model {
         receiver: rx_ui,
         orchestrator_tx: tx_orch,
@@ -284,6 +308,9 @@ fn model(app: &App) -> Model {
         is_closing: false,
         clipboard,
         context_menu: None,
+        patch_bay,
+        disabled_tiles: HashSet::new(),
+        show_patch_bay: false,
     }
 }
 
@@ -407,6 +434,9 @@ fn update(app: &App, model: &mut Model, update: Update) {
                              if ui.button("BURN").clicked() {
                                  model.retinal_burn = !model.retinal_burn;
                              }
+                             if ui.button("PATCH").clicked() {
+                                 model.show_patch_bay = !model.show_patch_bay;
+                             }
                              if ui.button("DESTROY").clicked() {
                                  std::process::exit(0);
                              }
@@ -513,8 +543,18 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 ui.add(egui::Separator::default().spacing(10.0));
                 
-                if ui.add_sized(btn_size, egui::Button::new("DISABLE")).clicked() {
-                    log::info!("Disable Tile: {}", tile_id);
+                // Toggle button text based on disabled state
+                let is_disabled = model.disabled_tiles.contains(&tile_id);
+                let disable_text = if is_disabled { "ENABLE" } else { "DISABLE" };
+                
+                if ui.add_sized(btn_size, egui::Button::new(disable_text)).clicked() {
+                    if is_disabled {
+                        model.disabled_tiles.remove(&tile_id);
+                        log::info!("Enabled Tile: {}", tile_id);
+                    } else {
+                        model.disabled_tiles.insert(tile_id.clone());
+                        log::info!("Disabled Tile: {}", tile_id);
+                    }
                     open = false;
                 }
                 
@@ -526,7 +566,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 ui.add(egui::Separator::default().spacing(10.0));
                  if ui.add_sized(btn_size, egui::Button::new("PATCH BAY")).clicked() {
-                    log::info!("Open Patch Bay");
+                    model.show_patch_bay = true;
+                    log::info!("Opening Patch Bay");
                     open = false;
                 }
                 if ui.add_sized(btn_size, egui::Button::new("GLOBAL SETTINGS")).clicked() {
@@ -549,6 +590,101 @@ fn update(app: &App, model: &mut Model, update: Update) {
         if !open {
             model.context_menu = None;
         }
+    }
+
+    // Patch Bay Modal
+    if model.show_patch_bay {
+        egui::Window::new("PATCH BAY")
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .default_size(egui::vec2(600.0, 450.0))
+            .collapsible(false)
+            .resizable(true)
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
+                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)),
+                inner_margin: egui::Margin::same(15.0),
+                ..Default::default()
+            })
+            .show(&ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("MODULE PATCH BAY")
+                        .heading()
+                        .color(egui::Color32::from_rgb(0, 255, 255)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("✕").clicked() {
+                            model.show_patch_bay = false;
+                        }
+                    });
+                });
+                
+                ui.add(egui::Separator::default().spacing(10.0));
+                
+                // Module List
+                ui.label(egui::RichText::new("REGISTERED MODULES")
+                    .small()
+                    .color(egui::Color32::GRAY));
+                
+                egui::ScrollArea::vertical()
+                    .max_height(280.0)
+                    .show(ui, |ui| {
+                        let modules: Vec<_> = model.patch_bay.get_modules()
+                            .iter()
+                            .map(|m| (*m).clone())
+                            .collect();
+                        
+                        for module in modules {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(&module.name)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(0, 255, 255)));
+                                    ui.label(egui::RichText::new(format!("({})", module.id))
+                                        .small()
+                                        .color(egui::Color32::GRAY));
+                                });
+                                
+                                ui.label(egui::RichText::new(&module.description)
+                                    .small()
+                                    .color(egui::Color32::from_rgb(150, 150, 150)));
+                                
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new("PORTS:").small().color(egui::Color32::GRAY));
+                                    for port in &module.ports {
+                                        let (prefix, color) = match port.direction {
+                                            talisman_core::PortDirection::Input => ("◀", egui::Color32::from_rgb(100, 200, 100)),
+                                            talisman_core::PortDirection::Output => ("▶", egui::Color32::from_rgb(200, 100, 100)),
+                                        };
+                                        ui.label(egui::RichText::new(format!("{} {} ({:?})", prefix, port.label, port.data_type))
+                                            .small()
+                                            .color(color));
+                                    }
+                                });
+                            });
+                            ui.add_space(5.0);
+                        }
+                    });
+                
+                ui.add(egui::Separator::default().spacing(10.0));
+                
+                // Connections
+                let patches = model.patch_bay.get_patches();
+                if patches.is_empty() {
+                    ui.label(egui::RichText::new("No active patches")
+                        .small()
+                        .color(egui::Color32::GRAY));
+                } else {
+                    ui.label(egui::RichText::new(format!("ACTIVE PATCHES: {}", patches.len()))
+                        .small()
+                        .color(egui::Color32::GRAY));
+                    for patch in patches {
+                        ui.label(egui::RichText::new(format!(
+                            "  {}:{} → {}:{}",
+                            patch.source_module, patch.source_port,
+                            patch.sink_module, patch.sink_port
+                        )).small().color(egui::Color32::YELLOW));
+                    }
+                }
+            });
     }
 
     // 2. PROCESS SIGNALS from Orchestrator (High speed!)
@@ -783,9 +919,16 @@ fn view(app: &App, model: &Model, frame: Frame) {
 // Helper to render tile content
 fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_color: LinSrgba, fg_color: Srgb<u8>, drawing_maximized: bool) {
     let is_selected = model.selected_tile.as_ref() == Some(&tile.id);
+    let is_disabled = model.disabled_tiles.contains(&tile.id);
     
-    // Visualize Borders
-    let final_border = if drawing_maximized { CYAN.into_format().into_linear().into() } else { border_color };
+    // Visualize Borders - use dim red for disabled tiles
+    let final_border = if is_disabled {
+        LinSrgba::new(0.5, 0.2, 0.2, 0.8)
+    } else if drawing_maximized { 
+        CYAN.into_format().into_linear().into() 
+    } else { 
+        border_color 
+    };
     
     draw.rect()
         .xy(rect.xy())
@@ -794,15 +937,35 @@ fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_
         .stroke(final_border) 
         .stroke_weight(if is_selected || drawing_maximized { 2.0 } else { 1.0 });
     
-    if is_selected && !drawing_maximized {
+    // Show disabled indicator
+    if is_disabled && !drawing_maximized {
+        draw.text("[DISABLED]")
+            .xy(pt2(rect.x(), rect.top() - 12.0))
+            .color(Srgb::new(150u8, 50, 50))
+            .font_size(10);
+        
+        // Dim overlay
+        draw.rect()
+            .xy(rect.xy())
+            .wh(rect.wh())
+            .color(rgba(0.0, 0.0, 0.0, 0.5));
+    }
+    
+    if is_selected && !drawing_maximized && !is_disabled {
         draw.text("[CLIPBOARD ACTIVE]")
             .xy(pt2(rect.left() + 60.0, rect.bottom() + 10.0))
             .color(CYAN)
             .font_size(10);
     }
     
+    // Skip content rendering for disabled tiles
+    if is_disabled {
+        return;
+    }
+    
     // Content Padding
     let content_rect = rect.pad(10.0);
+
     
     match tile.module.as_str() {
         "header" => {},
