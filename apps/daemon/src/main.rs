@@ -32,6 +32,11 @@ struct Model {
     // Layout and Interaction
     layout: Layout,
     selected_tile: Option<String>,
+    maximized_tile: Option<String>,
+    last_click_time: std::time::Instant,
+    // Animation
+    anim_factor: f32, // 0.0 to 1.0
+    is_closing: bool,
     clipboard: Option<arboard::Clipboard>,
 }
 
@@ -176,8 +181,8 @@ const CLI_RESET: &str = "\x1b[0m";
 
 fn main() {
     // Init Logger
-    // Default: warn for everything, but silence wgpu warnings (buffer drops), debug for our crates.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,wgpu_core=error,wgpu_hal=error,nannou=error,daemon=debug,text_tools=debug,aphrodite=debug,logos=debug,kamea=debug")).init();
+    // Default: warn for everything, but silence wgpu warnings, info for our crates.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,wgpu_core=error,wgpu_hal=error,nannou=error,daemon=info,text_tools=info,aphrodite=info,logos=info,kamea=info")).init();
     
     nannou::app(model)
         .update(update)
@@ -267,6 +272,10 @@ fn model(app: &App) -> Model {
         config,
         layout: Layout::new(app.window_rect()),
         selected_tile: None,
+        maximized_tile: None,
+        last_click_time: std::time::Instant::now(),
+        anim_factor: 0.0,
+        is_closing: false,
         clipboard,
     }
 }
@@ -297,6 +306,17 @@ fn spawn_source(mut source: Box<dyn Source>, tx: mpsc::Sender<Signal>) {
 fn update(app: &App, model: &mut Model, update: Update) {
     // Update Layout dimensions
     model.layout.update(app.window_rect());
+    
+    // Smooth Animation
+    if model.is_closing {
+        model.anim_factor = (model.anim_factor - 0.1).max(0.0);
+        if model.anim_factor <= 0.0 {
+            model.maximized_tile = None;
+            model.is_closing = false;
+        }
+    } else if model.maximized_tile.is_some() && model.anim_factor < 1.0 {
+        model.anim_factor = (model.anim_factor + 0.1).min(1.0);
+    }
 
     // 1. UPDATE GUI
     model.egui.set_elapsed_time(update.since_start);
@@ -318,64 +338,74 @@ fn update(app: &App, model: &mut Model, update: Update) {
             style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
             ctx.set_style(style);
 
-            egui::Window::new("source_editor")
-                .default_pos(egui::pos2(rect.left() + 10.0, model.layout.window_rect.top() - rect.top() + 10.0))
-                .fixed_pos(egui::pos2(
-                    rect.left() + app.window_rect().w()/2.0, 
-                    app.window_rect().h()/2.0 - rect.top()
-                ))
-                .fixed_size(egui::vec2(rect.w(), rect.h()))
-                .title_bar(false) 
-                .frame(egui::Frame {
-                    fill: egui::Color32::TRANSPARENT, // Fully Transparent Frame
-                    inner_margin: egui::Margin::same(10.0),
-                    ..Default::default()
-                })
-                .show(&ctx, |ui| {
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut model.text_buffer)
-                            .desired_width(ui.available_width())
-                            .desired_rows(20)
-                            .frame(false) 
-                            .text_color(egui::Color32::from_rgb(0, 255, 255))
-                            .font(egui::FontId::monospace(14.0)) 
-                    );
-                    
-                    if response.changed() {
-                        let signal = Signal::Text(model.text_buffer.clone());
-                        let _ = model.orchestrator_tx.try_send(signal);
-                    }
-                });
+            // Only show editor if no other tile is maximized
+            let block_egui = model.maximized_tile.is_some() && model.maximized_tile.as_ref() != Some(&tile.id);
+            
+            if !block_egui {
+                egui::Window::new("source_editor")
+                    .default_pos(egui::pos2(rect.left() + 10.0, model.layout.window_rect.top() - rect.top() + 10.0))
+                    .fixed_pos(egui::pos2(
+                        rect.left() + app.window_rect().w()/2.0, 
+                        app.window_rect().h()/2.0 - rect.top()
+                    ))
+                    .fixed_size(egui::vec2(rect.w(), rect.h()))
+                    .title_bar(false) 
+                    .frame(egui::Frame {
+                        fill: egui::Color32::TRANSPARENT, // Fully Transparent Frame
+                        inner_margin: egui::Margin::same(10.0),
+                        ..Default::default()
+                    })
+                    .show(&ctx, |ui| {
+                        let response = ui.add(
+                            egui::TextEdit::multiline(&mut model.text_buffer)
+                                .desired_width(ui.available_width())
+                                .desired_rows(20)
+                                .frame(false) 
+                                .text_color(egui::Color32::from_rgb(0, 255, 255))
+                                .font(egui::FontId::monospace(14.0)) 
+                        );
+                        
+                        if response.changed() {
+                            let signal = Signal::Text(model.text_buffer.clone());
+                            let _ = model.orchestrator_tx.try_send(signal);
+                        }
+                    });
+            }
         }
     }
 
     // Kamea Buttons
     let kamea_tile = model.layout.config.tiles.iter().find(|t| t.module == "kamea_sigil");
     if let Some(tile) = kamea_tile {
-         if let Some(rect) = model.layout.calculate_rect(tile) {
-             // Position buttons using an Area which respects coordinates better than Window logic sometimes
-             // Egui coordinates: Top-Left is (0,0).
-             let egui_params = egui::pos2(
-                  rect.left() + app.window_rect().w()/2.0, 
-                  app.window_rect().h()/2.0 - rect.top()
-             );
-             
-             // Place buttons at the bottom of the tile
-             egui::Area::new("kamea_buttons")
-                .fixed_pos(egui::pos2(egui_params.x + 10.0, egui_params.y + rect.h() - 40.0))
-                .show(&ctx, |ui| {
-                     ui.horizontal(|ui| {
-                         ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::BLACK; // Button BG
-                         ui.style_mut().visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(50, 50, 50);
-                         
-                         if ui.button("BURN").clicked() {
-                             model.retinal_burn = !model.retinal_burn;
-                         }
-                         if ui.button("DESTROY").clicked() {
-                             std::process::exit(0);
-                         }
-                     });
-                });
+         let is_max = model.maximized_tile.as_ref() == Some(&tile.id);
+         let something_else_max = model.maximized_tile.is_some() && !is_max;
+
+         // Hide buttons if something else is maximized, or if we are animating
+         if !something_else_max && (model.maximized_tile.is_none() || model.anim_factor > 0.9) {
+             if let Some(grid_rect) = model.layout.calculate_rect(tile) {
+                 let rect = if is_max { app.window_rect() } else { grid_rect };
+                 
+                 let egui_params = egui::pos2(
+                      rect.left() + app.window_rect().w()/2.0, 
+                      app.window_rect().h()/2.0 - rect.top()
+                 );
+                 
+                 egui::Area::new("kamea_buttons")
+                    .fixed_pos(egui::pos2(egui_params.x + 10.0, egui_params.y + rect.h() - 40.0))
+                    .show(&ctx, |ui| {
+                         ui.horizontal(|ui| {
+                             ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::BLACK;
+                             ui.style_mut().visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(50, 50, 50);
+                             
+                             if ui.button("BURN").clicked() {
+                                 model.retinal_burn = !model.retinal_burn;
+                             }
+                             if ui.button("DESTROY").clicked() {
+                                 std::process::exit(0);
+                             }
+                         });
+                    });
+             }
          }
     }
 
@@ -431,18 +461,30 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
 fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
     if button == MouseButton::Left {
-        // Hit test against tiles
-        let mouse_pos = app.mouse.position(); // Relative to center?
-        // App mouse position is (0,0) at center, +y up.
-        // Our Layout calculation uses the same coordinate system.
-        
+        let mouse_pos = app.mouse.position();
+        let now = std::time::Instant::now();
+        let delta = now.duration_since(model.last_click_time);
+        let is_double_click = delta.as_millis() < 300;
+        model.last_click_time = now;
+
         let mut hit = false;
         for tile in &model.layout.config.tiles {
             if let Some(rect) = model.layout.calculate_rect(tile) {
                 if rect.contains(mouse_pos) {
-                    model.selected_tile = Some(tile.id.clone());
+                    if is_double_click && model.selected_tile.as_ref() == Some(&tile.id) {
+                        // Toggle Maximization
+                        if model.maximized_tile.as_ref() == Some(&tile.id) {
+                            model.is_closing = true;
+                        } else {
+                            model.maximized_tile = Some(tile.id.clone());
+                            model.is_closing = false;
+                            model.anim_factor = 0.0; // Reset animation
+                        }
+                    } else {
+                        model.selected_tile = Some(tile.id.clone());
+                    }
                     hit = true;
-                    log::debug!("Selected Tile: {}", tile.id);
+                    log::debug!("Clicked Tile: {}", tile.id);
                     break;
                 }
             }
@@ -450,6 +492,9 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
         
         if !hit {
             model.selected_tile = None;
+            if model.maximized_tile.is_some() {
+                 model.is_closing = true;
+            }
         }
     }
 }
@@ -529,148 +574,149 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
     draw.background().color(bg_color);
 
-    // Iterate over all tiles in the config and render based on assigned module
+    // Iterate over all tiles and render
     for tile in &model.layout.config.tiles {
+        if model.maximized_tile.as_ref() == Some(&tile.id) {
+            continue;
+        }
+        
         if let Some(rect) = model.layout.calculate_rect(tile) {
-            
-            // Determine border color based on Selection
-            let is_selected = model.selected_tile.as_ref() == Some(&tile.id);
-            
-            // Unify color types to Alpha<Rgb>
-            let border_color = if is_selected {
-                rgba(0.0, 1.0, 1.0, 0.5) // Cyan Highlight
+            let bc = if model.selected_tile.as_ref() == Some(&tile.id) {
+                LinSrgba::new(0.0, 1.0, 1.0, 0.5)
             } else {
-                let s = stroke_color.into_format::<f32>();
-                rgba(s.red, s.green, s.blue, 1.0)
+                stroke_color.into_format::<f32>().into_linear().into()
             };
-            
-            // Visualize Borders
-            draw.rect()
-                .xy(rect.xy())
-                .wh(rect.wh())
-                .color(rgba(0.0, 0.0, 0.0, 0.0)) // Transparent BG
-                .stroke(border_color) 
-                .stroke_weight(if is_selected { 2.0 } else { 1.0 });
-            
-            if is_selected {
-                draw.text("[CLIPBOARD ACTIVE]")
-                    .xy(pt2(rect.left() + 60.0, rect.bottom() + 10.0))
-                    .color(CYAN)
-                    .font_size(10);
-            }
-            
-            // Content Padding
-            let content_rect = rect.pad(10.0);
-            
-            match tile.module.as_str() {
-                "header" => {
-                    // ...
-                },
-                "kamea_sigil" => {
-                     // ... (Existing Sigil Code)
-                     if !model.path_points.is_empty() {
-                         let offset = content_rect.xy();
-                         let points: Vec<Point2> = model.path_points.iter()
-                            .map(|p| *p + offset)
-                            .collect();
-                        draw.polyline()
-                            .weight(model.config.stroke_weight)
-                            .join_round()
-                            .caps_round()
-                            .points(points)
-                            .color(fg_color);
-                     }
-                     // Label: Sanitize newlines
-                     let sanitized_intent = model.current_intent.replace('\n', " ").replace('\r', "");
-                     let truncated_intent = if sanitized_intent.len() > 50 {
-                         format!("{}...", &sanitized_intent[..50])
-                     } else {
-                         sanitized_intent
-                     };
-                     draw.text(&truncated_intent)
-                        .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
-                        .color(fg_color)
-                        .font_size(14);
-                },
-                "word_count" => {
-                    let text = format!("WORD COUNT: {}", model.word_count);
-                    draw.text(&text)
-                        .xy(content_rect.xy())
-                        .color(YELLOW)
-                        .font_size(12);
-                        
-                    // Simple Scrollbar placeholder if "needed" (simulation)
-                    // If text length is huge, draw bar.
-                    if model.word_count.len() > 100 {
-                         draw.rect()
-                            .x(rect.right() - 5.0)
-                            .y(rect.y())
-                            .w(4.0)
-                            .h(rect.h() * 0.3)
-                            .color(rgba(1.0, 1.0, 1.0, 0.3));
-                    }
-                },
-                "devowelizer" => {
-                    // Sanitize: No newlines, normalize spaces
-                    // Regex replacement is heavy in view loop, maybe do it in Sink? 
-                    // Sink already did regex? The Sink sends raw text? 
-                    // Sink sends devoweled text. But user wants "sanitize the dvwl module so the text ignores newlines and normalizes spaces".
-                    // Let's do a quick sanitization here.
-                    let raw = &model.devowel_text;
-                    let clean = raw.replace('\n', " ").replace('\r', "");
-                    // Collapse spaces (simple)
-                    let clean_text = clean.split_whitespace().collect::<Vec<&str>>().join(" ");
-                    
-                    let _text = format!("DEVOWELIZER: {}", clean_text);
-                     // Truncate to avoid overflow for now as we don't have real scrolling view yet, just placeholder
-                    let display_text = if clean_text.len() > 200 {
-                         format!("{}...", &clean_text[..200])
-                    } else {
-                         clean_text
-                    };
-                    
-                    draw.text(&format!("DVWL: {}", display_text))
-                        .xy(content_rect.xy())
-                        .color(MAGENTA)
-                        .font_size(12)
-                        .w(content_rect.w()); // Wrap width
-                        
-                    // Scrollbar Placeholder
-                    if raw.len() > 50 {
-                         draw.rect()
-                            .x(rect.right() - 5.0)
-                            .y(rect.y())
-                            .w(4.0)
-                            .h(rect.h() * 0.5)
-                            .color(rgba(1.0, 0.0, 1.0, 0.5));
-                    }
-                },
-                "astrology" => {
-                    let text = format!("ASTROLOGY: {}", model.astro_data);
-                    draw.text(&text)
-                        .xy(content_rect.xy())
-                        .color(GRAY)
-                        .font_size(12);
-                        
-                    // Scrollbar Placeholder if data is wider than rect
-                    if text.len() > 40 {
-                         draw.rect()
-                            .x(rect.right() - 5.0)
-                            .y(rect.y())
-                            .w(2.0)
-                            .h(rect.h() * 0.4)
-                            .color(rgba(0.5, 0.5, 0.5, 0.4));
-                    }
-                },
-                "editor" => {
-                    // Handled by Egui, but we can draw a placeholder back/border if needed.
-                    // Egui is drawn on top.
-                },
-                _ => {}
+            render_tile(draw.clone(), tile, rect, model, bc, fg_color, false);
+        }
+    }
+
+    // Draw Maximized Tile on top
+    if let Some(max_id) = &model.maximized_tile {
+        if let Some(tile) = model.layout.config.tiles.iter().find(|t| &t.id == max_id) {
+            if let Some(source_rect) = model.layout.calculate_rect(tile) {
+                let target_rect = app.window_rect(); // Full Window maximize
+                
+                let t = model.anim_factor;
+                // Cubic easing for a smoother feel
+                let t_smooth = if t < 0.5 { 4.0 * t * t * t } else { (t - 1.0) * (2.0 * t - 2.0) * (2.0 * t - 2.0) + 1.0 };
+
+                let cx = source_rect.x() * (1.0 - t_smooth) + target_rect.x() * t_smooth;
+                let cy = source_rect.y() * (1.0 - t_smooth) + target_rect.y() * t_smooth;
+                let w = source_rect.w() * (1.0 - t_smooth) + target_rect.w() * t_smooth;
+                let h = source_rect.h() * (1.0 - t_smooth) + target_rect.h() * t_smooth;
+                
+                let rect = Rect::from_x_y_w_h(cx, cy, w, h);
+                
+                // Draw background for maximized view to hide underlying grid
+                draw.rect().xy(rect.xy()).wh(rect.wh()).color(bg_color);
+                
+                render_tile(draw.clone(), tile, rect, model, CYAN.into_format().into_linear().into(), fg_color, true);
             }
         }
     }
 
     draw.to_frame(app, &frame).unwrap();
     model.egui.draw_to_frame(&frame).unwrap();
+}
+
+// Helper to render tile content
+fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_color: LinSrgba, fg_color: Srgb<u8>, drawing_maximized: bool) {
+    let is_selected = model.selected_tile.as_ref() == Some(&tile.id);
+    
+    // Visualize Borders
+    let final_border = if drawing_maximized { CYAN.into_format().into_linear().into() } else { border_color };
+    
+    draw.rect()
+        .xy(rect.xy())
+        .wh(rect.wh())
+        .color(rgba(0.0, 0.0, 0.0, 0.0)) // Transparent BG
+        .stroke(final_border) 
+        .stroke_weight(if is_selected || drawing_maximized { 2.0 } else { 1.0 });
+    
+    if is_selected && !drawing_maximized {
+        draw.text("[CLIPBOARD ACTIVE]")
+            .xy(pt2(rect.left() + 60.0, rect.bottom() + 10.0))
+            .color(CYAN)
+            .font_size(10);
+    }
+    
+    // Content Padding
+    let content_rect = rect.pad(10.0);
+    
+    match tile.module.as_str() {
+        "header" => {},
+        "kamea_sigil" => {
+             if !model.path_points.is_empty() {
+                 let offset = content_rect.xy();
+                 let points: Vec<Point2> = model.path_points.iter()
+                    .map(|p| *p + offset)
+                    .collect();
+                draw.polyline()
+                    .weight(model.config.stroke_weight)
+                    .join_round()
+                    .caps_round()
+                    .points(points)
+                    .color(fg_color);
+             }
+             // Label: Sanitize newlines
+             let sanitized_intent = model.current_intent.replace('\n', " ").replace('\r', "");
+             let truncated_intent = if sanitized_intent.len() > 50 && !drawing_maximized {
+                 format!("{}...", &sanitized_intent[..50])
+             } else {
+                 sanitized_intent
+             };
+             draw.text(&truncated_intent)
+                .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
+                .color(fg_color)
+                .font_size(if drawing_maximized { 24 } else { 14 });
+        },
+        "word_count" => {
+            let text = format!("WORD COUNT: {}", model.word_count);
+            draw.text(&text)
+                .xy(content_rect.xy())
+                .color(YELLOW)
+                .font_size(if drawing_maximized { 48 } else { 12 });
+                
+            if model.word_count.len() > 100 {
+                 draw.rect().x(rect.right() - 5.0).y(rect.y()).w(4.0).h(rect.h() * 0.3).color(rgba(1.0, 1.0, 1.0, 0.3));
+            }
+        },
+        "devowelizer" => {
+            let raw = &model.devowel_text;
+            let clean = raw.replace('\n', " ").replace('\r', "");
+            let clean_text = clean.split_whitespace().collect::<Vec<&str>>().join(" ");
+            
+            let _text = format!("DEVOWELIZER: {}", clean_text);
+            let display_text = if clean_text.len() > 200 && !drawing_maximized {
+                 format!("{}...", &clean_text[..200])
+            } else {
+                 clean_text
+            };
+            
+            draw.text(&format!("DVWL: {}", display_text))
+                .xy(content_rect.xy())
+                .color(MAGENTA)
+                .font_size(if drawing_maximized { 32 } else { 12 })
+                .w(content_rect.w());
+                
+            if raw.len() > 50 {
+                 draw.rect().x(rect.right() - 5.0).y(rect.y()).w(4.0).h(rect.h() * 0.5).color(rgba(1.0, 0.0, 1.0, 0.5));
+            }
+        },
+        "astrology" => {
+            let text = format!("ASTROLOGY: {}", model.astro_data);
+            draw.text(&text)
+                .xy(content_rect.xy())
+                .color(GRAY)
+                .font_size(if drawing_maximized { 32 } else { 12 });
+                
+            if text.len() > 40 {
+                 draw.rect().x(rect.right() - 5.0).y(rect.y()).w(2.0).h(rect.h() * 0.4).color(rgba(0.5, 0.5, 0.5, 0.4));
+            }
+        },
+        "editor" => {
+             // Managed by Egui
+        },
+        _ => {}
+    }
 }
