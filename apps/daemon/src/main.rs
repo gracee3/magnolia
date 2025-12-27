@@ -1,5 +1,5 @@
 use nannou::prelude::*;
-use talisman_core::{Source, Sink, Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime};
+use talisman_core::{Source, Sink, Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime, Patch};
 use aphrodite::AphroditeSource;
 use logos::LogosSource;
 use kamea::{self, SigilConfig};
@@ -13,6 +13,11 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use audio_input::AudioInputSource;
 use text_tools::{SaveFileSink, OutputFormat};
+
+// Layout editor and visualizer modules
+mod layout_editor;
+mod patch_visualizer;
+use layout_editor::LayoutEditor;
 
 // --- MODEL ---
 struct Model {
@@ -62,6 +67,9 @@ struct Model {
     
     // Audio State
     audio_buffer: VecDeque<f32>, // Circular buffer for oscilloscope
+    
+    // Layout Editor State (Phase 5)
+    layout_editor: LayoutEditor,
 }
 
 struct ContextMenuState {
@@ -568,6 +576,7 @@ fn model(app: &App) -> Model {
         audio_buffer: VecDeque::with_capacity(2048),
         module_host,
         plugin_manager,
+        layout_editor: LayoutEditor::new(),
     }
 }
 
