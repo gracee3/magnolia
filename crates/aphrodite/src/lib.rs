@@ -1,6 +1,9 @@
 
 pub mod ephemeris;
 pub mod aspects;
+pub mod source;
+
+pub use source::AphroditeSource;
 
 pub mod vedic;
 pub mod western;

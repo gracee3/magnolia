@@ -1,222 +1,164 @@
 use nannou::prelude::*;
-use std::io::{self, Write};
-use std::sync::OnceLock;
-use std::time::Instant;
-use sysinfo::System;
+use talisman_core::{Source, Signal};
+use aphrodite::AphroditeSource;
+use logos::LogosSource;
+use kamea::{self, SigilConfig}; // We might need to expose generate_path in kamea lib
+use tokio::runtime::Runtime;
+use std::sync::mpsc;
+use std::thread;
 
-use kamea::{self, SigilConfig};
-
-// --- GLOBAL CONTEXT ---
-static SIGIL_CONTEXT: OnceLock<SigilContext> = OnceLock::new();
-
-#[derive(Debug)]
-struct SigilContext {
+// --- MODEL ---
+struct Model {
+    receiver: mpsc::Receiver<Signal>,
+    current_intent: String,
+    path_points: Vec<Point2>,
+    astro_data: String,
     config: SigilConfig,
-    _intent: String,
-    _hash_hex: String,
-    seed_bytes: [u8; 32],
 }
 
-// --- CONSTANTS ---
-const GREEN: &str = "\x1b[32m";
-const CYAN: &str = "\x1b[36m";
-const RESET: &str = "\x1b[0m";
-const RED: &str = "\x1b[31m";
+const CLI_GREEN: &str = "\x1b[32m";
+const CLI_CYAN: &str = "\x1b[36m";
+const CLI_RESET: &str = "\x1b[0m";
 
-// --- ENTRY POINT ---
 fn main() {
-    let ctx = match boot_sequence() {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    let _ = SIGIL_CONTEXT.set(ctx);
-
     nannou::app(model)
         .update(update)
-        .exit(bsod_exit)
+        .simple_window(view)
         .run();
 }
 
-// --- BOOT & CONFIG ---
-fn boot_sequence() -> io::Result<SigilContext> {
-    let mut stdout = io::stdout();
-    let sys = System::new_all();
-    let pid = std::process::id();
-    
-    writeln!(stdout, "{}SIGIL KERNEL INITIALIZED. PID: {}{}", GREEN, pid, RESET)?;
-    if let Some(cpu) = sys.cpus().first() {
-        log_tech(&mut stdout, "CPU_BRAND", cpu.brand())?;
-    }
-    
-    // 1. HARDWARE ENGAGEMENT
-    log_tech(&mut stdout, "HARDWARE_CTRL", "ENGAGING CAPS_LOCK MECHANISM")?;
-    std::panic::catch_unwind(|| {
-        logos::engage_hardware();
-    }).ok();
+fn model(_app: &App) -> Model {
+    // 1. Setup Channel: Orchestrator -> UI
+    let (tx, rx) = mpsc::channel();
 
-    // 2. INTENT
-    print!("\n{}AWAITING INTENT STREAM > {}", CYAN, RESET);
-    stdout.flush()?;
-    
-    let mut input = String::new();
-    let start_read = Instant::now();
-    io::stdin().read_line(&mut input)?;
-    let read_duration = start_read.elapsed();
+    // 2. Spawn Orchestrator (The Patch Bay)
+    thread::spawn(move || {
+        let rt = Runtime::new().expect("Failed to create Tokio runtime");
+        rt.block_on(async move {
+            println!("{}TALISMAN ORCHESTRATOR ONLINE{}", CLI_GREEN, CLI_RESET);
+            
+            // --- MODULES ---
+            let mut sources: Vec<Box<dyn Source>> = vec![
+                Box::new(AphroditeSource::new(10)), // Poll Astro every 10s
+                Box::new(LogosSource::new()),       // Stdin
+            ];
 
-    // Disengage Caps Lock
-    std::panic::catch_unwind(|| {
-        logos::disengage_hardware();
-    }).ok();
-    
-    let intent = input.trim().to_uppercase(); 
-    if intent.is_empty() { return Err(io::Error::new(io::ErrorKind::InvalidInput, "Null Intent")); }
+            // --- EVENT LOOP ---
+            loop {
+                // We poll cleanly. In a real system we'd use select_all or FuturesUnordered
+                // For now, simple round-robin poll with small sleep to prevent busy loop
+                let mut activity = false;
+                for source in &mut sources {
+                    if let Some(signal) = source.poll().await {
+                        activity = true;
+                        // ROUTING: Hardcoded "Everything to UI"
+                        if let Err(e) = tx.send(signal) {
+                            eprintln!("UI Channel closed: {}", e);
+                            return;
+                        }
+                    }
+                }
+                
+                if !activity {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            }
+        });
+    });
 
-    log_tech(&mut stdout, "INPUT_LATENCY", &format!("{} ns", read_duration.as_nanos()))?;
-    log_tech(&mut stdout, "SEMANTIC_LOCK", &format!("INTENT DETECTED: {}", intent))?;
-
-    // 3. ASTRO SALTING
-    log_tech(&mut stdout, "MODULE_LOAD", "APHRODITE_CORE_V2")?;
-    let salt = aphrodite::get_astro_salt();
-    log_tech(&mut stdout, "ASTRO_CORE", &format!("SALT: {}", salt))?;
-
-    // 4. KAMEA SELECTION
-    let sphere = logos::determine_sphere(&intent);
-    let size = sphere as usize;
-    log_tech(&mut stdout, "KAMEA_SELECT", &format!("{:?} ({}x{})", sphere, size, size))?;
-
-    // 5. CRYPTO HASHING
-    let (hash_hex, seed_bytes) = logos::semantic_hash(&intent, &salt);
-    
-    log_tech(&mut stdout, "SEMANTIC_HASH", &hash_hex[..16])?;
-    log_tech(&mut stdout, "GENERATOR", "TRACING KAMEA GRID PATH...")?;
-
+    // 3. Init State
     let config = SigilConfig {
-        spacing: 600.0 / (size as f32),
-        stroke_weight: 8.0,
-        grid_rows: size,
-        grid_cols: size,
+        spacing: 50.0,
+        stroke_weight: 4.0,
+        grid_rows: 4,
+        grid_cols: 4,
     };
 
-    Ok(SigilContext {
-        config,
-        _intent: intent,
-        _hash_hex: hash_hex, 
-        seed_bytes,
-    })
-}
-
-fn log_tech(w: &mut io::Stdout, key: &str, val: &str) -> io::Result<()> {
-    writeln!(w, "[{}] {}: {}", chrono::Utc::now().format("%H:%M:%S%.6f"), key, val)
-}
-
-// --- KAMEA MODEL ---
-
-struct Model {
-    path_points: Vec<Point2>,
-    inverted: bool,
-    config: SigilConfig,
-}
-
-fn model(app: &App) -> Model {
-    let ctx = SIGIL_CONTEXT.get().expect("Init");
-    
-    app.new_window()
-        .title("SIGIL // KAMEA TRACE")
-        .size(800, 800)
-        .view(view)
-        .key_pressed(key_pressed)
-        .build()
-        .unwrap();
-
-    let points_raw = kamea::generate_path(ctx.seed_bytes, ctx.config);
-    let points: Vec<Point2> = points_raw.into_iter().map(|(x, y)| pt2(x, y)).collect();
-
-    println!(">> KAMEA PATH GENERATED. LENGTH: {}", points.len());
-
     Model {
-        path_points: points,
-        inverted: false,
-        config: ctx.config,
+        receiver: rx,
+        current_intent: "AWAITING SIGNAL".to_string(),
+        path_points: vec![],
+        astro_data: "NO DATA".to_string(),
+        config,
     }
 }
 
-fn update(_app: &App, _model: &mut Model, _update: Update) {
-    // STATIC SEAL.
+fn update(_app: &App, model: &mut Model, _update: Update) {
+    // NON-BLOCKING CHECK FOR SIGNALS
+    while let Ok(signal) = model.receiver.try_recv() {
+        match signal {
+            Signal::Text(text) => {
+                println!("{}RECEIVED INTENT: {}{}", CLI_CYAN, text, CLI_RESET);
+                model.current_intent = text.clone();
+                // Generate Sigil (Using generic Kamea logic if possible)
+                // For now, we mock the seed logic or use kamea if it exposes it.
+                // Assuming we can just make up a seed from text hash
+                let mut hasher = sha2::Sha256::new();
+                use sha2::Digest;
+                hasher.update(text.as_bytes());
+                let result = hasher.finalize();
+                let mut seed = [0u8; 32];
+                seed.copy_from_slice(&result);
+
+                // Re-calc grid mapping based on length
+                let size = if text.len() > 10 { 5 } else { 4 };
+                model.config.grid_rows = size;
+                model.config.grid_cols = size;
+                model.config.spacing = 600.0 / (size as f32);
+
+                model.path_points = kamea::generate_path(seed, model.config)
+                    .into_iter()
+                    .map(|(x, y)| pt2(x, y))
+                    .collect();
+            },
+            Signal::Astrology { sun_sign, moon_sign, .. } => {
+                model.astro_data = format!("Sun: {} | Moon: {}", sun_sign, moon_sign);
+            },
+            Signal::Pulse => {}, // Heartbeat
+            _ => {}
+        }
+    }
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
+    draw.background().color(BLACK);
 
-    let (bg, fg) = if model.inverted {
-        (WHITE, BLACK)
-    } else {
-        (BLACK, nannou::prelude::CYAN)
-    };
+    // Header
+    draw.text("TALISMAN // PATCH BAY")
+        .xy(pt2(0.0, 360.0))
+        .color(WHITE)
+        .font_size(16);
 
-    draw.background().color(bg);
+    // Astro Data
+    draw.text(&model.astro_data)
+        .xy(pt2(0.0, 340.0))
+        .color(GRAY)
+        .font_size(12);
 
-    // 1. DRAW PATH (The Sigil)
-    draw.polyline()
-        .weight(model.config.stroke_weight)
-        .join_round()
-        .caps_round()
-        .points(model.path_points.clone())
-        .color(fg);
+    // Intent
+    draw.text(&model.current_intent)
+        .xy(pt2(0.0, -350.0))
+        .color(CYAN)
+        .font_size(14);
 
-    // 2. START TERMINAL (Circle)
-    if let Some(start) = model.path_points.first() {
-        draw.ellipse()
-            .xy(*start)
-            .radius(12.0)
-            .stroke(fg)
-            .stroke_weight(4.0)
-            .no_fill();
-    }
-
-    // 3. END TERMINAL (Crossbar)
-    if let Some(end) = model.path_points.last() {
-        let size = 15.0;
-        
-        // Vertical
-        draw.line()
-            .start(pt2(end.x, end.y - size))
-            .end(pt2(end.x, end.y + size))
-            .weight(6.0)
-            .color(fg);
+    // Sigil
+    if !model.path_points.is_empty() {
+        draw.polyline()
+            .weight(model.config.stroke_weight)
+            .join_round()
+            .caps_round()
+            .points(model.path_points.clone())
+            .color(CYAN);
             
-        // Horizontal
-        draw.line()
-            .start(pt2(end.x - size, end.y))
-            .end(pt2(end.x + size, end.y))
-            .weight(6.0)
-            .color(fg);
+         // Dots for start/end
+         if let Some(p) = model.path_points.first() {
+             draw.ellipse().xy(*p).radius(5.0).color(CYAN);
+         }
+         if let Some(p) = model.path_points.last() {
+             draw.rect().xy(*p).w_h(10.0, 10.0).color(CYAN);
+         }
     }
 
     draw.to_frame(app, &frame).unwrap();
-}
-
-fn key_pressed(app: &App, model: &mut Model, key: Key) {
-    match key {
-        Key::Space => {
-            model.inverted = !model.inverted;
-        },
-        Key::Escape => {
-            app.quit();
-        },
-        _ => {}
-    }
-}
-
-fn bsod_exit(_app: &App, _model: Model) {
-    println!("\n{}SIGNAL INTERRUPT DETECTED. COMMENCING CLEANUP.{}", RED, RESET);
-    println!("[{}] MEMORY_ZEROING_START", chrono::Utc::now().format("%H:%M:%S%.6f"));
-    
-    // Simulate real memory scrubbing
-    let pool_size = 4096 * 64;
-    let mut dummy_mem = vec![0u8; pool_size];
-    for i in &mut dummy_mem { *i = 0xFF; }
-    for i in &mut dummy_mem { *i = 0x00; }
-    
-    println!("[{}] MEMORY_ZEROING_COMPLETE.", chrono::Utc::now().format("%H:%M:%S%.6f"));
-    println!("{}[SYSTEM HALT]{}", RED, RESET);
 }
