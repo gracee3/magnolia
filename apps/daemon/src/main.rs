@@ -45,6 +45,11 @@ struct Model {
     patch_bay: PatchBay,
     disabled_tiles: HashSet<String>,
     show_patch_bay: bool,
+    
+    // Settings & Controls
+    show_global_settings: bool,
+    show_tile_settings: Option<String>,  // tile_id if showing settings for that tile
+    is_sleeping: bool,
 }
 
 struct ContextMenuState {
@@ -286,7 +291,67 @@ fn model(app: &App) -> Model {
     patch_bay.register_module(devowelizer_sink.schema());
     patch_bay.register_module(kamea_sink.schema());
     
-    log::info!("Patch Bay initialized with {} modules", patch_bay.get_modules().len());
+    // Register editor as a virtual source (it emits text from UI)
+    use talisman_core::{ModuleSchema, Port, DataType, PortDirection};
+    let editor_schema = ModuleSchema {
+        id: "editor".to_string(),
+        name: "Text Editor".to_string(),
+        description: "GUI text editor for intent input".to_string(),
+        ports: vec![
+            Port {
+                id: "text_out".to_string(),
+                label: "Text Output".to_string(),
+                data_type: DataType::Text,
+                direction: PortDirection::Output,
+            },
+        ],
+        settings_schema: None,
+    };
+    patch_bay.register_module(editor_schema);
+    
+    // Register astrology display as a sink
+    let astro_display_schema = ModuleSchema {
+        id: "astrology_display".to_string(),
+        name: "Astrology Display".to_string(),
+        description: "Dashboard view of celestial data".to_string(),
+        ports: vec![
+            Port {
+                id: "astro_in".to_string(),
+                label: "Astrology Input".to_string(),
+                data_type: DataType::Astrology,
+                direction: PortDirection::Input,
+            },
+        ],
+        settings_schema: None,
+    };
+    patch_bay.register_module(astro_display_schema);
+    
+    // Establish default patches (the existing signal flow)
+    // Editor → WordCount
+    if let Err(e) = patch_bay.connect("editor", "text_out", "word_count", "text_in") {
+        log::warn!("Failed to connect editor→word_count: {}", e);
+    }
+    // Editor → Devowelizer
+    if let Err(e) = patch_bay.connect("editor", "text_out", "devowelizer", "text_in") {
+        log::warn!("Failed to connect editor→devowelizer: {}", e);
+    }
+    // Editor → Kamea Sigil
+    if let Err(e) = patch_bay.connect("editor", "text_out", "kamea_printer", "text_in") {
+        log::warn!("Failed to connect editor→kamea: {}", e);
+    }
+    // Aphrodite → Kamea (astrology input)
+    if let Err(e) = patch_bay.connect("aphrodite", "astro_out", "kamea_printer", "astro_in") {
+        log::warn!("Failed to connect aphrodite→kamea: {}", e);
+    }
+    // Aphrodite → Astrology Display
+    if let Err(e) = patch_bay.connect("aphrodite", "astro_out", "astrology_display", "astro_in") {
+        log::warn!("Failed to connect aphrodite→astrology_display: {}", e);
+    }
+    
+    log::info!("Patch Bay initialized with {} modules, {} patches", 
+        patch_bay.get_modules().len(), 
+        patch_bay.get_patches().len());
+
 
     Model {
         receiver: rx_ui,
@@ -311,6 +376,21 @@ fn model(app: &App) -> Model {
         patch_bay,
         disabled_tiles: HashSet::new(),
         show_patch_bay: false,
+        show_global_settings: false,
+        show_tile_settings: None,
+        is_sleeping: false,
+    }
+}
+
+/// Map tile ID to module ID for PatchBay
+fn tile_to_module(tile_id: &str) -> String {
+    match tile_id {
+        "editor_pane" => "editor".to_string(),
+        "wc_pane" => "word_count".to_string(),
+        "dvwl_pane" => "devowelizer".to_string(),
+        "astro_pane" => "astrology_display".to_string(),
+        "sigil_pane" | "kamea_sigil" => "kamea_printer".to_string(),
+        _ => tile_id.to_string(), // fallback: use tile_id as module_id
     }
 }
 
@@ -501,12 +581,15 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 let btn_size = egui::vec2(ui.available_width(), 20.0);
 
-                if ui.add_sized(btn_size, egui::Button::new("SETTINGS")).clicked() {
-                    log::info!("Settings clicked for {}", tile_id);
+                let res = ui.add_sized(btn_size, egui::Button::new("SETTINGS"));
+                if res.clicked() || res.secondary_clicked() {
+                    model.show_tile_settings = Some(tile_id.clone());
+                    log::info!("Opening settings for {}", tile_id);
                     open = false;
                 }
                 
-                if ui.add_sized(btn_size, egui::Button::new("COPY")).clicked() {
+                let res = ui.add_sized(btn_size, egui::Button::new("COPY"));
+                if res.clicked() || res.secondary_clicked() {
                      // logic duplicated from key_pressed for now
                      let content = if tile_id == "wc_pane" {
                          Some(model.word_count.clone())
@@ -529,7 +612,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     open = false;
                 }
                 
-                if ui.add_sized(btn_size, egui::Button::new("PASTE")).clicked() {
+                let res = ui.add_sized(btn_size, egui::Button::new("PASTE"));
+                if res.clicked() || res.secondary_clicked() {
                      if tile_id == "editor_pane" {
                          if let Some(cb) = &mut model.clipboard {
                              if let Ok(text) = cb.get_text() {
@@ -547,42 +631,57 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 let is_disabled = model.disabled_tiles.contains(&tile_id);
                 let disable_text = if is_disabled { "ENABLE" } else { "DISABLE" };
                 
-                if ui.add_sized(btn_size, egui::Button::new(disable_text)).clicked() {
+                let res = ui.add_sized(btn_size, egui::Button::new(disable_text));
+                if res.clicked() || res.secondary_clicked() {
+                    // Get corresponding module ID for this tile
+                    let module_id = tile_to_module(&tile_id);
+                    
                     if is_disabled {
                         model.disabled_tiles.remove(&tile_id);
-                        log::info!("Enabled Tile: {}", tile_id);
+                        model.patch_bay.enable_module(&module_id);
+                        log::info!("Enabled Tile/Module: {} / {}", tile_id, module_id);
                     } else {
                         model.disabled_tiles.insert(tile_id.clone());
-                        log::info!("Disabled Tile: {}", tile_id);
+                        model.patch_bay.disable_module(&module_id);
+                        log::info!("Disabled Tile/Module: {} / {}", tile_id, module_id);
                     }
                     open = false;
                 }
                 
-                if ui.add_sized(btn_size, egui::Button::new("REMOVE")).clicked() {
+                let res = ui.add_sized(btn_size, egui::Button::new("REMOVE"));
+                if res.clicked() || res.secondary_clicked() {
                     // Remove from layout config
                     model.layout.config.tiles.retain(|t| t.id != tile_id);
                     open = false;
                 }
                 
                 ui.add(egui::Separator::default().spacing(10.0));
-                 if ui.add_sized(btn_size, egui::Button::new("PATCH BAY")).clicked() {
+                let res = ui.add_sized(btn_size, egui::Button::new("PATCH BAY"));
+                if res.clicked() || res.secondary_clicked() {
                     model.show_patch_bay = true;
                     log::info!("Opening Patch Bay");
                     open = false;
                 }
-                if ui.add_sized(btn_size, egui::Button::new("GLOBAL SETTINGS")).clicked() {
-                    log::info!("Global Settings");
+                let res = ui.add_sized(btn_size, egui::Button::new("GLOBAL SETTINGS"));
+                if res.clicked() || res.secondary_clicked() {
+                    model.show_global_settings = true;
+                    log::info!("Opening Global Settings");
                     open = false;
                 }
-                 if ui.add_sized(btn_size, egui::Button::new("SLEEP")).clicked() {
-                    log::info!("Sleep Engine");
-                    // maybe toggle a global pause?
-                     open = false;
+                
+                // Sleep toggle
+                let sleep_text = if model.is_sleeping { "WAKE" } else { "SLEEP" };
+                let res = ui.add_sized(btn_size, egui::Button::new(sleep_text));
+                if res.clicked() || res.secondary_clicked() {
+                    model.is_sleeping = !model.is_sleeping;
+                    log::info!("Engine {}", if model.is_sleeping { "sleeping" } else { "awake" });
+                    open = false;
                 }
                 
                 ui.add(egui::Separator::default().spacing(10.0));
                 
-                if ui.add_sized(btn_size, egui::Button::new("EXIT DAEMON")).clicked() {
+                let res = ui.add_sized(btn_size, egui::Button::new("EXIT DAEMON"));
+                if res.clicked() || res.secondary_clicked() {
                     std::process::exit(0);
                 }
             });
@@ -594,9 +693,15 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
     // Patch Bay Modal
     if model.show_patch_bay {
+        let screen_rect = ctx.screen_rect();
+        let width = 600.0;
+        let height = 450.0;
+        let x = screen_rect.center().x - width / 2.0;
+        let y = screen_rect.center().y - height / 2.0;
+
         egui::Window::new("PATCH BAY")
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .default_size(egui::vec2(600.0, 450.0))
+            .fixed_pos(egui::pos2(x, y))
+            .fixed_size(egui::vec2(width, height))
             .collapsible(false)
             .resizable(true)
             .frame(egui::Frame {
@@ -651,8 +756,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
                                     ui.label(egui::RichText::new("PORTS:").small().color(egui::Color32::GRAY));
                                     for port in &module.ports {
                                         let (prefix, color) = match port.direction {
-                                            talisman_core::PortDirection::Input => ("◀", egui::Color32::from_rgb(100, 200, 100)),
-                                            talisman_core::PortDirection::Output => ("▶", egui::Color32::from_rgb(200, 100, 100)),
+                                            talisman_core::PortDirection::Input => ("IN", egui::Color32::from_rgb(100, 200, 100)),
+                                            talisman_core::PortDirection::Output => ("OUT", egui::Color32::from_rgb(200, 100, 100)),
                                         };
                                         ui.label(egui::RichText::new(format!("{} {} ({:?})", prefix, port.label, port.data_type))
                                             .small()
@@ -678,12 +783,177 @@ fn update(app: &App, model: &mut Model, update: Update) {
                         .color(egui::Color32::GRAY));
                     for patch in patches {
                         ui.label(egui::RichText::new(format!(
-                            "  {}:{} → {}:{}",
+                            "  {}:{} -> {}:{}",
                             patch.source_module, patch.source_port,
                             patch.sink_module, patch.sink_port
                         )).small().color(egui::Color32::YELLOW));
                     }
                 }
+            });
+    }
+
+    // Global Settings Modal
+    if model.show_global_settings {
+        let screen_rect = ctx.screen_rect();
+        let width = 400.0;
+        let height = 300.0;
+        let x = screen_rect.center().x - width / 2.0;
+        let y = screen_rect.center().y - height / 2.0;
+
+        egui::Window::new("GLOBAL SETTINGS")
+            .fixed_pos(egui::pos2(x, y))
+            .fixed_size(egui::vec2(width, height))
+            .collapsible(false)
+            .resizable(true)
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
+                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)),
+                inner_margin: egui::Margin::same(15.0),
+                ..Default::default()
+            })
+            .show(&ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("TALISMAN CONFIGURATION")
+                        .heading()
+                        .color(egui::Color32::from_rgb(0, 255, 255)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("✕").clicked() {
+                            model.show_global_settings = false;
+                        }
+                    });
+                });
+                
+                ui.add(egui::Separator::default().spacing(10.0));
+                
+                // Display options
+                ui.label(egui::RichText::new("DISPLAY").small().color(egui::Color32::GRAY));
+                ui.checkbox(&mut model.retinal_burn, "Retinal Burn Mode (Inverted Colors)");
+                
+                ui.add_space(10.0);
+                
+                // Engine state
+                ui.label(egui::RichText::new("ENGINE").small().color(egui::Color32::GRAY));
+                let status = if model.is_sleeping { "SLEEPING" } else { "ACTIVE" };
+                let status_color = if model.is_sleeping { 
+                    egui::Color32::from_rgb(255, 100, 100) 
+                } else { 
+                    egui::Color32::from_rgb(100, 255, 100) 
+                };
+                ui.horizontal(|ui| {
+                    ui.label("Status:");
+                    ui.label(egui::RichText::new(status).color(status_color));
+                });
+                
+                if ui.button(if model.is_sleeping { "WAKE ENGINE" } else { "SLEEP ENGINE" }).clicked() {
+                    model.is_sleeping = !model.is_sleeping;
+                }
+                
+                ui.add_space(10.0);
+                
+                // Module overview
+                ui.label(egui::RichText::new("MODULES").small().color(egui::Color32::GRAY));
+                ui.label(format!("Registered: {}", model.patch_bay.get_modules().len()));
+                ui.label(format!("Active Patches: {}", model.patch_bay.get_patches().len()));
+                ui.label(format!("Disabled: {}", model.disabled_tiles.len()));
+            });
+    }
+
+    // Tile Settings Modal
+    if let Some(tile_id) = model.show_tile_settings.clone() {
+        let module_id = tile_to_module(&tile_id);
+        let module_info = model.patch_bay.get_module(&module_id).cloned();
+        let screen_rect = ctx.screen_rect();
+        let width = 400.0;
+        let height = 350.0;
+        let x = screen_rect.center().x - width / 2.0;
+        let y = screen_rect.center().y - height / 2.0;
+
+        egui::Window::new(format!("Settings: {}", tile_id))
+            .fixed_pos(egui::pos2(x, y))
+            .fixed_size(egui::vec2(width, height))
+            .collapsible(false)
+            .resizable(true)
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
+                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)),
+                inner_margin: egui::Margin::same(15.0),
+                ..Default::default()
+            })
+            .show(&ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("TILE: {}", tile_id.to_uppercase()))
+                        .heading()
+                        .color(egui::Color32::from_rgb(0, 255, 255)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("✕").clicked() {
+                            model.show_tile_settings = None;
+                        }
+                    });
+                });
+                
+                ui.add(egui::Separator::default().spacing(10.0));
+                
+                // Module info
+                if let Some(module) = module_info {
+                    ui.label(egui::RichText::new("MODULE INFO").small().color(egui::Color32::GRAY));
+                    ui.label(format!("Name: {}", module.name));
+                    ui.label(format!("ID: {}", module.id));
+                    ui.label(&module.description);
+                    
+                    ui.add_space(10.0);
+                    
+                    // Ports
+                    ui.label(egui::RichText::new("PORTS").small().color(egui::Color32::GRAY));
+                    for port in &module.ports {
+                        let (icon, color) = match port.direction {
+                            talisman_core::PortDirection::Input => ("◀ IN", egui::Color32::from_rgb(100, 200, 100)),
+                            talisman_core::PortDirection::Output => ("▶ OUT", egui::Color32::from_rgb(200, 100, 100)),
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(icon).color(color));
+                            ui.label(&port.label);
+                            ui.label(egui::RichText::new(format!("({:?})", port.data_type)).small().color(egui::Color32::GRAY));
+                        });
+                    }
+                    
+                    ui.add_space(10.0);
+                    
+                    // Connections
+                    ui.label(egui::RichText::new("CONNECTIONS").small().color(egui::Color32::GRAY));
+                    let incoming = model.patch_bay.get_incoming_patches(&module.id);
+                    let outgoing = model.patch_bay.get_outgoing_patches(&module.id);
+                    
+                    if incoming.is_empty() && outgoing.is_empty() {
+                        ui.label("No connections");
+                    } else {
+                        for patch in incoming {
+                            ui.label(egui::RichText::new(format!("← FROM: {}:{}", patch.source_module, patch.source_port))
+                                .small()
+                                .color(egui::Color32::from_rgb(100, 200, 100)));
+                        }
+                        for patch in outgoing {
+                            ui.label(egui::RichText::new(format!("→ TO: {}:{}", patch.sink_module, patch.sink_port))
+                                .small()
+                                .color(egui::Color32::from_rgb(200, 100, 100)));
+                        }
+                    }
+                } else {
+                    ui.label(egui::RichText::new("Module not found in Patch Bay")
+                        .color(egui::Color32::from_rgb(255, 100, 100)));
+                }
+                
+                ui.add_space(10.0);
+                
+                // Enabled state
+                ui.label(egui::RichText::new("STATE").small().color(egui::Color32::GRAY));
+                let is_disabled = model.disabled_tiles.contains(&tile_id);
+                let state_text = if is_disabled { "DISABLED" } else { "ENABLED" };
+                let state_color = if is_disabled { 
+                    egui::Color32::from_rgb(255, 100, 100) 
+                } else { 
+                    egui::Color32::from_rgb(100, 255, 100) 
+                };
+                ui.label(egui::RichText::new(state_text).color(state_color));
             });
     }
 
@@ -729,8 +999,17 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     model.devowel_text = content;
                 }
             },
-            Signal::Astrology { sun_sign, moon_sign, .. } => {
-                model.astro_data = format!("Sun: {} | Moon: {}", sun_sign, moon_sign);
+            Signal::Astrology { sun_sign, moon_sign, rising_sign, planetary_positions } => {
+                // Format planetary positions for display
+                let planets: Vec<String> = planetary_positions.iter()
+                    .take(5) // First 5 planets
+                    .map(|(name, lon)| format!("{}: {:.0}°", name, lon % 360.0))
+                    .collect();
+                
+                model.astro_data = format!(
+                    "{}|{}|{}|{}",
+                    sun_sign, moon_sign, rising_sign, planets.join("|")
+                );
             },
             _ => {}
         }
@@ -738,9 +1017,15 @@ fn update(app: &App, model: &mut Model, update: Update) {
 }
 
 fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
+    // 0. Intercept clicks for Egui
+    if model.egui.ctx().wants_pointer_input() {
+        return;
+    }
+    
+    // Clear context menu if clicking away (and egui didn't want it)
+    model.context_menu = None;
+
     if button == MouseButton::Left {
-        // Close Context Menu if clicking elsewhere
-        model.context_menu = None;
 
         let mouse_pos = app.mouse.position();
         let now = std::time::Instant::now();
@@ -912,6 +1197,19 @@ fn view(app: &App, model: &Model, frame: Frame) {
         }
     }
 
+    // Sleep visualization
+    if model.is_sleeping {
+        draw.rect()
+            .xy(app.window_rect().xy())
+            .wh(app.window_rect().wh())
+            .color(rgba(0.0, 0.0, 0.1, 0.4));
+            
+        draw.text("Zzz")
+             .xy(pt2(app.window_rect().right() - 30.0, app.window_rect().bottom() + 30.0))
+             .color(rgba(0.5, 0.5, 1.0, 0.5))
+             .font_size(24);
+    }
+
     draw.to_frame(app, &frame).unwrap();
     model.egui.draw_to_frame(&frame).unwrap();
 }
@@ -935,7 +1233,7 @@ fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_
         .wh(rect.wh())
         .color(rgba(0.0, 0.0, 0.0, 0.0)) // Transparent BG
         .stroke(final_border) 
-        .stroke_weight(if is_selected || drawing_maximized { 2.0 } else { 1.0 });
+        .stroke_weight(if is_disabled { 5.0 } else if is_selected || drawing_maximized { 2.0 } else { 1.0 });
     
     // Show disabled indicator
     if is_disabled && !drawing_maximized {
@@ -1028,15 +1326,67 @@ fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_
             }
         },
         "astrology" => {
-            let text = format!("ASTROLOGY: {}", model.astro_data);
-            draw.text(&text)
-                .xy(content_rect.xy())
-                .color(GRAY)
-                .font_size(if drawing_maximized { 32 } else { 12 });
+            // Parse astro_data into components
+            let parts: Vec<&str> = model.astro_data.split('|').collect();
+            
+            // Dashboard header
+            draw.text("CELESTIAL STATUS")
+                .xy(pt2(content_rect.x(), content_rect.top() - 15.0))
+                .color(YELLOW)
+                .font_size(if drawing_maximized { 18 } else { 11 });
+            
+            // Big three (Sun, Moon, Rising)
+            if parts.len() >= 3 {
+                let line_height = if drawing_maximized { 28.0 } else { 16.0 };
+                let font_size = if drawing_maximized { 16 } else { 10 };
+                let start_y = content_rect.y() + 10.0;
                 
-            if text.len() > 40 {
-                 draw.rect().x(rect.right() - 5.0).y(rect.y()).w(2.0).h(rect.h() * 0.4).color(rgba(0.5, 0.5, 0.5, 0.4));
+                // Sun
+                draw.text(&format!("SUN {}", parts.get(0).unwrap_or(&"--")))
+                    .xy(pt2(content_rect.x(), start_y))
+                    .color(Srgb::new(255u8, 200, 50)) // Golden yellow
+                    .font_size(font_size);
+                
+                // Moon
+                draw.text(&format!("MOON {}", parts.get(1).unwrap_or(&"--")))
+                    .xy(pt2(content_rect.x(), start_y - line_height))
+                    .color(Srgb::new(200u8, 200, 255)) // Pale blue
+                    .font_size(font_size);
+                
+                // Rising
+                draw.text(&format!("ASC {}", parts.get(2).unwrap_or(&"--")))
+                    .xy(pt2(content_rect.x(), start_y - line_height * 2.0))
+                    .color(Srgb::new(255u8, 150, 150)) // Soft red
+                    .font_size(font_size);
+                
+                // Planetary positions (remaining parts)
+                if parts.len() > 3 && drawing_maximized {
+                    for (i, planet) in parts.iter().skip(3).enumerate() {
+                        draw.text(planet.trim())
+                            .xy(pt2(content_rect.x(), start_y - line_height * (3.0 + i as f32)))
+                            .color(GRAY)
+                            .font_size(12);
+                    }
+                }
+            } else {
+                draw.text(&model.astro_data)
+                    .xy(content_rect.xy())
+                    .color(GRAY)
+                    .font_size(if drawing_maximized { 16 } else { 11 });
             }
+            
+            // Status indicator
+            let indicator_color = if model.astro_data.contains("NO DATA") {
+                rgba(1.0, 0.3, 0.3, 0.6)
+            } else {
+                rgba(0.3, 1.0, 0.3, 0.6)
+            };
+            draw.rect()
+                .x(rect.right() - 5.0)
+                .y(rect.top() - 10.0)
+                .w(6.0)
+                .h(6.0)
+                .color(indicator_color);
         },
         "editor" => {
              // Managed by Egui

@@ -1,5 +1,5 @@
 use crate::{DataType, ModuleSchema, Patch, Port, PortDirection};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// PatchBay manages module connections and validates type compatibility.
 /// 
@@ -10,6 +10,8 @@ pub struct PatchBay {
     modules: HashMap<String, ModuleSchema>,
     /// Active patches (connections)
     patches: Vec<Patch>,
+    /// Modules in pass-thru mode (disabled but still routing signals)
+    disabled_modules: HashSet<String>,
     /// Counter for generating patch IDs
     next_patch_id: u64,
 }
@@ -25,6 +27,7 @@ impl PatchBay {
         Self {
             modules: HashMap::new(),
             patches: Vec::new(),
+            disabled_modules: HashSet::new(),
             next_patch_id: 1,
         }
     }
@@ -171,6 +174,28 @@ impl PatchBay {
         self.patches.iter()
             .filter(|p| p.sink_module == module_id)
             .collect()
+    }
+    
+    /// Check if a module is disabled (pass-thru mode)
+    pub fn is_module_disabled(&self, module_id: &str) -> bool {
+        self.disabled_modules.contains(module_id)
+    }
+    
+    /// Disable a module (signals pass through without processing)
+    pub fn disable_module(&mut self, module_id: &str) {
+        self.disabled_modules.insert(module_id.to_string());
+        log::info!("PatchBay: Module '{}' disabled (pass-thru mode)", module_id);
+    }
+    
+    /// Enable a module (normal processing)
+    pub fn enable_module(&mut self, module_id: &str) {
+        self.disabled_modules.remove(module_id);
+        log::info!("PatchBay: Module '{}' enabled", module_id);
+    }
+    
+    /// Get all disabled modules
+    pub fn get_disabled_modules(&self) -> &HashSet<String> {
+        &self.disabled_modules
     }
 }
 
