@@ -18,7 +18,7 @@ use text_tools::{SaveFileSink, OutputFormat};
 struct Model {
     // We use a non-blocking channel for the UI thread to receive updates
     receiver: std::sync::mpsc::Receiver<Signal>,
-    orchestrator_tx: mpsc::Sender<Signal>, 
+    router_tx: mpsc::Sender<Signal>, 
     
     // UI State
     egui: Egui,
@@ -244,44 +244,73 @@ fn main() {
 }
 
 fn model(app: &App) -> Model {
-    // 1. Setup Channels (High Perf Core)
+    // 1. Setup Channels
     let (tx_ui, rx_ui) = std::sync::mpsc::channel::<Signal>();
-    let (tx_orch, mut rx_orch) = mpsc::channel::<Signal>(100);
+    let (tx_router, mut rx_router) = mpsc::channel::<Signal>(1000);
     
-    let tx_ui_for_orch = tx_ui.clone();
-    let tx_ui_for_sinks = tx_ui.clone();
-    let tx_orch_for_sources = tx_orch.clone();
+    // Clone for different uses
+    let tx_ui_clone = tx_ui.clone();
+    
+    // 2. Create ModuleHost for isolated module execution
+    let mut module_host = talisman_core::ModuleHost::new(tx_router.clone());
+    
+    // 3. Register and spawn modules
+    log::info!("Spawning modules with isolated threads...");
+    
+    // Sources
+    use talisman_core::SourceAdapter;
+    let aphrodite = SourceAdapter::new(AphroditeSource::new(10));
+    if let Err(e) = module_host.spawn(aphrodite, 100) {
+        log::error!("Failed to spawn Aphrodite: {}", e);
+    }
+    
+    let logos = SourceAdapter::new(LogosSource::new());
+    if let Err(e) = module_host.spawn(logos, 100) {
+        log::error!("Failed to spawn Logos: {}", e);
+    }
+    
+    // Sinks
+    use talisman_core::SinkAdapter;
+    let word_count = SinkAdapter::new(WordCountSink::new(Some(tx_ui.clone())));
+    if let Err(e) = module_host.spawn(word_count, 100) {
+        log::error!("Failed to spawn WordCount: {}", e);
+    }
+    
+    let devowelizer = SinkAdapter::new(DevowelizerSink::new(Some(tx_ui.clone())));
+    if let Err(e) = module_host.spawn(devowelizer, 100) {
+        log::error!("Failed to spawn Devowelizer: {}", e);
+    }
+    
+    let wav_sink = SaveFileSink::new(PathBuf::from("recording.wav"));
+    wav_sink.set_format(OutputFormat::Wav);
+    let wav_adapter = SinkAdapter::new(wav_sink);
+    if let Err(e) = module_host.spawn(wav_adapter, 100) {
+        log::error!("Failed to spawn WAV Sink: {}", e);
+    }
+    
+    // 4. Spawn Router Thread (signal fan-out to modules)
+    let module_handles: Vec<_> = module_host.list_modules()
+        .iter()
+        .filter_map(|id| module_host.get_module(id).map(|h| ((*id).to_string(), h.inbox.clone())))
+        .collect();
     
     thread::spawn(move || {
-        let rt = Runtime::new().expect("Tokio");
+        let rt = Runtime::new().expect("Tokio runtime");
         rt.block_on(async move {
-            println!("{}TALISMAN HIGH-PERF CORE ONLINE{}", CLI_GREEN, CLI_RESET);
+            println!("{}TALISMAN MODULE ROUTER ONLINE{}", CLI_GREEN, CLI_RESET);
             
-            // 1. Sinks (Consumer Layer)
-            let wav_sink = SaveFileSink::new(PathBuf::from("recording.wav"));
-            wav_sink.set_format(OutputFormat::Wav);
-            
-            let sinks: Vec<Box<dyn Sink>> = vec![
-                Box::new(WordCountSink::new(Some(tx_ui_for_sinks.clone()))),
-                Box::new(DevowelizerSink::new(Some(tx_ui_for_sinks.clone()))),
-                Box::new(wav_sink),
-            ];
-            
-            // 2. Spawn Sources (Producer Layer)
-            spawn_source(Box::new(AphroditeSource::new(10)), tx_orch_for_sources.clone());
-            spawn_source(Box::new(LogosSource::new()), tx_orch_for_sources.clone());
-            
-            // 3. Event Loop (Router)
-            // No sleep! Just await content.
-            while let Some(signal) = rx_orch.recv().await {
-                // Route to UI
-                let _ = tx_ui_for_orch.send(signal.clone());
+            while let Some(signal) = rx_router.recv().await {
+                // Send to UI (non-blocking)
+                let _ = tx_ui_clone.send(signal.clone());
                 
-                // Route to Sinks
-                for sink in &sinks {
-                    let _ = sink.consume(signal.clone()).await;
+                // Fan out to all module inboxes in parallel (non-blocking)
+                for (module_id, inbox) in &module_handles {
+                    if let Err(e) = inbox.try_send(signal.clone()) {
+                        log::debug!("Module {} inbox full or closed: {}", module_id, e);
+                    }
                 }
             }
+            log::warn!("Router channel closed, shutting down...");
         });
     });
 
@@ -335,19 +364,19 @@ fn model(app: &App) -> Model {
     patch_bay.register_module(devowelizer_sink.schema());
     patch_bay.register_module(kamea_sink.schema());
     
-    // Init Audio Input
+    // Init Audio Input (spawn it with ModuleHost would be better, but need to refactor first)
+    let tx_router_for_audio = tx_router.clone();
     match AudioInputSource::new(1024) {
         Ok(src) => {
             patch_bay.register_module(src.schema());
              // Start source thread
              let mut src_clone = src; // Move semantics
-             let tx_clone = tx_orch.clone();
              thread::spawn(move || {
                  let runtime = Runtime::new().unwrap();
                  runtime.block_on(async {
                      loop {
                          if let Some(signal) = src_clone.poll().await {
-                             let _ = tx_clone.send(signal).await;
+                             let _ = tx_router_for_audio.send(signal).await;
                          }
                      }
                  });
@@ -471,7 +500,7 @@ fn model(app: &App) -> Model {
 
     Model {
         receiver: rx_ui,
-        orchestrator_tx: tx_orch,
+        router_tx: tx_router,
         egui,
         text_buffer: String::new(),
         current_intent: "AWAITING SIGNAL".to_string(),
@@ -512,28 +541,7 @@ fn tile_to_module(tile_id: &str) -> String {
     }
 }
 
-// Helper to spawn a source into a generic loop
-fn spawn_source(mut source: Box<dyn Source>, tx: mpsc::Sender<Signal>) {
-    tokio::spawn(async move {
-        loop {
-            // Poll the source
-            if let Some(signal) = source.poll().await {
-                 if tx.send(signal).await.is_err() {
-                     break; // Channel closed
-                 }
-            } else {
-                // Source exhausted (unlikely for our sources, but possible)
-                // For now, if poll returns None, we assume it's done. 
-                // But Logos might return None on EOF. Aphrodite never returns None (unless error).
-                // Let's just loop.
-                // Wait, if poll returns None, we should stop? 
-                // Logos returns None on EOF (ctrl-D).
-                // Sleep briefly to avoid busy loop if source is broken (returns None repeatedly)
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-        }
-    });
-}
+
 
 fn update(app: &App, model: &mut Model, update: Update) {
     // Update Layout dimensions
@@ -599,7 +607,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                         
                         if response.changed() {
                             let signal = Signal::Text(model.text_buffer.clone());
-                            let _ = model.orchestrator_tx.try_send(signal);
+                            let _ = model.router_tx.try_send(signal);
                         }
                     });
             }
@@ -736,7 +744,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                          if let Some(cb) = &mut model.clipboard {
                              if let Ok(text) = cb.get_text() {
                                   model.text_buffer.push_str(&text);
-                                  let _ = model.orchestrator_tx.try_send(Signal::Text(model.text_buffer.clone()));
+                                  let _ = model.router_tx.try_send(Signal::Text(model.text_buffer.clone()));
                              }
                         }
                      }
@@ -1415,7 +1423,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                                    Ok(text) => {
                                         model.text_buffer.push_str(&text);
                                         // Trigger Signal
-                                        let _ = model.orchestrator_tx.try_send(Signal::Text(model.text_buffer.clone()));
+                                        let _ = model.router_tx.try_send(Signal::Text(model.text_buffer.clone()));
                                    },
                                    Err(e) => log::error!("Clipboard Paste Failed: {}", e)
                                }

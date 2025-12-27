@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 
 pub mod patch_bay;
 pub use patch_bay::{PatchBay, PatchBayError};
+
+pub mod runtime;
+pub use runtime::{ModuleRuntime, ModuleHost, ModuleHandle, ExecutionModel, Priority};
+
+pub mod adapters;
+pub use adapters::{SourceAdapter, SinkAdapter};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutConfig {
     pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"
