@@ -22,6 +22,18 @@ pub use shared_data::{AudioData, BlobData};
 
 pub mod plugin_loader;
 pub use plugin_loader::{PluginLoader, PluginLibrary};
+
+pub mod plugin_adapter;
+pub use plugin_adapter::PluginModuleAdapter;
+
+pub mod plugin_manager;
+pub use plugin_manager::PluginManager;
+
+pub mod sandbox;
+pub use sandbox::{create_plugin_sandbox, apply_sandbox};
+
+pub mod plugin_signing;
+pub use plugin_signing::PluginVerifier;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutConfig {
     pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"

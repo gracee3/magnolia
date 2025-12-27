@@ -1,5 +1,5 @@
 use nannou::prelude::*;
-use talisman_core::{Source, Sink, Signal, PatchBay};
+use talisman_core::{Source, Sink, Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime};
 use aphrodite::AphroditeSource;
 use logos::LogosSource;
 use kamea::{self, SigilConfig};
@@ -55,6 +55,10 @@ struct Model {
     show_tile_settings: Option<String>,  // tile_id if showing settings for that tile
     show_layout_manager: bool,
     is_sleeping: bool,
+    
+    // Runtime State
+    module_host: talisman_core::ModuleHost,
+    plugin_manager: talisman_core::PluginManager,
     
     // Audio State
     audio_buffer: VecDeque<f32>, // Circular buffer for oscilloscope
@@ -498,6 +502,42 @@ fn model(app: &App) -> Model {
     // Extract sleep state before moving layout into Model
     let initial_sleep_state = layout.config.is_sleeping;
 
+    // Load and spawn plugins
+    let mut plugin_manager = PluginManager::new();
+    
+    // Enable hot-reload (in dev mode)
+    if let Err(e) = plugin_manager.enable_hot_reload() {
+        log::warn!("Failed to enable hot-reload: {}", e);
+    }
+    
+    // Load existing plugins
+    log::info!("Discovering and loading plugins...");
+    {
+        // Safe to unwrap here as we are single threaded in init
+        let mut loader = plugin_manager.loader.write().unwrap();
+        if let Err(e) = unsafe { loader.discover().and_then(|_| loader.load_all()) } {
+            log::error!("Failed to load plugins: {}", e);
+        }
+        
+        // Spawn plugins
+        for plugin in loader.drain_loaded() {
+            let adapter = PluginModuleAdapter::new(plugin);
+            log::info!("Spawning plugin module: {}", adapter.id());
+            
+            // Register schema if possible? 
+            // Currently adapter schema is basic.
+            // We should register it in PatchBay too?
+            // For now just spawn executing module.
+            // Note: If we don't register in PatchBay, they won't show up in UI for patching.
+            // TODO: Extract schema from adapter and register in PatchBay
+            patch_bay.register_module(adapter.schema());
+            
+            if let Err(e) = module_host.spawn(adapter, 100) {
+                 log::error!("Failed to spawn plugin: {}", e);
+            }
+        }
+    }
+
     Model {
         receiver: rx_ui,
         router_tx: tx_router,
@@ -526,6 +566,8 @@ fn model(app: &App) -> Model {
         show_layout_manager: false,
         is_sleeping: initial_sleep_state,
         audio_buffer: VecDeque::with_capacity(2048),
+        module_host,
+        plugin_manager,
     }
 }
 
@@ -556,6 +598,35 @@ fn update(app: &App, model: &mut Model, update: Update) {
         }
     } else if model.maximized_tile.is_some() && model.anim_factor < 1.0 {
         model.anim_factor = (model.anim_factor + 0.1).min(1.0);
+    }
+
+    // Handle Plugin Hot-Reload
+    while let Ok(path) = model.plugin_manager.reload_rx.try_recv() {
+        log::info!("Hot-reload trigger for: {}", path.display());
+        match model.plugin_manager.reload_plugin(&path) {
+            Ok(plugin) => {
+                let adapter = PluginModuleAdapter::new(plugin);
+                let id = adapter.id().to_string(); // Copy ID
+                log::info!("Replacng module: {}", id);
+                
+                // Shutdown old module
+                if let Err(e) = model.module_host.shutdown_module(&id) {
+                    log::warn!("Error shutting down old module {}: {}", id, e);
+                }
+                
+                // Determine execution model (Thread pool? Dedicated?)
+                // Defaulting to dedicated for plugins.
+                // We need to re-spawn.
+                if let Err(e) = model.module_host.spawn(adapter, 100) {
+                    log::error!("Failed to respawn refreshed plugin {}: {}", id, e);
+                } else {
+                    log::info!("Successfully hot-reloaded plugin: {}", id);
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to reload plugin from {}: {}", path.display(), e);
+            }
+        }
     }
 
     // 1. UPDATE GUI

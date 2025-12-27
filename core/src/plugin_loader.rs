@@ -13,6 +13,11 @@ pub struct PluginLibrary {
     pub instance: *mut c_void,
 }
 
+// Safety: The plugin instance must be thread-safe for the operations called on it.
+// We are bridging C ABI which involves raw pointers.
+unsafe impl Send for PluginLibrary {}
+unsafe impl Sync for PluginLibrary {}
+
 impl PluginLibrary {
     /// Load a plugin from a shared library file
     /// 
@@ -131,6 +136,8 @@ impl PluginLoader {
                 
                 // Check if it's a plugin library
                 if self.is_plugin_file(&path) {
+                    // Check if already loaded?
+                    // For now, simple discovery
                     log::debug!("Found plugin file: {}", path.display());
                     plugins.push(path);
                 }
@@ -138,6 +145,11 @@ impl PluginLoader {
         }
         
         Ok(plugins)
+    }
+
+    /// Drain all loaded plugins, transferring ownership to the caller
+    pub fn drain_loaded(&mut self) -> Vec<PluginLibrary> {
+        self.loaded.drain(..).collect()
     }
     
     fn is_plugin_file(&self, path: &Path) -> bool {
