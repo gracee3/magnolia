@@ -29,8 +29,10 @@ struct Model {
     devowel_text: String,
     config: SigilConfig,
     
-    // Layout
+    // Layout and Interaction
     layout: Layout,
+    selected_tile: Option<String>,
+    clipboard: Option<arboard::Clipboard>,
 }
 
 // --- LAYOUT ENGINE ---
@@ -83,11 +85,6 @@ impl Layout {
         self.window_rect = win_rect;
     }
     
-    // Resolve a specific tile by ID
-    fn get_rect(&self, tile_id: &str) -> Option<Rect> {
-        let tile = self.config.tiles.iter().find(|t| t.id == tile_id)?;
-        self.calculate_rect(tile)
-    }
     
     // Helper to calculate Grid Rect directly from Col/Row
     fn calculate_rect(&self, tile: &TileConfig) -> Option<Rect> {
@@ -229,6 +226,8 @@ fn model(app: &App) -> Model {
     let window_id = app.new_window()
         .view(view)
         .raw_event(raw_window_event)
+        .key_pressed(key_pressed)
+        .mouse_pressed(mouse_pressed)
         .size(900, 600)
         .title("TALISMAN // DIGITAL LAB")
         .build()
@@ -245,6 +244,15 @@ fn model(app: &App) -> Model {
         grid_cols: 4,
     };
 
+    // 6. Init Clipboard (might fail on some systems)
+    let clipboard = match arboard::Clipboard::new() {
+        Ok(cb) => Some(cb),
+        Err(e) => {
+            log::warn!("Failed to init Clipboard: {}", e);
+            None
+        }
+    };
+
     Model {
         receiver: rx_ui,
         orchestrator_tx: tx_orch,
@@ -258,6 +266,8 @@ fn model(app: &App) -> Model {
         devowel_text: "".to_string(),
         config,
         layout: Layout::new(app.window_rect()),
+        selected_tile: None,
+        clipboard,
     }
 }
 
@@ -419,6 +429,91 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 }
 
+fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
+    if button == MouseButton::Left {
+        // Hit test against tiles
+        let mouse_pos = app.mouse.position(); // Relative to center?
+        // App mouse position is (0,0) at center, +y up.
+        // Our Layout calculation uses the same coordinate system.
+        
+        let mut hit = false;
+        for tile in &model.layout.config.tiles {
+            if let Some(rect) = model.layout.calculate_rect(tile) {
+                if rect.contains(mouse_pos) {
+                    model.selected_tile = Some(tile.id.clone());
+                    hit = true;
+                    log::debug!("Selected Tile: {}", tile.id);
+                    break;
+                }
+            }
+        }
+        
+        if !hit {
+            model.selected_tile = None;
+        }
+    }
+}
+
+fn key_pressed(_app: &App, model: &mut Model, key: Key) {
+    let ctrl = _app.keys.mods.ctrl();
+    
+    if ctrl {
+        match key {
+            Key::C => {
+                // COPY logic
+                if let Some(selected) = &model.selected_tile {
+                    // Map selected ID to content
+                    // Note: This relies on known IDs. 
+                    let content = if selected == "wc_pane" {
+                         Some(model.word_count.clone())
+                    } else if selected == "dvwl_pane" {
+                         Some(model.devowel_text.clone())
+                    } else if selected == "astro_pane" {
+                         Some(model.astro_data.clone())
+                    } else if selected == "editor_pane" {
+                         // Editor copy handled by Egui natively if focused?
+                         // If we clicked the tile but Egui isn't focused, we might want to copy buffer?
+                         Some(model.text_buffer.clone())
+                    } else if selected == "sigil_pane" {
+                         // Can't copy vector graphics to text clipboard easily
+                         None 
+                    } else {
+                         None
+                    };
+                    
+                    if let Some(text) = content {
+                         if let Some(cb) = &mut model.clipboard {
+                             if let Err(e) = cb.set_text(text) {
+                                  log::error!("Clipboard Copy Failed: {}", e);
+                             } else {
+                                  log::info!("Copied to Clipboard");
+                             }
+                         }
+                    }
+                }
+            },
+            Key::V => {
+                 // PASTE Logic
+                 if let Some(selected) = &model.selected_tile {
+                     if selected == "editor_pane" {
+                          if let Some(cb) = &mut model.clipboard {
+                               match cb.get_text() {
+                                   Ok(text) => {
+                                        model.text_buffer.push_str(&text);
+                                        // Trigger Signal
+                                        let _ = model.orchestrator_tx.try_send(Signal::Text(model.text_buffer.clone()));
+                                   },
+                                   Err(e) => log::error!("Clipboard Paste Failed: {}", e)
+                               }
+                          }
+                     }
+                 }
+            },
+            _ => {}
+        }
+    }
+}
+
 fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event::WindowEvent) {
     model.egui.handle_raw_event(event);
 }
@@ -437,13 +532,32 @@ fn view(app: &App, model: &Model, frame: Frame) {
     // Iterate over all tiles in the config and render based on assigned module
     for tile in &model.layout.config.tiles {
         if let Some(rect) = model.layout.calculate_rect(tile) {
+            
+            // Determine border color based on Selection
+            let is_selected = model.selected_tile.as_ref() == Some(&tile.id);
+            
+            // Unify color types to Alpha<Rgb>
+            let border_color = if is_selected {
+                rgba(0.0, 1.0, 1.0, 0.5) // Cyan Highlight
+            } else {
+                let s = stroke_color.into_format::<f32>();
+                rgba(s.red, s.green, s.blue, 1.0)
+            };
+            
             // Visualize Borders
             draw.rect()
                 .xy(rect.xy())
                 .wh(rect.wh())
-                .color(rgba(0.0, 0.0, 0.0, 0.0)) // Transparent BG for tiles
-                .stroke(stroke_color) 
-                .stroke_weight(1.0);
+                .color(rgba(0.0, 0.0, 0.0, 0.0)) // Transparent BG
+                .stroke(border_color) 
+                .stroke_weight(if is_selected { 2.0 } else { 1.0 });
+            
+            if is_selected {
+                draw.text("[CLIPBOARD ACTIVE]")
+                    .xy(pt2(rect.left() + 60.0, rect.bottom() + 10.0))
+                    .color(CYAN)
+                    .font_size(10);
+            }
             
             // Content Padding
             let content_rect = rect.pad(10.0);
@@ -453,13 +567,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     // ...
                 },
                 "kamea_sigil" => {
+                     // ... (Existing Sigil Code)
                      if !model.path_points.is_empty() {
-                         // Center logic
                          let offset = content_rect.xy();
                          let points: Vec<Point2> = model.path_points.iter()
                             .map(|p| *p + offset)
                             .collect();
-                            
                         draw.polyline()
                             .weight(model.config.stroke_weight)
                             .join_round()
@@ -474,29 +587,80 @@ fn view(app: &App, model: &Model, frame: Frame) {
                      } else {
                          sanitized_intent
                      };
-
                      draw.text(&truncated_intent)
                         .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
                         .color(fg_color)
                         .font_size(14);
                 },
                 "word_count" => {
-                    draw.text(&format!("WORD COUNT: {}", model.word_count))
+                    let text = format!("WORD COUNT: {}", model.word_count);
+                    draw.text(&text)
                         .xy(content_rect.xy())
                         .color(YELLOW)
                         .font_size(12);
+                        
+                    // Simple Scrollbar placeholder if "needed" (simulation)
+                    // If text length is huge, draw bar.
+                    if model.word_count.len() > 100 {
+                         draw.rect()
+                            .x(rect.right() - 5.0)
+                            .y(rect.y())
+                            .w(4.0)
+                            .h(rect.h() * 0.3)
+                            .color(rgba(1.0, 1.0, 1.0, 0.3));
+                    }
                 },
                 "devowelizer" => {
-                    draw.text(&format!("DEVOWELIZER: {}", model.devowel_text))
+                    // Sanitize: No newlines, normalize spaces
+                    // Regex replacement is heavy in view loop, maybe do it in Sink? 
+                    // Sink already did regex? The Sink sends raw text? 
+                    // Sink sends devoweled text. But user wants "sanitize the dvwl module so the text ignores newlines and normalizes spaces".
+                    // Let's do a quick sanitization here.
+                    let raw = &model.devowel_text;
+                    let clean = raw.replace('\n', " ").replace('\r', "");
+                    // Collapse spaces (simple)
+                    let clean_text = clean.split_whitespace().collect::<Vec<&str>>().join(" ");
+                    
+                    let _text = format!("DEVOWELIZER: {}", clean_text);
+                     // Truncate to avoid overflow for now as we don't have real scrolling view yet, just placeholder
+                    let display_text = if clean_text.len() > 200 {
+                         format!("{}...", &clean_text[..200])
+                    } else {
+                         clean_text
+                    };
+                    
+                    draw.text(&format!("DVWL: {}", display_text))
                         .xy(content_rect.xy())
                         .color(MAGENTA)
-                        .font_size(12);
+                        .font_size(12)
+                        .w(content_rect.w()); // Wrap width
+                        
+                    // Scrollbar Placeholder
+                    if raw.len() > 50 {
+                         draw.rect()
+                            .x(rect.right() - 5.0)
+                            .y(rect.y())
+                            .w(4.0)
+                            .h(rect.h() * 0.5)
+                            .color(rgba(1.0, 0.0, 1.0, 0.5));
+                    }
                 },
                 "astrology" => {
-                    draw.text(&format!("ASTROLOGY: {}", model.astro_data))
+                    let text = format!("ASTROLOGY: {}", model.astro_data);
+                    draw.text(&text)
                         .xy(content_rect.xy())
                         .color(GRAY)
                         .font_size(12);
+                        
+                    // Scrollbar Placeholder if data is wider than rect
+                    if text.len() > 40 {
+                         draw.rect()
+                            .x(rect.right() - 5.0)
+                            .y(rect.y())
+                            .w(2.0)
+                            .h(rect.h() * 0.4)
+                            .color(rgba(0.5, 0.5, 0.5, 0.4));
+                    }
                 },
                 "editor" => {
                     // Handled by Egui, but we can draw a placeholder back/border if needed.
