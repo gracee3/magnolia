@@ -23,6 +23,7 @@ struct Model {
     current_intent: String,
     path_points: Vec<Point2>,
     astro_data: String,
+    retinal_burn: bool,
     // Sink Results
     word_count: String,
     devowel_text: String,
@@ -252,6 +253,7 @@ fn model(app: &App) -> Model {
         current_intent: "AWAITING SIGNAL".to_string(),
         path_points: vec![],
         astro_data: "NO DATA".to_string(),
+        retinal_burn: false,
         word_count: "0".to_string(),
         devowel_text: "".to_string(),
         config,
@@ -297,16 +299,37 @@ fn update(app: &App, model: &mut Model, update: Update) {
     
     if let Some(tile) = editor_tile {
         if let Some(rect) = model.layout.calculate_rect(tile) {
-            egui::Window::new("Source: Text Editor")
+            // Custom Style for "Terminal-like" look
+            let mut style = (*ctx.style()).clone();
+            style.visuals.widgets.noninteractive.bg_fill = egui::Color32::TRANSPARENT; // Transparent Window BG
+            style.visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255)); 
+            style.visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT; // Transparent Input BG
+            style.visuals.selection.bg_fill = egui::Color32::from_rgb(0, 100, 100);
+            style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
+            ctx.set_style(style);
+
+            egui::Window::new("source_editor")
                 .default_pos(egui::pos2(rect.left() + 10.0, model.layout.window_rect.top() - rect.top() + 10.0))
                 .fixed_pos(egui::pos2(
                     rect.left() + app.window_rect().w()/2.0, 
                     app.window_rect().h()/2.0 - rect.top()
                 ))
                 .fixed_size(egui::vec2(rect.w(), rect.h()))
+                .title_bar(false) 
+                .frame(egui::Frame {
+                    fill: egui::Color32::TRANSPARENT, // Fully Transparent Frame
+                    inner_margin: egui::Margin::same(10.0),
+                    ..Default::default()
+                })
                 .show(&ctx, |ui| {
-                    ui.label("Type your intent below:");
-                    let response = ui.add(egui::TextEdit::multiline(&mut model.text_buffer).desired_width(ui.available_width()));
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut model.text_buffer)
+                            .desired_width(ui.available_width())
+                            .desired_rows(20)
+                            .frame(false) 
+                            .text_color(egui::Color32::from_rgb(0, 255, 255))
+                            .font(egui::FontId::monospace(14.0)) 
+                    );
                     
                     if response.changed() {
                         let signal = Signal::Text(model.text_buffer.clone());
@@ -314,6 +337,36 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     }
                 });
         }
+    }
+
+    // Kamea Buttons
+    let kamea_tile = model.layout.config.tiles.iter().find(|t| t.module == "kamea_sigil");
+    if let Some(tile) = kamea_tile {
+         if let Some(rect) = model.layout.calculate_rect(tile) {
+             // Position buttons using an Area which respects coordinates better than Window logic sometimes
+             // Egui coordinates: Top-Left is (0,0).
+             let egui_params = egui::pos2(
+                  rect.left() + app.window_rect().w()/2.0, 
+                  app.window_rect().h()/2.0 - rect.top()
+             );
+             
+             // Place buttons at the bottom of the tile
+             egui::Area::new("kamea_buttons")
+                .fixed_pos(egui::pos2(egui_params.x + 10.0, egui_params.y + rect.h() - 40.0))
+                .show(&ctx, |ui| {
+                     ui.horizontal(|ui| {
+                         ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::BLACK; // Button BG
+                         ui.style_mut().visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(50, 50, 50);
+                         
+                         if ui.button("BURN").clicked() {
+                             model.retinal_burn = !model.retinal_burn;
+                         }
+                         if ui.button("DESTROY").clicked() {
+                             std::process::exit(0);
+                         }
+                     });
+                });
+         }
     }
 
     // 2. PROCESS SIGNALS from Orchestrator (High speed!)
@@ -371,18 +424,25 @@ fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event:
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
+    // Retinal Burn Mode: Invert Colors
+    let (bg_color, fg_color, stroke_color) = if model.retinal_burn {
+        (CYAN, BLACK, BLACK)
+    } else {
+        (BLACK, CYAN, GRAY)
+    };
+    
     let draw = app.draw();
-    draw.background().color(BLACK);
+    draw.background().color(bg_color);
 
     // Iterate over all tiles in the config and render based on assigned module
     for tile in &model.layout.config.tiles {
         if let Some(rect) = model.layout.calculate_rect(tile) {
-            // Visualize Borders (Light)
+            // Visualize Borders
             draw.rect()
                 .xy(rect.xy())
                 .wh(rect.wh())
-                .color(rgba(0.1, 0.1, 0.1, 1.0)) // Dark Gray Background
-                .stroke(GRAY)
+                .color(rgba(0.0, 0.0, 0.0, 0.0)) // Transparent BG for tiles
+                .stroke(stroke_color) 
                 .stroke_weight(1.0);
             
             // Content Padding
@@ -390,10 +450,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             
             match tile.module.as_str() {
                 "header" => {
-                    draw.text("TALISMAN // PATCH BAY")
-                        .xy(content_rect.xy())
-                        .color(WHITE)
-                        .font_size(16);
+                    // ...
                 },
                 "kamea_sigil" => {
                      if !model.path_points.is_empty() {
@@ -408,12 +465,19 @@ fn view(app: &App, model: &Model, frame: Frame) {
                             .join_round()
                             .caps_round()
                             .points(points)
-                            .color(CYAN);
+                            .color(fg_color);
                      }
-                     // Label
-                     draw.text(&model.current_intent)
+                     // Label: Sanitize newlines
+                     let sanitized_intent = model.current_intent.replace('\n', " ").replace('\r', "");
+                     let truncated_intent = if sanitized_intent.len() > 50 {
+                         format!("{}...", &sanitized_intent[..50])
+                     } else {
+                         sanitized_intent
+                     };
+
+                     draw.text(&truncated_intent)
                         .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
-                        .color(CYAN)
+                        .color(fg_color)
                         .font_size(14);
                 },
                 "word_count" => {
