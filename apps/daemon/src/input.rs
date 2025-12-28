@@ -126,6 +126,139 @@ impl KeyboardNav {
         };
     }
 
+    /// Navigate to adjacent tile in the given direction using smart adjacency detection
+    /// Returns the tile ID if navigation successful, None otherwise
+    pub fn navigate_to_adjacent_tile(&mut self, direction: Direction, layout: &LayoutConfig) -> Option<String> {
+        // Get current tile if any
+        let current_tile = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1);
+        
+        if let Some(current) = current_tile {
+            // Find the best adjacent tile in the specified direction
+            if let Some(adjacent) = self.find_adjacent_tile(current, direction, layout) {
+                // Move cursor to the adjacent tile's position
+                self.cursor = (adjacent.col, adjacent.row);
+                self.selection = SelectionState::TileSelected { tile_id: adjacent.id.clone() };
+                return Some(adjacent.id.clone());
+            } else {
+                // No adjacent tile found, try moving cursor anyway
+                self.navigate(direction);
+                if let Some(tile) = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1) {
+                    if tile.id != current.id {
+                        self.selection = SelectionState::TileSelected { tile_id: tile.id.clone() };
+                        return Some(tile.id.clone());
+                    }
+                }
+            }
+        } else {
+            // No current tile, just move cursor and select whatever is there
+            self.navigate(direction);
+            if let Some(tile) = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1) {
+                self.selection = SelectionState::TileSelected { tile_id: tile.id.clone() };
+                return Some(tile.id.clone());
+            }
+        }
+        
+        None
+    }
+
+    /// Find the adjacent tile in a direction that has maximum overlap
+    fn find_adjacent_tile<'a>(
+        &self,
+        current: &TileConfig,
+        direction: Direction,
+        layout: &'a LayoutConfig,
+    ) -> Option<&'a TileConfig> {
+        let cur_col = current.col;
+        let cur_row = current.row;
+        let cur_colspan = current.colspan.unwrap_or(1);
+        let cur_rowspan = current.rowspan.unwrap_or(1);
+
+        let mut best_tile: Option<&TileConfig> = None;
+        let mut best_overlap = 0;
+
+        for tile in &layout.tiles {
+            if tile.id == current.id {
+                continue;
+            }
+
+            let tile_col = tile.col;
+            let tile_row = tile.row;
+            let tile_colspan = tile.colspan.unwrap_or(1);
+            let tile_rowspan = tile.rowspan.unwrap_or(1);
+
+            // Calculate overlap based on direction
+            let (is_adjacent, overlap) = match direction {
+                Direction::Up => {
+                    // Tile must be directly above
+                    if tile_row + tile_rowspan == cur_row {
+                        // Calculate horizontal overlap
+                        let overlap_start = cur_col.max(tile_col);
+                        let overlap_end = (cur_col + cur_colspan).min(tile_col + tile_colspan);
+                        if overlap_end > overlap_start {
+                            (true, overlap_end - overlap_start)
+                        } else {
+                            (false, 0)
+                        }
+                    } else {
+                        (false, 0)
+                    }
+                },
+                Direction::Down => {
+                    // Tile must be directly below
+                    if cur_row + cur_rowspan == tile_row {
+                        // Calculate horizontal overlap
+                        let overlap_start = cur_col.max(tile_col);
+                        let overlap_end = (cur_col + cur_colspan).min(tile_col + tile_colspan);
+                        if overlap_end > overlap_start {
+                            (true, overlap_end - overlap_start)
+                        } else {
+                            (false, 0)
+                        }
+                    } else {
+                        (false, 0)
+                    }
+                },
+                Direction::Left => {
+                    // Tile must be directly to the left
+                    if tile_col + tile_colspan == cur_col {
+                        // Calculate vertical overlap
+                        let overlap_start = cur_row.max(tile_row);
+                        let overlap_end = (cur_row + cur_rowspan).min(tile_row + tile_rowspan);
+                        if overlap_end > overlap_start {
+                            (true, overlap_end - overlap_start)
+                        } else {
+                            (false, 0)
+                        }
+                    } else {
+                        (false, 0)
+                    }
+                },
+                Direction::Right => {
+                    // Tile must be directly to the right
+                    if cur_col + cur_colspan == tile_col {
+                        // Calculate vertical overlap
+                        let overlap_start = cur_row.max(tile_row);
+                        let overlap_end = (cur_row + cur_rowspan).min(tile_row + tile_rowspan);
+                        if overlap_end > overlap_start {
+                            (true, overlap_end - overlap_start)
+                        } else {
+                            (false, 0)
+                        }
+                    } else {
+                        (false, 0)
+                    }
+                },
+            };
+
+            if is_adjacent && overlap > best_overlap {
+                best_overlap = overlap;
+                best_tile = Some(tile);
+            }
+        }
+
+        best_tile
+    }
+
     /// Select tile at current cursor position
     pub fn select_tile_at_cursor(&mut self, layout: &LayoutConfig) -> Option<String> {
         if let Some(tile) = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1) {

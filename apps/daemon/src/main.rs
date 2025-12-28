@@ -1693,13 +1693,14 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 
                 match model.keyboard_nav.mode {
                     InputMode::Normal | InputMode::Patch => {
-                        // Navigate and auto-select tile at cursor
-                        model.keyboard_nav.navigate(direction);
-                        if let Some(tile_id) = model.keyboard_nav.select_tile_at_cursor(&model.layout.config) {
+                        // Smart tile-to-tile navigation
+                        if let Some(tile_id) = model.keyboard_nav.navigate_to_adjacent_tile(direction, &model.layout.config) {
                             model.selected_tile = Some(tile_id.clone());
-                            log::debug!("Selected tile: {}", tile_id);
+                            log::debug!("Navigated to tile: {}", tile_id);
                         } else {
+                            // No tile found, deselect
                             model.selected_tile = None;
+                            log::debug!("No adjacent tile in that direction");
                         }
                     },
                     InputMode::Layout => {
