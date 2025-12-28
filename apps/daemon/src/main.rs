@@ -1,18 +1,9 @@
 use nannou::prelude::*;
-use talisman_core::{Source, Sink, Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime, Patch};
-use aphrodite::AphroditeSource;
-use logos::LogosSource;
-use kamea::{self, SigilConfig};
-use text_tools::{WordCountSink, DevowelizerSink};
+use talisman_core::{Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime};
 use nannou_egui::{self, Egui, egui};
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
-use std::thread;
 
-use std::collections::VecDeque;
-use std::path::PathBuf;
-use audio_input::{AudioInputSource, AudioInputSourceRT};
-use text_tools::{SaveFileSink, OutputFormat};
+use audio_input::AudioInputSourceRT;
 use talisman_core::ring_buffer;
 
 // Layout editor and visualizer modules
@@ -45,17 +36,6 @@ struct Model {
     
     // UI State
     egui: Egui,
-    text_buffer: String,
-    
-    // Vis State
-    current_intent: String,
-    path_points: Vec<Point2>,
-    astro_data: String,
-    retinal_burn: bool,
-    // Sink Results
-    word_count: String,
-    devowel_text: String,
-    config: SigilConfig,
     
     // Layout and Interaction
     layout: Layout,
@@ -70,7 +50,6 @@ struct Model {
     
     // Patch Bay State
     patch_bay: PatchBay,
-    // disabled_tiles removed
     show_patch_bay: bool,
     
     // Settings & Controls
@@ -79,15 +58,12 @@ struct Model {
     show_layout_manager: bool,
     show_close_confirmation: bool,
     is_sleeping: bool,
-
     
     // Runtime State
     module_host: talisman_core::ModuleHost,
     plugin_manager: talisman_core::PluginManager,
     
-    // Audio State
-    audio_buffer: VecDeque<f32>, // Circular buffer for oscilloscope (legacy)
-    /// Real-time audio ring buffer receiver (for new tile system)
+    // Audio State - Real-time audio ring buffer receiver (for tile system)
     audio_stream_rx: Option<ring_buffer::RingBufferReceiver<talisman_core::AudioFrame>>,
     
     // Layout Editor State (Phase 5)
@@ -140,67 +116,13 @@ fn model(app: &App) -> Model {
     // 2. Create ModuleHost for isolated module execution
     let mut module_host = talisman_core::ModuleHost::new(tx_router.clone());
     
-    // 3. Register and spawn modules
-    log::info!("Spawning modules with isolated threads...");
+    // NOTE: No hardcoded module registration here!
+    // Modules are discovered and loaded dynamically via PluginManager.
+    // See plugin discovery section below.
     
-    // Sources
-    use talisman_core::SourceAdapter;
-    let aphrodite = SourceAdapter::new(AphroditeSource::new(10));
-    if let Err(e) = module_host.spawn(aphrodite, 100) {
-        log::error!("Failed to spawn Aphrodite: {}", e);
-    }
+    log::info!("ModuleHost initialized - modules will be loaded dynamically via PluginManager");
     
-    let logos = SourceAdapter::new(LogosSource::new());
-    if let Err(e) = module_host.spawn(logos, 100) {
-        log::error!("Failed to spawn Logos: {}", e);
-    }
-    
-    // Sinks
-    use talisman_core::SinkAdapter;
-    let word_count = SinkAdapter::new(WordCountSink::new(Some(tx_ui.clone())));
-    if let Err(e) = module_host.spawn(word_count, 100) {
-        log::error!("Failed to spawn WordCount: {}", e);
-    }
-    
-    let devowelizer = SinkAdapter::new(DevowelizerSink::new(Some(tx_ui.clone())));
-    if let Err(e) = module_host.spawn(devowelizer, 100) {
-        log::error!("Failed to spawn Devowelizer: {}", e);
-    }
-    
-    let wav_sink = SaveFileSink::new(PathBuf::from("recording.wav"));
-    wav_sink.set_format(OutputFormat::Wav);
-    let wav_adapter = SinkAdapter::new(wav_sink);
-    if let Err(e) = module_host.spawn(wav_adapter, 100) {
-        log::error!("Failed to spawn WAV Sink: {}", e);
-    }
-    
-    // 4. Spawn Router Thread (signal fan-out to modules)
-    let module_handles: Vec<_> = module_host.list_modules()
-        .iter()
-        .filter_map(|id| module_host.get_module(id).map(|h| ((*id).to_string(), h.inbox.clone())))
-        .collect();
-    
-    thread::spawn(move || {
-        let rt = Runtime::new().expect("Tokio runtime");
-        rt.block_on(async move {
-            println!("{}TALISMAN MODULE ROUTER ONLINE{}", CLI_GREEN, CLI_RESET);
-            
-            while let Some(signal) = rx_router.recv().await {
-                // Send to UI (non-blocking)
-                let _ = tx_ui_clone.send(signal.clone());
-                
-                // Fan out to all module inboxes in parallel (non-blocking)
-                for (module_id, inbox) in &module_handles {
-                    if let Err(e) = inbox.try_send(signal.clone()) {
-                        log::debug!("Module {} inbox full or closed: {}", module_id, e);
-                    }
-                }
-            }
-            log::warn!("Router channel closed, shutting down...");
-        });
-    });
-
-    // 4. Init Window ID & Egui
+    // 3. Initialize Window & Egui
     let window_id = app.new_window()
         .view(view)
         .raw_event(raw_window_event)
@@ -216,15 +138,7 @@ fn model(app: &App) -> Model {
     let window = app.window(window_id).unwrap();
     let egui = Egui::from_window(&window);
 
-    // 5. Init State
-    let config = SigilConfig {
-        spacing: 50.0,
-        stroke_weight: 4.0,
-        grid_rows: 4,
-        grid_cols: 4,
-    };
-
-    // 6. Init Clipboard (might fail on some systems)
+    // 4. Init Clipboard (might fail on some systems)
     let clipboard = match arboard::Clipboard::new() {
         Ok(cb) => Some(cb),
         Err(e) => {
@@ -233,177 +147,29 @@ fn model(app: &App) -> Model {
         }
     };
 
-    // 7. Init Patch Bay and register module schemas
+    // 5. Init Patch Bay (empty - modules register themselves when loaded)
     let mut patch_bay = PatchBay::new();
     
-    // Load layout config early to access saved patches
+    // Load layout config
     let layout = Layout::new(app.window_rect());
 
-    // Register all module schemas
-    let logos_source = LogosSource::new();
-    let aphrodite_source = AphroditeSource::new(10);
-    let word_count_sink = WordCountSink::new(None);
-    let devowelizer_sink = DevowelizerSink::new(None);
-    let kamea_sink = kamea::KameaSink::new();
+    // Apply patches from layout config (after plugins register their schemas)
+    // This will be re-applied after plugin loading
     
-    patch_bay.register_module(logos_source.schema());
-    patch_bay.register_module(aphrodite_source.schema());
-    patch_bay.register_module(word_count_sink.schema());
-    patch_bay.register_module(devowelizer_sink.schema());
-    patch_bay.register_module(kamea_sink.schema());
-    
-    // Init Audio Input (spawn it with ModuleHost would be better, but need to refactor first)
-    let tx_router_for_audio = tx_router.clone();
-    match AudioInputSource::new(1024) {
-        Ok(src) => {
-            patch_bay.register_module(src.schema());
-             // Start source thread
-             let mut src_clone = src; // Move semantics
-             thread::spawn(move || {
-                 let runtime = Runtime::new().unwrap();
-                 runtime.block_on(async {
-                     loop {
-                         if let Some(signal) = src_clone.poll().await {
-                             let _ = tx_router_for_audio.send(signal).await;
-                         }
-                     }
-                 });
-             });
-        },
-        Err(e) => log::error!("Failed to init AudioInputSource: {}", e),
-    }
-    
-    // Init Real-Time Audio Input (SPSC ring buffer for new tile system)
-    // This provides minimal latency audio streaming (~5-10ns per frame)
+    // Real-Time Audio Input (SPSC ring buffer for tile system)
     let audio_stream_rx = match AudioInputSourceRT::new(4096) {
         Ok((_source, rx)) => {
-            // Source is kept alive by thread ownership
-            // We get the ring buffer receiver directly
             log::info!("AudioInputSourceRT initialized with ring buffer");
-            
-            // The source runs in the audio thread callback
-            // We keep the receiver for the tile system
-            // Note: source is moved here, stream will stop when it drops
-            // We need to keep it alive - store it or leak it
             std::mem::forget(_source); // Keep audio stream alive
-            
             Some(rx)
         },
         Err(e) => {
-            log::warn!("Failed to init AudioInputSourceRT: {} - using legacy audio", e);
+            log::warn!("Failed to init AudioInputSourceRT: {} - audio visualization unavailable", e);
             None
         }
     };
-
-    // Init SaveFileSink (WAV/Text/Image)
-    let save_file_sink = SaveFileSink::default();
-    patch_bay.register_module(save_file_sink.schema());
-    // Note: Sinks usually need a runner thread or be polled. 
-    // The daemon orchestrator handles sink dispatch. 
-    // We need to add SaveFileSink to the dispatcher.
-    // Wait, the orchestrator/dispatcher logic in main.rs handles this. 
-    // I need to see how sinks are stored. They seem to be dropped after registration?
-    // Ah, `patch_bay` stores schemas, but the *instances* need to be managed by the orchestrator.
-    // The current daemon implementation seems to have dedicated threads/channels for sources, 
-    // but sinks seem to be handled... how?
-    // Looking at `logos` and `kamea`, they are just registered? 
-    // Wait, if I look at `main.rs`, I don't see where sink instances are kept.
-    // Ah, line 290: `let word_count_sink = WordCountSink::new(None);`
-    // If I don't move them into a runner, they die.
-    // I suspect the Previous Implementation might have abstracted this or missed it?
-    // Let me check `orchestrator` loop. It probably sends signals to *named* sinks.
-    // But how does it invoke the sink instance?
-    // Most likely, the instances are just for schema registration in this demo, 
-    // OR there is a map of Sinks somewhere?
-    // The `Model` struct doesn't have a `sinks` map.
-    // Let me check `main.rs` lines 430+ (update loop) to see how sinks are invoked.    
-
     
-    // Register editor as a virtual source (it emits text from UI)
-    use talisman_core::{ModuleSchema, Port, DataType, PortDirection};
-    let editor_schema = ModuleSchema {
-        id: "editor".to_string(),
-        name: "Text Editor".to_string(),
-        description: "GUI text editor for intent input".to_string(),
-        ports: vec![
-            Port {
-                id: "text_out".to_string(),
-                label: "Text Output".to_string(),
-                data_type: DataType::Text,
-                direction: PortDirection::Output,
-            },
-        ],
-        settings_schema: None,
-    };
-    patch_bay.register_module(editor_schema);
-    
-    // Register astrology display as a sink
-    let astro_display_schema = ModuleSchema {
-        id: "astrology_display".to_string(),
-        name: "Astrology Display".to_string(),
-        description: "Dashboard view of celestial data".to_string(),
-        ports: vec![
-            Port {
-                id: "astro_in".to_string(),
-                label: "Astrology Input".to_string(),
-                data_type: DataType::Astrology,
-                direction: PortDirection::Input,
-            },
-        ],
-        settings_schema: None,
-    };
-    patch_bay.register_module(astro_display_schema);
-    
-    // Establish default patches ONLY if no patches loaded from config
-    if layout.config.patches.is_empty() {
-        log::info!("No patches found in config, applying factory defaults.");
-        // Editor → WordCount
-        if let Err(e) = patch_bay.connect("editor", "text_out", "word_count", "text_in") {
-            log::warn!("Failed to connect editor→word_count: {}", e);
-        }
-        // Editor → Devowelizer
-        if let Err(e) = patch_bay.connect("editor", "text_out", "devowelizer", "text_in") {
-            log::warn!("Failed to connect editor→devowelizer: {}", e);
-        }
-        // Editor → Kamea Sigil
-        if let Err(e) = patch_bay.connect("editor", "text_out", "kamea_printer", "text_in") {
-            log::warn!("Failed to connect editor→kamea: {}", e);
-        }
-        // Aphrodite → Kamea (astrology input)
-        if let Err(e) = patch_bay.connect("aphrodite", "astro_out", "kamea_printer", "astro_in") {
-            log::warn!("Failed to connect aphrodite→kamea: {}", e);
-        }
-    }
-    // Aphrodite → Astrology Display
-    if let Err(e) = patch_bay.connect("aphrodite", "astro_out", "astrology_display", "astro_in") {
-        log::warn!("Failed to connect aphrodite→astrology_display: {}", e);
-    }
-    
-    log::info!("Patch Bay initialized with {} modules, {} patches", 
-        patch_bay.get_modules().len(), 
-        patch_bay.get_patches().len());
-    
-    // Apply patches from layout config
-    for patch in &layout.config.patches {
-        if let Err(e) = patch_bay.connect(
-            &patch.source_module, 
-            &patch.source_port, 
-            &patch.sink_module, 
-            &patch.sink_port
-        ) {
-            log::warn!("Failed to apply patch from config: {}", e);
-        }
-    }
-
-    // Sync initial enabled/disabled state from layout tiles
-    for tile in &layout.config.tiles {
-        if !tile.enabled {
-            let module_id = tile_to_module(&tile.id);
-            patch_bay.disable_module(&module_id);
-            log::info!("Disabled module '{}' based on layout config", module_id);
-        }
-    }
-
+    log::info!("Patch Bay initialized - modules will register via PluginManager");
 
     // Extract sleep state before moving layout into Model
     let initial_sleep_state = layout.config.is_sleeping;
@@ -448,14 +214,6 @@ fn model(app: &App) -> Model {
         receiver: rx_ui,
         router_tx: tx_router,
         egui,
-        text_buffer: String::new(),
-        current_intent: "AWAITING SIGNAL".to_string(),
-        path_points: vec![],
-        astro_data: "NO DATA".to_string(),
-        retinal_burn: false,
-        word_count: "0".to_string(),
-        devowel_text: "".to_string(),
-        config,
         layout,
         selected_tile: None,
         maximized_tile: None,
@@ -465,15 +223,12 @@ fn model(app: &App) -> Model {
         clipboard,
         context_menu: None,
         patch_bay,
-
         show_patch_bay: false,
         show_global_settings: false,
         show_tile_settings: None,
         show_layout_manager: false,
         show_close_confirmation: false,
         is_sleeping: initial_sleep_state,
-
-        audio_buffer: VecDeque::with_capacity(2048),
         audio_stream_rx,
         module_host,
         plugin_manager,
@@ -578,19 +333,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
     model.tile_registry.update_all();
     model.frame_count += 1;
     
-    // Pump audio from ring buffer to legacy audio_buffer for visualization
-    // The new tile system polls this in update(), but we also feed the legacy buffer
-    // for backward compatibility with render_tile()
-    if let Some(ref rx) = model.audio_stream_rx {
-        while let Some(frame) = rx.try_recv() {
-            // Add to circular buffer (mono mix)
-            let sample = (frame.left + frame.right) * 0.5;
-            if model.audio_buffer.len() >= 2048 {
-                model.audio_buffer.pop_front();
-            }
-            model.audio_buffer.push_back(sample);
-        }
-    }
+    // (Legacy audio_buffer pump removed - AudioVisTile handles polling from ring buffer)
 
     // Handle Plugin Hot-Reload
     while let Ok(path) = model.plugin_manager.reload_rx.try_recv() {
@@ -634,95 +377,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
         log::debug!("UPDATE: begin_frame completed");
     }
     
-    // Position Egui Window via Layout
-    // Position Egui Window via Layout
-    // Find the tile assigned to 'editor' module
-    let editor_tile = model.layout.config.tiles.iter().find(|t| t.module == "editor");
-    
-    if let Some(tile) = editor_tile {
-        if let Some(rect) = model.layout.calculate_rect(tile) {
-            // Custom Style for "Terminal-like" look
-            let mut style = (*ctx.style()).clone();
-            style.visuals.widgets.noninteractive.bg_fill = egui::Color32::TRANSPARENT; // Transparent Window BG
-            style.visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255)); 
-            style.visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT; // Transparent Input BG
-            style.visuals.selection.bg_fill = egui::Color32::from_rgb(0, 100, 100);
-            style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
-            ctx.set_style(style);
-
-            // Only show editor if no other tile is maximized
-            let block_egui = model.maximized_tile.is_some() && model.maximized_tile.as_ref() != Some(&tile.id);
-            
-            if !block_egui {
-                egui::Window::new("source_editor")
-                    .default_pos(egui::pos2(rect.left() + 10.0, model.layout.window_rect.top() - rect.top() + 10.0))
-                    .fixed_pos(egui::pos2(
-                        rect.left() + app.window_rect().w()/2.0, 
-                        app.window_rect().h()/2.0 - rect.top()
-                    ))
-                    .fixed_size(egui::vec2(rect.w(), rect.h()))
-                    .title_bar(false) 
-                    .frame(egui::Frame {
-                        fill: egui::Color32::TRANSPARENT, // Fully Transparent Frame
-                        inner_margin: egui::Margin::same(10.0),
-                        ..Default::default()
-                    })
-                    .show(&ctx, |ui| {
-                        let response = ui.add(
-                            egui::TextEdit::multiline(&mut model.text_buffer)
-                                .desired_width(ui.available_width())
-                                .desired_rows(20)
-                                .frame(false) 
-                                .text_color(egui::Color32::from_rgb(0, 255, 255))
-                                .font(egui::FontId::monospace(14.0)) 
-                        );
-                        
-                        if response.changed() {
-                            let signal = Signal::Text(model.text_buffer.clone());
-                            let _ = model.router_tx.try_send(signal);
-                        }
-                    });
-            }
-        }
-    }
-
-    // Kamea Buttons
-    let kamea_tile = model.layout.config.tiles.iter().find(|t| t.module == "kamea_sigil");
-    if let Some(tile) = kamea_tile {
-         let is_max = model.maximized_tile.as_ref() == Some(&tile.id);
-         let something_else_max = model.maximized_tile.is_some() && !is_max;
-
-         // Hide buttons if something else is maximized, or if we are animating
-         if !something_else_max && (model.maximized_tile.is_none() || model.anim_factor > 0.9) {
-             if let Some(grid_rect) = model.layout.calculate_rect(tile) {
-                 let rect = if is_max { app.window_rect() } else { grid_rect };
-                 
-                 let egui_params = egui::pos2(
-                      rect.left() + app.window_rect().w()/2.0, 
-                      app.window_rect().h()/2.0 - rect.top()
-                 );
-                 
-                 egui::Area::new("kamea_buttons")
-                    .fixed_pos(egui::pos2(egui_params.x + 10.0, egui_params.y + rect.h() - 40.0))
-                    .show(&ctx, |ui| {
-                         ui.horizontal(|ui| {
-                             ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::BLACK;
-                             ui.style_mut().visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(50, 50, 50);
-                             
-                             if ui.button("BURN").clicked() {
-                                 model.retinal_burn = !model.retinal_burn;
-                             }
-                             if ui.button("PATCH").clicked() {
-                                 model.show_patch_bay = !model.show_patch_bay;
-                             }
-                             if ui.button("DESTROY").clicked() {
-                                 std::process::exit(0);
-                             }
-                         });
-                    });
-             }
-         }
-    }
+    // (Legacy editor window removed - TextInputTile handles text input)
+    // (Legacy kamea buttons removed - KameaTile handles its own controls)
 
     // Context Menu
     if let Some(menu) = &model.context_menu {
@@ -788,18 +444,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 let res = ui.add_sized(btn_size, egui::Button::new("COPY"));
                 if res.clicked() || res.secondary_clicked() {
-                     // logic duplicated from key_pressed for now
-                     let content = if tile_id == "wc_pane" {
-                         Some(model.word_count.clone())
-                    } else if tile_id == "dvwl_pane" {
-                         Some(model.devowel_text.clone())
-                    } else if tile_id == "astro_pane" {
-                         Some(model.astro_data.clone())
-                    } else if tile_id == "editor_pane" {
-                         Some(model.text_buffer.clone())
-                    } else {
-                         None
-                    };
+                     // Get content from tile registry
+                     let content = model.tile_registry.get_display_text(&tile_id);
                     
                     if let Some(text) = content {
                          if let Some(cb) = &mut model.clipboard {
@@ -812,14 +458,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 let res = ui.add_sized(btn_size, egui::Button::new("PASTE"));
                 if res.clicked() || res.secondary_clicked() {
-                     if tile_id == "editor_pane" {
-                         if let Some(cb) = &mut model.clipboard {
-                             if let Ok(text) = cb.get_text() {
-                                  model.text_buffer.push_str(&text);
-                                  let _ = model.router_tx.try_send(Signal::Text(model.text_buffer.clone()));
-                             }
-                        }
-                     }
+                     // Note: Paste functionality removed - tiles handle their own input
                      open = false;
                 }
                 
@@ -1038,7 +677,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 // Display options
                 ui.label(egui::RichText::new("DISPLAY").small().color(egui::Color32::GRAY));
-                ui.checkbox(&mut model.retinal_burn, "Retinal Burn Mode (Inverted Colors)");
+                // (Retinal burn mode removed)
                 
                 ui.add_space(10.0);
                 
@@ -1369,19 +1008,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
 
 
-    // 2. PROCESS SIGNALS from Orchestrator (using signal_handler module)
-    signal_handler::process_signals(
-        &model.receiver,
-        &mut model.current_intent,
-        &mut model.word_count,
-        &mut model.devowel_text,
-        &mut model.astro_data,
-        &mut model.path_points,
-        &mut model.config,
-        &model.layout.config,
-        &mut model.audio_buffer,
-        |tile| model.layout.calculate_rect(tile),
-    );
+    // (Legacy signal_handler::process_signals removed - tiles handle their own state via TileRegistry)
 }
 
 fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
@@ -1638,17 +1265,9 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
         // Ctrl key combinations (clipboard, etc.)
         match key {
             Key::C => {
-                // COPY logic
+                // COPY logic - get content from tile registry
                 if let Some(selected) = model.keyboard_nav.selected_tile_id() {
-                    let content = match selected {
-                        "wc_pane" => Some(model.word_count.clone()),
-                        "dvwl_pane" => Some(model.devowel_text.clone()),
-                        "astro_pane" => Some(model.astro_data.clone()),
-                        "editor_pane" => Some(model.text_buffer.clone()),
-                        _ => None,
-                    };
-                    
-                    if let Some(text) = content {
+                    if let Some(text) = model.tile_registry.get_display_text(selected) {
                         if let Some(cb) = &mut model.clipboard {
                             if let Err(e) = cb.set_text(text) {
                                 log::error!("Clipboard Copy Failed: {}", e);
@@ -1660,19 +1279,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 }
             },
             Key::V => {
-                if let Some(selected) = model.keyboard_nav.selected_tile_id() {
-                    if selected == "editor_pane" {
-                        if let Some(cb) = &mut model.clipboard {
-                            match cb.get_text() {
-                                Ok(text) => {
-                                    model.text_buffer.push_str(&text);
-                                    let _ = model.router_tx.try_send(Signal::Text(model.text_buffer.clone()));
-                                },
-                                Err(e) => log::error!("Clipboard Paste Failed: {}", e)
-                            }
-                        }
-                    }
-                }
+                // Note: Paste functionality removed - tiles handle their own input
             },
             _ => {}
         }
@@ -1931,12 +1538,8 @@ fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event:
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
-    // Retinal Burn Mode: Invert Colors
-    let (bg_color, fg_color, stroke_color) = if model.retinal_burn {
-        (CYAN, BLACK, BLACK)
-    } else {
-        (BLACK, CYAN, GRAY)
-    };
+    // Color scheme (retinal burn mode removed)
+    let (bg_color, fg_color, stroke_color) = (BLACK, CYAN, GRAY);
     
     let draw = app.draw();
     draw.background().color(bg_color);
@@ -2003,9 +1606,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 if let Some(error) = model.tile_registry.get_error(&tile.module) {
                     tiles::render_error_overlay(&draw, rect, &error);
                 }
-            } else {
-                // Fallback to legacy render_tile
-                render_tile(draw.clone(), tile, rect, model, bc, fg_color, false);
             }
         }
     }
@@ -2037,17 +1637,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     frame_count: model.frame_count,
                     is_selected: true,
                     is_maximized: true,
-                    egui_ctx: None, // Will be handled separately
+                    egui_ctx: None,
                     tile_settings: Some(&tile.settings.config),
                 };
                 
-                // Try tile registry first
-                if model.tile_registry.get(&tile.module).is_some() {
-                    model.tile_registry.render_controls(&tile.module, &draw, rect, &ctx);
-                } else {
-                    // Fallback to legacy render_tile
-                    render_tile(draw.clone(), tile, rect, model, CYAN.into_format().into_linear().into(), fg_color, true);
-                }
+                // Render via tile registry
+                model.tile_registry.render_controls(&tile.module, &draw, rect, &ctx);
             }
         }
     }
@@ -2140,205 +1735,4 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     draw.to_frame(app, &frame).unwrap();
     model.egui.draw_to_frame(&frame).unwrap();
-}
-
-// Helper to render tile content
-fn render_tile(draw: Draw, tile: &TileConfig, rect: Rect, model: &Model, border_color: LinSrgba, fg_color: Srgb<u8>, drawing_maximized: bool) {
-    let is_selected = model.selected_tile.as_ref() == Some(&tile.id);
-    let is_disabled = !tile.enabled;
-    
-    // Visualize Borders - use dim red for disabled tiles
-    let final_border = if is_disabled {
-        LinSrgba::new(0.5, 0.2, 0.2, 0.8)
-    } else if drawing_maximized { 
-        CYAN.into_format().into_linear().into() 
-    } else { 
-        border_color 
-    };
-    
-    draw.rect()
-        .xy(rect.xy())
-        .wh(rect.wh())
-        .color(rgba(0.0, 0.0, 0.0, 0.0)) // Transparent BG
-        .stroke(final_border) 
-        .stroke_weight(if is_disabled { 5.0 } else if is_selected || drawing_maximized { 2.0 } else { 1.0 });
-    
-    // Show disabled indicator
-    if is_disabled && !drawing_maximized {
-        draw.text("[DISABLED]")
-            .xy(pt2(rect.x(), rect.top() - 12.0))
-            .color(Srgb::new(150u8, 50, 50))
-            .font_size(10);
-        
-        // Dim overlay
-        draw.rect()
-            .xy(rect.xy())
-            .wh(rect.wh())
-            .color(rgba(0.0, 0.0, 0.0, 0.5));
-    }
-    
-    if is_selected && !drawing_maximized && !is_disabled {
-        draw.text("[CLIPBOARD ACTIVE]")
-            .xy(pt2(rect.left() + 60.0, rect.bottom() + 10.0))
-            .color(CYAN)
-            .font_size(10);
-    }
-    
-    // Skip content rendering for disabled tiles
-    if is_disabled {
-        return;
-    }
-    
-    // Content Padding
-    let content_rect = rect.pad(10.0);
-
-    
-    match tile.module.as_str() {
-        "header" => {},
-        "kamea_sigil" => {
-             if !model.path_points.is_empty() {
-                 let offset = content_rect.xy();
-                 let points: Vec<Point2> = model.path_points.iter()
-                    .map(|p| *p + offset)
-                    .collect();
-                draw.polyline()
-                    .weight(model.config.stroke_weight)
-                    .join_round()
-                    .caps_round()
-                    .points(points)
-                    .color(fg_color);
-             }
-             // Label: Sanitize newlines
-             let sanitized_intent = model.current_intent.replace('\n', " ").replace('\r', "");
-             let truncated_intent = if sanitized_intent.len() > 50 && !drawing_maximized {
-                 format!("{}...", &sanitized_intent[..50])
-             } else {
-                 sanitized_intent
-             };
-             draw.text(&truncated_intent)
-                .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
-                .color(fg_color)
-                .font_size(if drawing_maximized { 24 } else { 14 });
-        },
-        "word_count" => {
-            let text = format!("WORD COUNT: {}", model.word_count);
-            draw.text(&text)
-                .xy(content_rect.xy())
-                .color(YELLOW)
-                .font_size(if drawing_maximized { 48 } else { 12 });
-                
-            if model.word_count.len() > 100 {
-                 draw.rect().x(rect.right() - 5.0).y(rect.y()).w(4.0).h(rect.h() * 0.3).color(rgba(1.0, 1.0, 1.0, 0.3));
-            }
-        },
-        "devowelizer" => {
-            let raw = &model.devowel_text;
-            let clean = raw.replace('\n', " ").replace('\r', "");
-            let clean_text = clean.split_whitespace().collect::<Vec<&str>>().join(" ");
-            
-            let _text = format!("DEVOWELIZER: {}", clean_text);
-            let display_text = if clean_text.len() > 200 && !drawing_maximized {
-                 format!("{}...", &clean_text[..200])
-            } else {
-                 clean_text
-            };
-            
-            draw.text(&format!("DVWL: {}", display_text))
-                .xy(content_rect.xy())
-                .color(MAGENTA)
-                .font_size(if drawing_maximized { 32 } else { 12 })
-                .w(content_rect.w());
-                
-            if raw.len() > 50 {
-                 draw.rect().x(rect.right() - 5.0).y(rect.y()).w(4.0).h(rect.h() * 0.5).color(rgba(1.0, 0.0, 1.0, 0.5));
-            }
-        },
-        "astrology" => {
-            // Parse astro_data into components
-            let parts: Vec<&str> = model.astro_data.split('|').collect();
-            
-            // Dashboard header
-            draw.text("CELESTIAL STATUS")
-                .xy(pt2(content_rect.x(), content_rect.top() - 15.0))
-                .color(YELLOW)
-                .font_size(if drawing_maximized { 18 } else { 11 });
-            
-            // Big three (Sun, Moon, Rising)
-            if parts.len() >= 3 {
-                let line_height = if drawing_maximized { 28.0 } else { 16.0 };
-                let font_size = if drawing_maximized { 16 } else { 10 };
-                let start_y = content_rect.y() + 10.0;
-                
-                // Sun
-                draw.text(&format!("SUN {}", parts.get(0).unwrap_or(&"--")))
-                    .xy(pt2(content_rect.x(), start_y))
-                    .color(Srgb::new(255u8, 200, 50)) // Golden yellow
-                    .font_size(font_size);
-                
-                // Moon
-                draw.text(&format!("MOON {}", parts.get(1).unwrap_or(&"--")))
-                    .xy(pt2(content_rect.x(), start_y - line_height))
-                    .color(Srgb::new(200u8, 200, 255)) // Pale blue
-                    .font_size(font_size);
-                
-                // Rising
-                draw.text(&format!("ASC {}", parts.get(2).unwrap_or(&"--")))
-                    .xy(pt2(content_rect.x(), start_y - line_height * 2.0))
-                    .color(Srgb::new(255u8, 150, 150)) // Soft red
-                    .font_size(font_size);
-                
-                // Planetary positions (remaining parts)
-                if parts.len() > 3 && drawing_maximized {
-                    for (i, planet) in parts.iter().skip(3).enumerate() {
-                        draw.text(planet.trim())
-                            .xy(pt2(content_rect.x(), start_y - line_height * (3.0 + i as f32)))
-                            .color(GRAY)
-                            .font_size(12);
-                    }
-                }
-            } else {
-                draw.text(&model.astro_data)
-                    .xy(content_rect.xy())
-                    .color(GRAY)
-                    .font_size(if drawing_maximized { 16 } else { 11 });
-            }
-            
-            // Status indicator
-            let indicator_color = if model.astro_data.contains("NO DATA") {
-                rgba(1.0, 0.3, 0.3, 0.6)
-            } else {
-                rgba(0.3, 1.0, 0.3, 0.6)
-            };
-            draw.rect()
-                .x(rect.right() - 5.0)
-                .y(rect.top() - 10.0)
-                .w(6.0)
-                .h(6.0)
-                .color(indicator_color);
-        },
-        "editor" => {
-             // Managed by Egui
-        },
-        "audio_input" => {
-             // Oscilloscope Visualization
-             let points: Vec<Point2> = model.audio_buffer.iter().enumerate().map(|(i, &sample)| {
-                 let x = map_range(i, 0, 2048, content_rect.left(), content_rect.right());
-                 let y = map_range(sample, -1.0, 1.0, content_rect.bottom(), content_rect.top());
-                 pt2(x, y)
-             }).collect();
-             
-             if !points.is_empty() {
-                 draw.polyline()
-                    .weight(2.0)
-                    .points(points)
-                    .color(SPRINGGREEN.into_format::<f32>().into_linear()); // Bright Green Scope
-             }
-                
-             draw.text("OSCILLOSCOPE")
-                .xy(pt2(content_rect.x(), content_rect.top() - 10.0))
-                .color(SPRINGGREEN)
-                .font_size(10);
-        },
-        _ => {}
-    }
 }
