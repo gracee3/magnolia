@@ -45,6 +45,20 @@ The **Daemon** is the vessel that binds them, orchestrating data flow through a 
 
    See `examples/hello_plugin` to create your own.
 
+## Keyboard Controls
+
+Talisman is keyboard-first with smart tile navigation:
+
+| Key | Normal Mode | Layout Mode |
+|-----|-------------|-------------|
+| **Arrows** | Navigate between tiles (smart adjacency) | Navigate grid cursor |
+| **E** | Open settings (if tile selected) / Enter layout | Enter resize mode |
+| **P** | Enter patch mode | — |
+| **Space** | — | Toggle resize ↔ move mode |
+| **Enter** | — | Confirm resize/move |
+| **ESC** | Deselect tile / Exit mode | Cancel / Exit mode |
+
+
 ## Configuration
 
 - **Layout**: `configs/layout.toml` controls the visual grid.

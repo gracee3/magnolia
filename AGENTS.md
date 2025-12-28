@@ -96,6 +96,13 @@ keybinds = { mute = "m", freeze = "f", next_vis = "n" }
 - **Layout Engine**: `configs/layout.toml` drives the grid system with percentage/pixel/fr tracks.
 - **Tile Settings**: Per-instance configuration with keybinds, persisted to TOML.
 - **GPU Rendering**: `GpuRenderer` for hardware-accelerated visualizations.
+- **Keyboard-First Navigation** (`apps/daemon/src/input.rs`):
+  - **Smart Tile Navigation**: Arrow keys use adjacency detection with overlap calculation
+  - **InputMode State Machine**: `Normal`, `Layout`, `Patch` modes with ESC cascade
+  - **Layout Editing**: Resize (arrows) and Move (Space toggle) modes with Enter to confirm
+  - Cursor position persists between modes
+  - Single key press jumps between tiles (no double-press issue)
+
 
 ## 6. Focus Areas for Future Agents
 - **Security Audit**: Verify capability-based security model and sandbox rules.
