@@ -432,8 +432,9 @@ impl KeyboardNav {
                     self.deselect();
                     EscapeResult::Deselected
                 } else {
-                    // Second ESC with no selection - defer to caller for exit dialog
-                    EscapeResult::ExitRequested
+                    // ESC at root with no selection = no-op
+                    // Use Ctrl+Q to exit the application
+                    EscapeResult::NoAction
                 }
             }
             InputMode::Layout => {
@@ -475,8 +476,8 @@ pub enum EscapeResult {
     ExitedSubMode,
     /// Exited the current mode (layout/patch) back to normal
     ExitedMode,
-    /// No selection, exit dialog requested (deferred)
-    ExitRequested,
+    /// ESC at root with no selection - no action taken
+    NoAction,
 }
 
 #[cfg(test)]
@@ -549,6 +550,6 @@ mod tests {
         
         // ESC with no selection requests exit
         let result = nav.handle_escape();
-        assert_eq!(result, EscapeResult::ExitRequested);
+        assert_eq!(result, EscapeResult::NoAction);
     }
 }

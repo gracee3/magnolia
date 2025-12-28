@@ -8,7 +8,7 @@
 //! - **Control Mode**: Maximized tile view, settings UI with live preview
 //! - **Error Handling**: Tiles can report errors displayed in monitor view
 
-use nannou::prelude::*;
+
 
 // Local tile implementations (remaining - clock is still local)
 pub mod clock;
@@ -19,8 +19,7 @@ pub use talisman_core::{
     TileRenderer, 
     TileRegistry, 
     RenderContext, 
-    TileError, 
-    ErrorSeverity, 
+ 
     BindableAction,
     render_error_overlay,
 };

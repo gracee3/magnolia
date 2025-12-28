@@ -56,7 +56,6 @@ struct Model {
     show_global_settings: bool,
     show_tile_settings: Option<String>,  // tile_id if showing settings for that tile
     show_layout_manager: bool,
-    show_close_confirmation: bool,
     is_sleeping: bool,
     
     // Runtime State
@@ -108,10 +107,10 @@ fn main() {
 fn model(app: &App) -> Model {
     // 1. Setup Channels
     let (tx_ui, rx_ui) = std::sync::mpsc::channel::<Signal>();
-    let (tx_router, mut rx_router) = mpsc::channel::<Signal>(1000);
+    let (tx_router, _rx_router) = mpsc::channel::<Signal>(1000);
     
     // Clone for different uses
-    let tx_ui_clone = tx_ui.clone();
+    let _tx_ui_clone = tx_ui.clone();
     
     // 2. Create ModuleHost for isolated module execution
     let mut module_host = talisman_core::ModuleHost::new(tx_router.clone());
@@ -227,7 +226,6 @@ fn model(app: &App) -> Model {
         show_global_settings: false,
         show_tile_settings: None,
         show_layout_manager: false,
-        show_close_confirmation: false,
         is_sleeping: initial_sleep_state,
         audio_stream_rx,
         module_host,
@@ -249,7 +247,7 @@ fn model(app: &App) -> Model {
     if let Some(rx) = model.audio_stream_rx.take() {
         // Get the audio_vis tile from registry and connect the stream
         if let Some(tile) = model.tile_registry.get("audio_vis") {
-            if let Ok(mut t) = tile.write() {
+            if let Ok(_t) = tile.write() {
                 // Downcast to AudioVisTile - this is tricky with trait objects
                 // For now, we'll use a different approach - store the receiver in the model
                 // and poll it in update, pushing to the tile's legacy buffer
@@ -307,10 +305,6 @@ fn save_tile_settings(registry: &tiles::TileRegistry, layout: &mut Layout, tile_
 
 
 fn update(app: &App, model: &mut Model, update: Update) {
-    if model.show_close_confirmation {
-        log::debug!("UPDATE: show_close_confirmation is TRUE");
-    }
-    
     // Update Layout dimensions
     model.layout.update(app.window_rect());
     
@@ -365,17 +359,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 
     // 1. UPDATE GUI
-    if model.show_close_confirmation {
-        log::debug!("UPDATE: About to set_elapsed_time and begin_frame");
-    }
     model.egui.set_elapsed_time(update.since_start);
-    if model.show_close_confirmation {
-        log::debug!("UPDATE: About to call begin_frame");
-    }
     let ctx = model.egui.begin_frame();
-    if model.show_close_confirmation {
-        log::debug!("UPDATE: begin_frame completed");
-    }
     
     // (Legacy editor window removed - TextInputTile handles text input)
     // (Legacy kamea buttons removed - KameaTile handles its own controls)
@@ -931,80 +916,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
             });
     }
 
-    // Close Confirmation Dialog (ESC outside edit mode)
-    // NOTE: ESC detection moved to egui input to avoid nannou/egui frame collision
-    if model.show_close_confirmation {
-        log::debug!("Rendering close confirmation dialog...");
-        let screen_rect = ctx.screen_rect();
-        let width = 300.0;
-        let height = 120.0;
-        let x = screen_rect.center().x - width / 2.0;
-        let y = screen_rect.center().y - height / 2.0;
-        
-        log::debug!("Dialog position: ({}, {}), size: {}x{}", x, y, width, height);
-
-        egui::Window::new("Confirm Close")
-            .fixed_pos(egui::pos2(x, y))
-            .fixed_size(egui::vec2(width, height))
-            .collapsible(false)
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: egui::Color32::from_rgba_unmultiplied(20, 20, 20, 250),
-                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 100, 100)),
-                inner_margin: egui::Margin::same(20.0),
-                ..Default::default()
-            })
-            .show(&ctx, |ui| {
-                log::debug!("Inside dialog UI closure");
-                ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("Exit Talisman?")
-                        .heading()
-                        .color(egui::Color32::from_rgb(255, 200, 200)));
-                    
-                    ui.add_space(15.0);
-                    
-                    ui.horizontal(|ui| {
-                        ui.add_space(30.0);
-                        if ui.button(egui::RichText::new("  Quit  ").color(egui::Color32::from_rgb(255, 100, 100))).clicked() {
-                            log::info!("User confirmed quit");
-                            std::process::exit(0);
-                        }
-                        ui.add_space(20.0);
-                        if ui.button("Cancel").clicked() {
-                            model.show_close_confirmation = false;
-                        }
-                    });
-                });
-            });
-        
-        log::debug!("Dialog window created");
-        
-        // Handle Enter to confirm quit
-        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-            log::info!("User confirmed quit via Enter");
-            std::process::exit(0);
-        }
-        
-        // Handle ESC to cancel dialog
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            log::info!("Close confirmation cancelled via ESC");
-            model.show_close_confirmation = false;
-        }
-    } else {
-        // ESC triggers close confirmation when:
-        // - Not in edit mode
-        // - Module picker is not visible
-        // - No other modal is active
-        let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-        if esc_pressed 
-            && !model.layout_editor.edit_mode 
-            && !model.module_picker.visible 
-            && model.context_menu.is_none()
-        {
-            log::info!("ESC pressed - showing close confirmation");
-            model.show_close_confirmation = true;
-        }
-    }
+    // (Close confirmation dialog removed - ESC is for navigation only, not exit)
 
 
 
@@ -1239,10 +1151,8 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     // Skip nannou key handling when:
     // 1. Egui wants keyboard input (e.g., TextEdit is focused)
     // 2. Modal layer is active (modals handle their own keys via egui)
-    // 3. Close confirmation is showing
     if model.egui.ctx().wants_keyboard_input() 
         || model.modal_layer.is_active() 
-        || model.show_close_confirmation 
     {
         return;
     }
@@ -1262,8 +1172,13 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     }
     
     if ctrl {
-        // Ctrl key combinations (clipboard, etc.)
+        // Ctrl key combinations (clipboard, exit)
         match key {
+            Key::Q => {
+                // Ctrl+Q = Exit application (the ONLY keyboard exit)
+                log::info!("Ctrl+Q pressed - exiting application");
+                std::process::exit(0);
+            },
             Key::C => {
                 // COPY logic - get content from tile registry
                 if let Some(selected) = model.keyboard_nav.selected_tile_id() {
@@ -1512,10 +1427,9 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                         model.selected_tile = None;
                         log::debug!("Exited mode (layout/patch) back to normal");
                     },
-                    EscapeResult::ExitRequested => {
-                        // Deferred: exit confirmation dialog
-                        // For now, just log
-                        log::debug!("Exit requested (confirmation deferred)");
+                    EscapeResult::NoAction => {
+                        // ESC at root with no selection - nothing to do
+                        // (Ctrl+Q is the only keyboard exit)
                     },
                 }
                 
@@ -1539,7 +1453,7 @@ fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event:
 
 fn view(app: &App, model: &Model, frame: Frame) {
     // Color scheme (retinal burn mode removed)
-    let (bg_color, fg_color, stroke_color) = (BLACK, CYAN, GRAY);
+    let (bg_color, _fg_color, stroke_color) = (BLACK, CYAN, GRAY);
     
     let draw = app.draw();
     draw.background().color(bg_color);

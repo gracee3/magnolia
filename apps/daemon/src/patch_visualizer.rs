@@ -118,7 +118,7 @@ pub fn is_near_cable(point: Vec2, start: Vec2, end: Vec2, tolerance: f32) -> boo
 /// Render cable with hover highlight
 pub fn render_patch_with_hover(
     draw: &Draw,
-    patch: &Patch,
+    _patch: &Patch,
     source_rect: Rect,
     sink_rect: Rect,
     is_hovered: bool,

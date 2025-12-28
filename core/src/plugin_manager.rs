@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use notify::{Watcher, RecursiveMode, Event, RecommendedWatcher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, mpsc};

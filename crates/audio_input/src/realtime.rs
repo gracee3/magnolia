@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::{error, info};
-use std::sync::Arc;
+
 use talisman_core::{
     AudioFrame, DataType, ModuleSchema, Port, PortDirection, Signal, Source,
     ring_buffer::{self, RingBufferSender, RingBufferReceiver},
@@ -82,7 +82,7 @@ impl AudioInputSourceRT {
         device: &cpal::Device,
         config: &cpal::StreamConfig,
         ring_tx: RingBufferSender<AudioFrame>,
-        sample_rate: u32,
+        _sample_rate: u32,
         channels: u16,
         err_fn: impl Fn(cpal::StreamError) + Send + 'static,
     ) -> anyhow::Result<cpal::Stream>
@@ -182,7 +182,7 @@ impl Source for AudioInputSourceRT {
     async fn poll(&mut self) -> Option<Signal> {
         // For ring buffer based streaming, we send the AudioStream signal once
         // Then consumers poll the ring buffer directly
-        if let Some(tx) = self.ring_tx.take() {
+        if let Some(_tx) = self.ring_tx.take() {
             // Create receiver from the same ring buffer
             let (_new_tx, rx) = ring_buffer::channel::<AudioFrame>(2048);
             

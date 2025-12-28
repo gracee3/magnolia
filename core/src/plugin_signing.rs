@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature};
 use sha2::{Sha256, Digest};
-use std::path::{Path, PathBuf};
-use log::{info, warn, error};
+use std::path::Path;
+use log::{info, warn};
 
 pub struct PluginVerifier {
     trusted_keys: Vec<VerifyingKey>,
@@ -60,7 +60,7 @@ impl PluginVerifier {
             .with_context(|| format!("Failed to read plugin: {}", plugin_path.display()))?;
         
         // Read signature file (.sig)
-        let sig_path = plugin_path.with_extension("so.sig"); // Assumes .so -> .so.sig
+        let _sig_path = plugin_path.with_extension("so.sig"); // Assumes .so -> .so.sig
         // If extension was .dll, this replaces it with .sig. We want append or replace extension?
         // Typically .so.sig or just .sig. Let's try appending.
         let sig_path = if let Some(ext) = plugin_path.extension() {

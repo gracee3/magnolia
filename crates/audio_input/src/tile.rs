@@ -216,11 +216,6 @@ impl AudioVisTile {
         }
     }
     
-    /// Get stereo buffers for Lissajous display
-    fn get_stereo_buffers(&self) -> (&[f32], &[f32]) {
-        (&self.left_buffer, &self.right_buffer)
-    }
-    
     /// Poll audio from ring buffer and update local buffers
     fn poll_audio(&mut self) {
         if let Some(ref rx) = self.ring_rx {
@@ -264,7 +259,7 @@ impl TileRenderer for AudioVisTile {
     fn name(&self) -> &str { "Audio Visualizer" }
     fn prefers_gpu(&self) -> bool { true }
     
-    fn render_monitor(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) {
+    fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
         // Background
         draw.rect()
             .xy(rect.xy())
@@ -388,7 +383,7 @@ impl TileRenderer for AudioVisTile {
                                 .width(200.0)
                                 .show_ui(ui, |ui| {
                                     for vt in VisualizationType::all() {
-                                        ui.selectable_label(self.vis_type == *vt, vt.label());
+                                        let _ = ui.selectable_label(self.vis_type == *vt, vt.label());
                                     }
                                 });
                             
@@ -401,7 +396,7 @@ impl TileRenderer for AudioVisTile {
                                 .width(200.0)
                                 .show_ui(ui, |ui| {
                                     for cs in ColorScheme::all() {
-                                        ui.selectable_label(self.color_scheme == *cs, cs.label());
+                                        let _ = ui.selectable_label(self.color_scheme == *cs, cs.label());
                                     }
                                 });
                             

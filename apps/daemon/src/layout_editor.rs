@@ -1,6 +1,6 @@
 use nannou::prelude::*;
-use talisman_core::{LayoutConfig, TileConfig, Patch, ModuleSchema, DataType, PortDirection};
-use std::collections::HashSet;
+use talisman_core::{LayoutConfig, TileConfig, Patch, ModuleSchema, DataType};
+
 
 /// Direction for keyboard navigation
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -271,7 +271,7 @@ impl LayoutEditor {
     pub fn complete_patch(
         &mut self,
         target_tile_id: &str,
-        layout: &LayoutConfig,
+        _layout: &LayoutConfig,
         get_module_for_tile: impl Fn(&str) -> Option<String>,
     ) -> Option<Patch> {
         if let EditState::Patching { tile_id, role } = &self.edit_state {
@@ -558,7 +558,7 @@ pub fn render_cell_indicators(
                             .stroke_weight(2.0);
                     }
                 }
-                EditState::TileSelected { tile_id } => {
+                EditState::TileSelected { tile_id: _ } => {
                     if is_cursor {
                         draw.rect()
                             .xy(rect.xy())

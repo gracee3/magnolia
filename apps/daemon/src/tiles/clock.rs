@@ -141,8 +141,8 @@ impl TileRenderer for ClockTile {
                             
                             ui.label(egui::RichText::new("Time Format").color(egui::Color32::GRAY).small());
                             ui.horizontal(|ui| {
-                                ui.selectable_label(self.format == TimeFormat::TwentyFourHour, "24-hour");
-                                ui.selectable_label(self.format == TimeFormat::TwelveHour, "12-hour");
+                                let _ = ui.selectable_label(self.format == TimeFormat::TwentyFourHour, "24-hour");
+                                let _ = ui.selectable_label(self.format == TimeFormat::TwelveHour, "12-hour");
                             });
                             
                             ui.add_space(8.0);
