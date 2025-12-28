@@ -29,9 +29,13 @@ pub enum EditState {
     Navigation,
     /// A tile is selected, can move/resize via keyboard or enter patch mode
     TileSelected { tile_id: String },
-    /// Setting tile position - click to set start cell, then end cell for span
-    SettingPosition {
+    /// Move/Resize mode - tile shown as 1×1, awaiting clicks to define new bounds
+    MoveResize {
         tile_id: String,
+        /// Original bounds for revert on ESC (col, row, colspan, rowspan)
+        original_bounds: (usize, usize, usize, usize),
+        /// If Some, first click was made (new start position)
+        /// If None, tile is at original start, next click sets end
         start_cell: Option<(usize, usize)>,
     },
     /// Patching mode - selecting source or sink connection
@@ -46,6 +50,7 @@ impl Default for EditState {
         EditState::Navigation
     }
 }
+
 
 /// Main layout editor state - keyboard-driven, no drag operations
 #[derive(Debug)]
@@ -130,46 +135,64 @@ impl LayoutEditor {
         self.edit_state = EditState::Navigation;
     }
 
-    /// Enter position-setting mode for the selected tile
-    pub fn enter_position_mode(&mut self) {
+    /// Enter move/resize mode for the selected tile
+    /// Tile will be shown as 1×1 at its current start position
+    pub fn enter_move_resize_mode(&mut self, layout: &LayoutConfig) {
         if let EditState::TileSelected { tile_id } = &self.edit_state {
-            self.edit_state = EditState::SettingPosition {
-                tile_id: tile_id.clone(),
-                start_cell: None,
-            };
+            // Find tile to get its current bounds
+            if let Some(tile) = layout.tiles.iter().find(|t| t.id == *tile_id) {
+                let original_bounds = (
+                    tile.col,
+                    tile.row,
+                    tile.colspan.unwrap_or(1),
+                    tile.rowspan.unwrap_or(1),
+                );
+                self.edit_state = EditState::MoveResize {
+                    tile_id: tile_id.clone(),
+                    original_bounds,
+                    start_cell: None,
+                };
+            }
         }
     }
 
-    /// Set a cell bound during position mode
-    /// Returns true if position setting is complete
-    pub fn set_position_cell(
+    /// Handle a click during move/resize mode
+    /// Returns true if operation is complete
+    pub fn handle_move_resize_click(
         &mut self,
         cell: (usize, usize),
         layout: &mut LayoutConfig,
     ) -> bool {
-        if let EditState::SettingPosition { tile_id, start_cell } = &self.edit_state {
+        if let EditState::MoveResize { tile_id, original_bounds, start_cell } = &self.edit_state {
             let tile_id = tile_id.clone();
+            let original_bounds = *original_bounds;
+            
             if start_cell.is_none() {
-                // First click: set start cell
-                self.edit_state = EditState::SettingPosition {
-                    tile_id,
-                    start_cell: Some(cell),
-                };
-                false
-            } else {
-                // Second click: complete positioning
-                let start = start_cell.unwrap();
+                // First click: This could be either:
+                // 1. Setting end position (resize from original start)
+                // 2. Setting new start position (user wants to move)
+                
+                // If clicking on the same start cell as original, interpret as "set new start"
+                if cell == (original_bounds.0, original_bounds.1) {
+                    // User clicked on current start - they want to define new start next
+                    self.edit_state = EditState::MoveResize {
+                        tile_id,
+                        original_bounds,
+                        start_cell: Some(cell),
+                    };
+                    return false;
+                }
+                
+                // Otherwise, this is the end position (resize from original start)
+                let start = (original_bounds.0, original_bounds.1);
                 let end = cell;
                 
-                // Calculate new position and span
                 let new_col = start.0.min(end.0);
                 let new_row = start.1.min(end.1);
                 let colspan = (start.0.max(end.0) - new_col + 1).max(1);
                 let rowspan = (start.1.max(end.1) - new_row + 1).max(1);
                 
-                // Check if placement is valid (no overlaps with other tiles)
                 if self.is_placement_valid(layout, &tile_id, new_col, new_row, colspan, rowspan) {
-                    // Update the tile
                     if let Some(tile) = layout.tiles.iter_mut().find(|t| t.id == tile_id) {
                         tile.col = new_col;
                         tile.row = new_row;
@@ -178,16 +201,50 @@ impl LayoutEditor {
                         self.pending_changes = true;
                     }
                     self.edit_state = EditState::TileSelected { tile_id };
-                    true
-                } else {
-                    // Invalid placement - stay in position mode
-                    false
+                    return true;
                 }
+                false
+            } else {
+                // Second click: set end position (moved from start_cell)
+                let start = start_cell.unwrap();
+                let end = cell;
+                
+                let new_col = start.0.min(end.0);
+                let new_row = start.1.min(end.1);
+                let colspan = (start.0.max(end.0) - new_col + 1).max(1);
+                let rowspan = (start.1.max(end.1) - new_row + 1).max(1);
+                
+                if self.is_placement_valid(layout, &tile_id, new_col, new_row, colspan, rowspan) {
+                    if let Some(tile) = layout.tiles.iter_mut().find(|t| t.id == tile_id) {
+                        tile.col = new_col;
+                        tile.row = new_row;
+                        tile.colspan = Some(colspan);
+                        tile.rowspan = Some(rowspan);
+                        self.pending_changes = true;
+                    }
+                    self.edit_state = EditState::TileSelected { tile_id };
+                    return true;
+                }
+                false
             }
         } else {
             false
         }
     }
+
+    /// Revert tile to original bounds (on ESC during MoveResize)
+    pub fn revert_move_resize(&mut self, layout: &mut LayoutConfig) {
+        if let EditState::MoveResize { tile_id, original_bounds, .. } = &self.edit_state {
+            if let Some(tile) = layout.tiles.iter_mut().find(|t| t.id == *tile_id) {
+                tile.col = original_bounds.0;
+                tile.row = original_bounds.1;
+                tile.colspan = Some(original_bounds.2);
+                tile.rowspan = Some(original_bounds.3);
+            }
+            self.edit_state = EditState::TileSelected { tile_id: tile_id.clone() };
+        }
+    }
+
 
     /// Enter patch mode for the selected tile
     pub fn enter_patch_mode(&mut self) {
@@ -255,7 +312,7 @@ impl LayoutEditor {
     /// Cancel current operation and return to appropriate state
     pub fn cancel_operation(&mut self) {
         self.edit_state = match &self.edit_state {
-            EditState::SettingPosition { tile_id, .. } => EditState::TileSelected {
+            EditState::MoveResize { tile_id, .. } => EditState::TileSelected {
                 tile_id: tile_id.clone(),
             },
             EditState::Patching { tile_id, role } => {
@@ -274,6 +331,7 @@ impl LayoutEditor {
             EditState::Navigation => EditState::Navigation,
         };
     }
+
 
     /// Check if a placement is valid (no overlaps with other tiles)
     pub fn is_placement_valid(
@@ -370,16 +428,71 @@ impl LayoutEditor {
     pub fn selected_tile_id(&self) -> Option<&str> {
         match &self.edit_state {
             EditState::TileSelected { tile_id } => Some(tile_id),
-            EditState::SettingPosition { tile_id, .. } => Some(tile_id),
+            EditState::MoveResize { tile_id, .. } => Some(tile_id),
             EditState::Patching { tile_id, .. } => Some(tile_id),
             EditState::Navigation => None,
         }
     }
 }
 
+
+// =============================================================================
+// COLOR HELPERS
+// =============================================================================
+
+/// Generate a deterministic color from a tile ID string
+/// Uses HSL color space for pleasant, distinct hues
+pub fn tile_color(id: &str) -> Srgba<u8> {
+    // Hash the string to get a deterministic value
+    let hash = id.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    
+    // Use golden ratio angle for hue distribution (avoids clustering)
+    let hue = ((hash % 360) as f32) / 360.0;
+    let saturation = 0.7;
+    let lightness = 0.55;
+    
+    // Convert HSL to RGB
+    let c = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let x = c * (1.0 - ((hue * 6.0) % 2.0 - 1.0).abs());
+    let m = lightness - c / 2.0;
+    
+    let (r, g, b) = match (hue * 6.0) as u8 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    
+    Srgba::new(
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+        255
+    )
+}
+
+/// Color for each DataType (for port visualization)
+pub fn data_type_color(dt: &DataType) -> Srgba<u8> {
+    match dt {
+        DataType::Text => Srgba::new(0, 255, 128, 255),        // Green
+        DataType::Audio => Srgba::new(255, 128, 0, 255),       // Orange
+        DataType::Astrology => Srgba::new(180, 100, 255, 255), // Purple
+        DataType::Blob => Srgba::new(100, 150, 255, 255),      // Blue
+        DataType::Control => Srgba::new(255, 80, 80, 255),     // Red
+        DataType::Video => Srgba::new(255, 200, 50, 255),      // Yellow
+        DataType::Network => Srgba::new(50, 200, 200, 255),    // Teal
+        DataType::Numeric => Srgba::new(200, 200, 100, 255),   // Olive/Yellow
+        DataType::Any => Srgba::new(255, 255, 255, 255),       // White
+    }
+}
+
+
 // =============================================================================
 // RENDERING FUNCTIONS
 // =============================================================================
+
 
 /// Render the edit mode grid overlay
 pub fn render_edit_overlay(
@@ -455,14 +568,19 @@ pub fn render_cell_indicators(
                             .stroke_weight(2.0);
                     }
                 }
-                EditState::SettingPosition { start_cell, .. } => {
+                EditState::MoveResize { start_cell, original_bounds, tile_id } => {
                     // Show validity indicators
                     if is_occupied {
-                        // Red for occupied cells
-                        draw.rect()
-                            .xy(rect.xy())
-                            .wh(rect.wh())
-                            .color(rgba(1.0, 0.2, 0.2, 0.2));
+                        // Red for occupied cells (unless it's the tile being moved)
+                        let is_self = LayoutEditor::get_tile_at_cell(layout, col, row)
+                            .map(|t| t.id == *tile_id)
+                            .unwrap_or(false);
+                        if !is_self {
+                            draw.rect()
+                                .xy(rect.xy())
+                                .wh(rect.wh())
+                                .color(rgba(1.0, 0.2, 0.2, 0.2));
+                        }
                     } else {
                         // Green for available cells
                         draw.rect()
@@ -471,16 +589,15 @@ pub fn render_cell_indicators(
                             .color(rgba(0.2, 1.0, 0.2, 0.15));
                     }
 
-                    // Highlight start cell if set
-                    if let Some(start) = start_cell {
-                        if (col, row) == *start {
-                            draw.rect()
-                                .xy(rect.xy())
-                                .wh(rect.wh())
-                                .no_fill()
-                                .stroke(rgba(0.0, 1.0, 0.5, 1.0))
-                                .stroke_weight(3.0);
-                        }
+                    // Highlight current start position (1×1 anchor)
+                    let current_start = start_cell.unwrap_or((original_bounds.0, original_bounds.1));
+                    if (col, row) == current_start {
+                        draw.rect()
+                            .xy(rect.xy())
+                            .wh(rect.wh())
+                            .no_fill()
+                            .stroke(rgba(0.0, 1.0, 0.5, 1.0))
+                            .stroke_weight(4.0);
                     }
 
                     if is_cursor || is_hover {
@@ -492,6 +609,7 @@ pub fn render_cell_indicators(
                             .stroke_weight(2.0);
                     }
                 }
+
                 EditState::Patching { .. } => {
                     if is_cursor || is_hover {
                         // Will be colored green/red based on compatibility
@@ -521,39 +639,50 @@ pub fn render_tile_labels(
     for tile in &layout.tiles {
         if let Some(rect) = calculate_tile_rect(win_rect, col_sizes, row_sizes, tile) {
             let is_selected = selected_tile_id == Some(&tile.id);
-
-            // Draw module name label
-            let label_color = if is_selected {
-                rgba(0.0, 1.0, 1.0, 1.0)
-            } else {
-                rgba(0.7, 0.7, 0.7, 0.8)
-            };
-
-            // Selection highlight
+            
+            // Get deterministic color for this tile
+            let tile_col = tile_color(&tile.id);
+            
+            // Draw thick colored border for visibility
+            draw.rect()
+                .xy(rect.xy())
+                .wh(rect.wh())
+                .no_fill()
+                .stroke(tile_col)
+                .stroke_weight(4.0);
+            
+            // Additional selection highlight (cyan glow)
             if is_selected {
                 draw.rect()
                     .xy(rect.xy())
-                    .wh(rect.wh())
+                    .wh(pt2(rect.w() - 4.0, rect.h() - 4.0))
                     .no_fill()
                     .stroke(rgba(0.0, 1.0, 1.0, 1.0))
-                    .stroke_weight(3.0);
+                    .stroke_weight(2.0);
             }
 
-            // Module name at top-left of tile
+            // Module name label
+            let label_color = if is_selected {
+                rgba(0.0, 1.0, 1.0, 1.0)
+            } else {
+                rgba(0.9, 0.9, 0.9, 0.9)
+            };
+
+            // Module name at top-left of tile (larger font)
             draw.text(&tile.module)
-                .xy(pt2(rect.left() + 8.0, rect.top() - 12.0))
+                .xy(pt2(rect.left() + 10.0, rect.top() - 14.0))
                 .color(label_color)
-                .font_size(12)
+                .font_size(14)
                 .left_justify();
 
             // Tile ID below module name
             draw.text(&format!("[{}]", tile.id))
-                .xy(pt2(rect.left() + 8.0, rect.top() - 26.0))
-                .color(rgba(0.5, 0.5, 0.5, 0.7))
-                .font_size(10)
+                .xy(pt2(rect.left() + 10.0, rect.top() - 30.0))
+                .color(rgba(0.6, 0.6, 0.6, 0.8))
+                .font_size(11)
                 .left_justify();
 
-            // Position info
+            // Position and size info at bottom-right
             let pos_info = format!(
                 "({},{}) {}×{}",
                 tile.col,
@@ -562,13 +691,14 @@ pub fn render_tile_labels(
                 tile.rowspan.unwrap_or(1)
             );
             draw.text(&pos_info)
-                .xy(pt2(rect.right() - 8.0, rect.bottom() + 12.0))
-                .color(rgba(0.5, 0.5, 0.5, 0.6))
-                .font_size(9)
+                .xy(pt2(rect.right() - 10.0, rect.bottom() + 14.0))
+                .color(rgba(0.6, 0.6, 0.6, 0.7))
+                .font_size(10)
                 .right_justify();
         }
     }
 }
+
 
 /// Render patch cables as bezier curves between connected tiles
 pub fn render_patch_cables(

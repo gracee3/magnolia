@@ -17,7 +17,10 @@ use text_tools::{SaveFileSink, OutputFormat};
 // Layout editor and visualizer modules
 mod layout_editor;
 mod patch_visualizer;
+mod module_picker;
 use layout_editor::LayoutEditor;
+use module_picker::ModulePicker;
+
 
 // --- MODEL ---
 struct Model {
@@ -59,7 +62,9 @@ struct Model {
     show_global_settings: bool,
     show_tile_settings: Option<String>,  // tile_id if showing settings for that tile
     show_layout_manager: bool,
+    show_close_confirmation: bool,
     is_sleeping: bool,
+
     
     // Runtime State
     module_host: talisman_core::ModuleHost,
@@ -70,7 +75,9 @@ struct Model {
     
     // Layout Editor State (Phase 5)
     layout_editor: LayoutEditor,
+    module_picker: ModulePicker,
 }
+
 
 struct ContextMenuState {
     tile_id: String,
@@ -576,13 +583,17 @@ fn model(app: &App) -> Model {
         show_global_settings: false,
         show_tile_settings: None,
         show_layout_manager: false,
+        show_close_confirmation: false,
         is_sleeping: initial_sleep_state,
+
         audio_buffer: VecDeque::with_capacity(2048),
         module_host,
         plugin_manager,
         layout_editor: LayoutEditor::new(),
+        module_picker: ModulePicker::new(),
     }
 }
+
 
 /// Map tile ID to module ID for PatchBay
 fn tile_to_module(tile_id: &str) -> String {
@@ -599,6 +610,10 @@ fn tile_to_module(tile_id: &str) -> String {
 
 
 fn update(app: &App, model: &mut Model, update: Update) {
+    if model.show_close_confirmation {
+        log::debug!("UPDATE: show_close_confirmation is TRUE");
+    }
+    
     // Update Layout dimensions
     model.layout.update(app.window_rect());
     
@@ -643,8 +658,17 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 
     // 1. UPDATE GUI
+    if model.show_close_confirmation {
+        log::debug!("UPDATE: About to set_elapsed_time and begin_frame");
+    }
     model.egui.set_elapsed_time(update.since_start);
+    if model.show_close_confirmation {
+        log::debug!("UPDATE: About to call begin_frame");
+    }
     let ctx = model.egui.begin_frame();
+    if model.show_close_confirmation {
+        log::debug!("UPDATE: begin_frame completed");
+    }
     
     // Position Egui Window via Layout
     // Position Egui Window via Layout
@@ -1303,7 +1327,64 @@ fn update(app: &App, model: &mut Model, update: Update) {
             });
     }
 
+    // Close Confirmation Dialog (ESC outside edit mode)
+    if model.show_close_confirmation {
+        log::debug!("Rendering close confirmation dialog...");
+        let screen_rect = ctx.screen_rect();
+        let width = 300.0;
+        let height = 120.0;
+        let x = screen_rect.center().x - width / 2.0;
+        let y = screen_rect.center().y - height / 2.0;
+        
+        log::debug!("Dialog position: ({}, {}), size: {}x{}", x, y, width, height);
+
+        egui::Window::new("Confirm Close")
+            .fixed_pos(egui::pos2(x, y))
+            .fixed_size(egui::vec2(width, height))
+            .collapsible(false)
+            .resizable(false)
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgba_unmultiplied(20, 20, 20, 250),
+                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 100, 100)),
+                inner_margin: egui::Margin::same(20.0),
+                ..Default::default()
+            })
+            .show(&ctx, |ui| {
+                log::debug!("Inside dialog UI closure");
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("Exit Talisman?")
+                        .heading()
+                        .color(egui::Color32::from_rgb(255, 200, 200)));
+                    
+                    ui.add_space(15.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.add_space(30.0);
+                        if ui.button(egui::RichText::new("  Quit  ").color(egui::Color32::from_rgb(255, 100, 100))).clicked() {
+                            log::info!("User confirmed quit");
+                            std::process::exit(0);
+                        }
+                        ui.add_space(20.0);
+                        if ui.button("Cancel").clicked() {
+                            model.show_close_confirmation = false;
+                        }
+                    });
+                });
+            });
+        
+        log::debug!("Dialog window created");
+        
+        // Handle Enter to confirm quit
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            log::info!("User confirmed quit via Enter");
+            std::process::exit(0);
+        }
+    }
+
+
+
     // 2. PROCESS SIGNALS from Orchestrator (High speed!)
+
     while let Ok(signal) = model.receiver.try_recv() {
         match signal {
             Signal::Text(text) => {
@@ -1417,13 +1498,14 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
                         model.layout_editor.deselect();
                     }
                 },
-                EditState::SettingPosition { tile_id, start_cell } => {
-                    // Setting position bounds - handle clicks
+                EditState::MoveResize { tile_id, .. } => {
+                    // Handle move/resize clicks
                     let tile_id = tile_id.clone();
-                    if model.layout_editor.set_position_cell((col, row), &mut model.layout.config) {
-                        log::info!("Position set for tile: {}", tile_id);
+                    if model.layout_editor.handle_move_resize_click((col, row), &mut model.layout.config) {
+                        log::info!("Move/resize completed for tile: {}", tile_id);
                     }
                 },
+
                 EditState::Patching { tile_id, role } => {
                     // Complete patch if clicking on another tile
                     use layout_editor::PatchRole;
@@ -1664,22 +1746,37 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 }
             },
             
-            // R - Enter Position/Resize Mode (edit mode + tile selected only)
-            Key::R => {
+            // M - Enter Move/Resize Mode (edit mode + tile selected only)
+            Key::M => {
                 if model.layout_editor.edit_mode {
                     use layout_editor::EditState;
                     if matches!(&model.layout_editor.edit_state, EditState::TileSelected { .. }) {
-                        model.layout_editor.enter_position_mode();
-                        log::info!("Entered position mode - click to set bounds");
+                        model.layout_editor.enter_move_resize_mode(&model.layout.config);
+                        log::info!("Entered move/resize mode - tile shown as 1×1, click to set bounds");
                     }
                 }
             },
             
-            // Escape - Cancel current operation or exit edit mode
+            // Escape - Cascading behavior within edit mode only
             Key::Escape => {
                 if model.layout_editor.edit_mode {
                     use layout_editor::EditState;
                     match &model.layout_editor.edit_state {
+                        EditState::MoveResize { .. } => {
+                            // Revert to original bounds and return to tile selected
+                            model.layout_editor.revert_move_resize(&mut model.layout.config);
+                            log::info!("Reverted move/resize");
+                        },
+                        EditState::Patching { .. } => {
+                            // Return to tile selected
+                            model.layout_editor.cancel_operation();
+                            log::info!("Cancelled patch mode");
+                        },
+                        EditState::TileSelected { .. } => {
+                            // Deselect tile, return to navigation
+                            model.layout_editor.deselect();
+                            log::info!("Deselected tile");
+                        },
                         EditState::Navigation => {
                             // Exit edit mode entirely
                             let should_save = model.layout_editor.toggle_edit_mode();
@@ -1688,18 +1785,19 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                                 model.layout.save();
                             }
                         },
-                        _ => {
-                            // Cancel current operation
-                            model.layout_editor.cancel_operation();
-                            log::info!("Cancelled operation");
-                        }
                     }
                 }
+                // ESC outside edit mode is ignored - use window close button
             },
+
+
+
+
             _ => {}
         }
     }
 }
+
 
 
 fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event::WindowEvent) {
@@ -1844,10 +1942,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
         // Show current state
         let state_text = match &model.layout_editor.edit_state {
             layout_editor::EditState::Navigation => "NAV",
-            layout_editor::EditState::TileSelected { tile_id } => "SEL",
-            layout_editor::EditState::SettingPosition { .. } => "POS",
+            layout_editor::EditState::TileSelected { .. } => "SEL",
+            layout_editor::EditState::MoveResize { .. } => "MOVE",
             layout_editor::EditState::Patching { .. } => "PATCH",
         };
+
         draw.text(state_text)
             .xy(pt2(app.window_rect().left() + 130.0, app.window_rect().top() - 15.0))
             .color(rgba(1.0, 0.8, 0.0, 0.8))
