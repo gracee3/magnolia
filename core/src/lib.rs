@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
 
+// Feature-gated tile rendering system
+#[cfg(feature = "tile-rendering")]
+pub mod tile;
+#[cfg(feature = "tile-rendering")]
+pub use tile::{TileRenderer, TileRegistry, RenderContext, TileError, ErrorSeverity, BindableAction, render_error_overlay};
+
+
 pub mod patch_bay;
 pub use patch_bay::{PatchBay, PatchBayError};
 

@@ -1,0 +1,22 @@
+[package]
+name = "kamea"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:nannou_egui"]
+
+[dependencies]
+rand = "0.8"
+rand_chacha = "0.3"
+sha2 = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+talisman_core = { path = "../../core" }
+async-trait = "0.1"
+
+# Optional rendering dependencies
+nannou = { version = "0.19", optional = true }
+nannou_egui = { version = "0.19", optional = true }
+

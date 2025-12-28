@@ -279,50 +279,18 @@ impl TileRenderer for AudioVisTile {
         // Render visualization using GPU renderer if available
         let content_rect = rect.pad(5.0);
         
-        if let Some(gpu) = ctx.gpu {
-            match self.vis_type {
-                VisualizationType::Oscilloscope => {
-                    gpu.render_oscilloscope(draw, &buffer, content_rect, color, 2.0);
-                },
-                VisualizationType::SpectrumBars => {
-                    // Simple mock spectrum (would use FFT in real impl)
-                    let mags: Vec<f32> = buffer.chunks(64)
-                        .map(|c| c.iter().map(|s| s.abs()).sum::<f32>() / c.len() as f32)
-                        .collect();
-                    gpu.render_spectrum_bars(draw, &mags, content_rect, color, 32);
-                },
-                VisualizationType::SpectrumLine => {
-                    // Draw spectrum as a line instead of bars
-                    let mags: Vec<f32> = buffer.chunks(64)
-                        .map(|c| c.iter().map(|s| s.abs()).sum::<f32>() / c.len() as f32)
-                        .collect();
-                    gpu.render_oscilloscope(draw, &mags, content_rect, color, 2.0);
-                },
-                VisualizationType::VuMeter => {
-                    gpu.render_vu_meter(draw, avg_amp * self.sensitivity, content_rect);
-                },
-                VisualizationType::Lissajous => {
-                    // Use first half as left, second half as right
-                    let mid = buffer.len() / 2;
-                    let left = &buffer[..mid];
-                    let right = &buffer[mid..];
-                    gpu.render_lissajous(draw, left, right, content_rect, color);
-                },
-            }
-        } else {
-            // Fallback: simple oscilloscope without GPU renderer
-            let points: Vec<Point2> = buffer.iter().enumerate().map(|(i, &sample)| {
-                let x = map_range(i, 0, buffer.len(), content_rect.left(), content_rect.right());
-                let y = content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
-                pt2(x, y)
-            }).collect();
-            
-            if !points.is_empty() {
-                draw.polyline()
-                    .weight(2.0)
-                    .points(points)
-                    .color(color);
-            }
+        // Software rendering fallback (GPU rendering removed for now)
+        let points: Vec<Point2> = buffer.iter().enumerate().map(|(i, &sample)| {
+            let x = map_range(i, 0, buffer.len(), content_rect.left(), content_rect.right());
+            let y = content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
+            pt2(x, y)
+        }).collect();
+        
+        if !points.is_empty() {
+            draw.polyline()
+                .weight(2.0)
+                .points(points)
+                .color(color);
         }
         
         // Status indicators (monitor mode - read only)

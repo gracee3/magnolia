@@ -1995,7 +1995,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     is_maximized: false,
                     egui_ctx: None,
                     tile_settings: Some(&tile.settings.config),
-                    gpu: Some(&model.gpu_renderer),
                 };
                 
                 model.tile_registry.render_monitor(&tile.module, &draw, rect.pad(5.0), &ctx);
@@ -2040,7 +2039,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     is_maximized: true,
                     egui_ctx: None, // Will be handled separately
                     tile_settings: Some(&tile.settings.config),
-                    gpu: Some(&model.gpu_renderer),
                 };
                 
                 // Try tile registry first

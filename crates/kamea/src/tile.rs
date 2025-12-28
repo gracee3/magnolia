@@ -9,9 +9,9 @@
 use nannou::prelude::*;
 use nannou_egui::egui;
 use sha2::{Sha256, Digest};
-use kamea::{generate_path, SigilConfig};
+use crate::{generate_path, SigilConfig};
 use std::sync::{Arc, Mutex};
-use super::{TileRenderer, RenderContext, BindableAction};
+use talisman_core::{TileRenderer, RenderContext, BindableAction};
 
 pub struct KameaTile {
     current_text: Arc<Mutex<String>>,
