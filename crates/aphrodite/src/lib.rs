@@ -88,15 +88,24 @@ impl TalismanPlugin for AphroditePlugin {
                     .map(|(k, v)| (k.clone(), v.lon))
                     .collect();
 
-                 // Construct JSON object matching Signal::Astrology content
-                 let data = json!({
-                     "sun_sign": get_sign(sun_lon),
-                     "moon_sign": get_sign(moon_lon),
-                     "rising_sign": get_sign(asc_lon),
-                     "planetary_positions": planetary_positions
-                 });
-                 
-                 let json_str = data.to_string();
+use talisman_signals::AstrologyData;
+
+// ...
+
+                 let planetary_positions: Vec<(String, f64)> = pos.planets.iter()
+                    .map(|(k, v)| (k.clone(), v.lon))
+                    .collect();
+
+                 // Construct AstrologyData Object
+                 let data = AstrologyData {
+                     sun_sign: get_sign(sun_lon),
+                     moon_sign: get_sign(moon_lon),
+                     rising_sign: get_sign(asc_lon),
+                     planetary_positions,
+                 };
+
+                 // Serialize to JSON (Host expects serialized data)
+                 let json_str = serde_json::to_string(&data).unwrap_or_default();
                  let mut bytes = json_str.into_bytes();
                  let len = bytes.len();
                  let ptr = bytes.as_mut_ptr();

@@ -113,8 +113,15 @@ impl TalismanPlugin for KameaPlugin {
                 
                 buffer.signal_type = SignalType::Texture as u32;
                 // nannou_texture.view() returns a Builder.
-                // We stored the built view in gpu.view.
-                buffer.value = SignalValue { ptr: &gpu.view as *const _ as *mut _ };
+                // We stored the built view in gpu.view (Nannou wrapper).
+                // We must send the pointer to the INNER wgpu::TextureView (Arc)
+                // so the host can clone the Arc.
+                // CAUTION: plugin `gpu.view` owns the inner Arc. 
+                // Host `clone` bumps ref count.
+                // `gpu.view.inner()` returns &wgpu::TextureView.
+                let raw_view = gpu.view.inner();
+                
+                buffer.value = SignalValue { ptr: raw_view as *const _ as *mut _ };
                 buffer.size = id;
                 buffer.param = ((gpu.width as u64) << 32) | (gpu.height as u64);
                 

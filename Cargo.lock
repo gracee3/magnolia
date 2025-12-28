@@ -161,6 +161,7 @@ dependencies = [
  "swisseph",
  "talisman-plugin-helper",
  "talisman_core",
+ "talisman_signals",
  "thiserror",
  "tokio",
  "uuid",
@@ -3651,6 +3652,7 @@ name = "talisman-plugin-helper"
 version = "0.1.0"
 dependencies = [
  "talisman-plugin-abi",
+ "talisman_signals",
 ]
 
 [[package]]

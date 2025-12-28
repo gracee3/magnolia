@@ -174,40 +174,9 @@ use schemars::JsonSchema;
 
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
 
-// ============================================================================
-// PATCH BAY TYPES
-// ============================================================================
-
-/// Data types for type-safe port connections.
-/// These define compatibility between module inputs and outputs.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-pub enum DataType {
-    /// String/text data
-    Text,
-    /// Raw bytes (images, generic binary)
-    Blob,
-    /// PCM or encoded audio streams
-    Audio,
-    /// Video frames or streams
-    Video,
-    /// Network packets or streams
-    Network,
-    /// Astrological data structures
-    Astrology,
-    /// Numeric values or metrics
-    Numeric,
-    /// Control signals (shutdown, reload, etc.)
-    Control,
-    /// Accepts any data type (universal transforms)
-    Any,
-}
-
-/// Port direction - whether a port receives or emits data
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum PortDirection {
-    Input,
-    Output,
-}
+// Re-export core types from signals
+pub use talisman_signals::{DataType, PortDirection, Signal, ControlSignal, AstrologyData};
+pub use talisman_signals::{AudioBufferHandle, BlobHandle, GpuTextureHandle, GpuBufferHandle};
 
 /// A typed port on a module for connecting to other modules
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -252,89 +221,7 @@ pub struct Patch {
     pub sink_port: String,
 }
 
-// ============================================================================
-// SIGNAL TYPES
-// ============================================================================
-
-/// The Alchemical Consignment.
-///
-/// A `Signal` represents any discrete unit of information flowing through the system.
-/// It acts as the "Standardized Substance" that allows modules to transmute data.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", content = "data")]
-pub enum Signal {
-    /// Pure text content (e.g., from Clipboard, Keyboard, LLM)
-    Text(String),
-    /// A structured command or intent
-    Intent {
-        action: String,
-        parameters: Vec<String>,
-    },
-    /// Astrological Data
-    Astrology {
-        sun_sign: String,
-        moon_sign: String,
-        rising_sign: String,
-        planetary_positions: Vec<(String, f64)>, // Planet name, degree
-    },
-    /// Raw bytes (e.g., Image, Audio buffer)
-    Blob {
-        mime_type: String,
-        bytes: Vec<u8>,
-    },
-    /// Audio Signal (PCM) - buffered, copied to each module
-    Audio {
-        sample_rate: u32,
-        channels: u16,
-        data: Vec<f32>,
-    },
-    /// Shared audio data (Arc-wrapped) - one allocation, many readers
-    /// Use this for large audio buffers to avoid copying overhead
-    #[serde(skip)]
-    SharedAudio(Arc<AudioData>),
-    /// Real-time audio stream handle (ring buffer for minimal latency)
-    /// Contains receiver end - SPSC: only ONE module can consume this!
-    /// First module to receive this signal gets exclusive access
-    #[serde(skip)]
-    AudioStream {
-        sample_rate: u32,
-        channels: u16,
-        receiver: RingBufferReceiver<AudioFrame>,
-    },
-    /// Shared blob data (Arc-wrapped) - one allocation, many readers
-    /// Use this for large files/images to avoid copying overhead  
-    #[serde(skip)]
-    SharedBlob(Arc<BlobData>),
-    /// A control signal for the system (e.g., "Shutdown", "Reload")
-    Control(ControlSignal),
-    /// Computed/Processed Data (Source, Content)
-    Computed {
-        source: String,
-        content: String,
-    },
-    /// Pointer to WGPU Context types (Device, Queue) - Unsafe!
-    #[serde(skip)]
-    GpuContext {
-        device: usize, // cast to *const wgpu::Device
-        queue: usize,  // cast to *const wgpu::Queue
-    },
-    /// GPU Texture Handle (for Compositor)
-    #[serde(skip)]
-    Texture {
-        id: u64,
-        view: usize, // cast to *const wgpu::TextureView
-        width: u32,
-        height: u32,
-    },
-    /// Empty signal, used for heartbeat or triggers
-    Pulse,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub enum ControlSignal {
-    Shutdown,
-    ReloadConfig,
-}
+// Signal types replaced by talisman_signals re-export
 
 // ============================================================================
 // MODULE TRAITS

@@ -129,6 +129,15 @@ pub struct GpuBufferHandle {
     pub size: u64,
 }
 
+/// Astrological Data Payload
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AstrologyData {
+    pub sun_sign: String,
+    pub moon_sign: String,
+    pub rising_sign: String,
+    pub planetary_positions: Vec<(String, f64)>, // Planet name, degree
+}
+
 /// The Alchemical Consignment.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "data")]
@@ -141,12 +150,7 @@ pub enum Signal {
         parameters: Vec<String>,
     },
     /// Astrological Data
-    Astrology {
-        sun_sign: String,
-        moon_sign: String,
-        rising_sign: String,
-        planetary_positions: Vec<(String, f64)>, // Planet name, degree
-    },
+    Astrology(AstrologyData),
     /// Raw bytes (e.g., Image, Audio buffer)
     Blob {
         mime_type: String,

@@ -192,7 +192,7 @@ fn model(app: &App) -> Model {
         
         // Spawn plugins
         for plugin in loader.drain_loaded() {
-            let adapter = PluginModuleAdapter::new(plugin);
+            let adapter = PluginModuleAdapter::new(plugin, module_host.view_map.clone());
             log::info!("Spawning plugin module: {}", adapter.id());
             
             // Register schema if possible? 
@@ -362,7 +362,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
         log::info!("Hot-reload trigger for: {}", path.display());
         match model.plugin_manager.reload_plugin(&path) {
             Ok(plugin) => {
-                let adapter = PluginModuleAdapter::new(plugin);
+                let adapter = PluginModuleAdapter::new(plugin, model.module_host.view_map.clone());
                 let id = adapter.id().to_string(); // Copy ID
                 log::info!("Replacng module: {}", id);
                 
@@ -389,21 +389,10 @@ fn update(app: &App, model: &mut Model, update: Update) {
     // Process Router Signals (From Plugins)
     while let Ok(signal) = model.router_rx.try_recv() {
         match signal {
-            Signal::Texture { id, view, width, height } => {
-                // Register texture with Compositor
-                unsafe {
-                     // Cast usize back to *const TextureView
-                     use nannou::wgpu; // Use nannou's wgpu re-export
-                     let view_ptr = view as *const wgpu::TextureView;
-                     if !view_ptr.is_null() {
-                         // We need to CLONE the view to store it in Compositor (it expects TextureView, not reference)
-                         // But wgpu::TextureView is a handle (Arc). It IS Clone.
-                         // So we dereference and clone.
-                         let view_ref = &*view_ptr;
-                         model._compositor.register_texture(id, view_ref.clone());
-                         log::info!("Registered texture {} ({}x{}) from plugin", id, width, height);
-                     }
-                }
+            Signal::Texture { handle, start_time: _ } => {
+                log::info!("Received texture handle {} ({}x{}) from plugin", handle.id, handle.width, handle.height);
+                // Texture is already registered in view_map by the adapter (when enabled).
+                // Compositor can lookup via handle.id.
             }
             // Logic for other signals...
             _ => {}

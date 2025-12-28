@@ -4,14 +4,19 @@ use tokio::sync::mpsc;
 use talisman_plugin_abi::*;
 use crate::{Signal, ModuleRuntime, ModuleSchema, PluginLibrary};
 
+use talisman_signals::GpuTextureHandle;
+use crate::resources::gpu_map::GpuTextureViewMap;
+use std::sync::Arc;
+
 pub struct PluginModuleAdapter {
     plugin: PluginLibrary,
     id_cache: String,
     name_cache: String,
+    view_map: Arc<GpuTextureViewMap>,
 }
 
 impl PluginModuleAdapter {
-    pub fn new(plugin: PluginLibrary) -> Self {
+    pub fn new(plugin: PluginLibrary, view_map: Arc<GpuTextureViewMap>) -> Self {
         let (id_cache, name_cache) = unsafe {
             let id = CStr::from_ptr((plugin.vtable.get_id)(plugin.instance as *const _))
                 .to_string_lossy()
@@ -22,7 +27,7 @@ impl PluginModuleAdapter {
             (id, name)
         };
         
-        Self { plugin, id_cache, name_cache }
+        Self { plugin, id_cache, name_cache, view_map }
     }
     
     fn encode_signal(&self, signal: &Signal) -> SignalBuffer {
@@ -65,18 +70,18 @@ impl PluginModuleAdapter {
                     param: *queue as u64,
                 }
             }
-            Signal::Texture { id, view, width, height } => {
-                let param = ((*width as u64) << 32) | (*height as u64);
-                // Correct mapping:
-                // Value.ptr = View Handle
-                // Size = ID
-                // Param = W/H
-                
+            Signal::Texture { handle, start_time: _ } => {
+                // We only support sending Handles derived from local pointers back to plugins
+                // which is rare (usually host sends Handles to consumers).
+                // Plugins generating textures (kamea) send TO host.
+                // Sending Texture TO plugin?
+                // If a plugin consumes textures, it expects a Handle ID.
+                // The ABI SignalValue has `gpu_id`.
                 SignalBuffer {
                     signal_type: SignalType::Texture as u32,
-                    value: SignalValue { ptr: *view as *mut _ },
-                    size: *id,
-                    param,
+                    value: SignalValue { gpu_id: handle.id },
+                    size: 0,
+                    param: 0, 
                 }
             }
             Signal::Pulse => SignalBuffer::empty(),
@@ -134,34 +139,19 @@ impl PluginModuleAdapter {
                     String::from_utf8_lossy(&vec).to_string()
                 };
                 
-                // Parse JSON back to Signal::Astrology handling
-                // We actually want to reconstruct the specific fields or just use the generic deserializer if it matches.
-                // But Signal::Astrology has specific struct fields.
-                // Let's assume the JSON matches the internal definition.
-                // This implies the plugin serialized the *content* of the structure.
-                
-                if let Ok(astrology_data) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    // Extract fields manually or define a helper struct
-                     let sun = astrology_data["sun_sign"].as_str().unwrap_or("Unknown").to_string();
-                     let moon = astrology_data["moon_sign"].as_str().unwrap_or("Unknown").to_string();
-                     let rising = astrology_data["rising_sign"].as_str().unwrap_or("Unknown").to_string();
-                     
-                     let mut planets = Vec::new();
-                     if let Some(arr) = astrology_data["planetary_positions"].as_array() {
-                         for p in arr {
-                             if let Some(name) = p[0].as_str() {
-                                 let deg = p[1].as_f64().unwrap_or(0.0);
-                                 planets.push((name.to_string(), deg));
-                             }
-                         }
-                     }
-                     
-                    Some(Signal::Astrology {
-                        sun_sign: sun,
-                        moon_sign: moon,
-                        rising_sign: rising,
-                        planetary_positions: planets,
-                    })
+                // Parse JSON back to AstrologyData
+                use talisman_signals::AstrologyData;
+                if let Ok(data) = serde_json::from_str::<AstrologyData>(&json_str) {
+                    Some(Signal::Astrology(data))
+                } else if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    // Legacy fallback if plugin sends flat structure? 
+                    // Current plugin sends: {"sun_sign": ..., "planetary_positions": ...}
+                    // This matches AstrologyData struct!
+                    // So direct deserialization should work if fields match.
+                    // Just in case, manual extract if needed, but strict serde is better.
+                    // Let's assume strict for now.
+                     log::warn!("Failed to strict parse AstrologyData - plugin mismatch?");
+                     Some(Signal::Pulse)
                 } else {
                     log::warn!("Failed to parse astrology JSON from plugin");
                     Some(Signal::Pulse)
@@ -173,11 +163,44 @@ impl PluginModuleAdapter {
                  Some(Signal::GpuContext { device, queue })
             }
             t if t == SignalType::Texture as u32 => {
-                 let view = buffer.value.ptr as usize;
-                 let id = buffer.size;
-                 let width = (buffer.param >> 32) as u32;
-                 let height = (buffer.param & 0xFFFFFFFF) as u32;
-                 Some(Signal::Texture { id, view, width, height })
+                 // Plugin sends:
+                 // value.ptr = *wgpu::TextureView
+                 
+                 // TODO: Re-enable texture sharing when wgpu::TextureView Clone issue is resolved.
+                 // Current ambiguity: TextureView (alias TextureViewHandle) is !Clone !Copy.
+                 log::warn!("Signal::Texture received but texture sharing is temporarily disabled due to wgpu type issues.");
+                 None
+                 /* 
+                 use wgpu as wgpu_crate;
+                 unsafe {
+                     let view_ptr = buffer.value.ptr as *const wgpu_crate::TextureView;
+                     if !view_ptr.is_null() {
+                         // Clone the view (Arc incr)
+                         // ERROR: TextureView not Clone or Copy
+                         // let view = (*view_ptr).clone(); 
+                         
+                         // Register in our map
+                         // let (id, generation) = self.view_map.insert(view);
+                         
+                         let width = (buffer.param >> 32) as u32;
+                         let height = (buffer.param & 0xFFFFFFFF) as u32;
+                         
+                         let handle = GpuTextureHandle {
+                             id,
+                             generation,
+                             width,
+                             height,
+                         };
+                         
+                         Some(Signal::Texture { 
+                             handle,
+                             start_time: 0.0,
+                         })
+                     } else {
+                         None
+                     }
+                 }
+                 */
             }
             t if t == SignalType::Pulse as u32 => Some(Signal::Pulse),
             _ => None,

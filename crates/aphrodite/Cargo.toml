@@ -20,6 +20,7 @@ thiserror = "1.0"
 anyhow = "1.0"
 swisseph = "^0.1"
 talisman_core = { path = "../../core" }
+talisman_signals = { path = "../../crates/talisman-signals" }
 talisman-plugin-helper = { path = "../talisman-plugin-helper" }
 async-trait = "0.1"
 tokio = { version = "1.0", features = ["full"] }
