@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use std::sync::Arc;
-use std::any::Any;
 
 pub mod ring_buffer;
 use ring_buffer::RingBufferReceiver;
@@ -165,6 +164,7 @@ pub enum Signal {
     Audio {
         sample_rate: u32,
         channels: u16,
+        timestamp_us: u64,
         data: Vec<f32>,
     },
     /// Host-managed Audio Buffer Handle (zero-copy)
@@ -234,9 +234,10 @@ impl Clone for Signal {
                 handle: *handle,
                 mime_type: mime_type.clone(),
             },
-            Signal::Audio { sample_rate, channels, data } => Signal::Audio {
+            Signal::Audio { sample_rate, channels, timestamp_us, data } => Signal::Audio {
                 sample_rate: *sample_rate,
                 channels: *channels,
+                timestamp_us: *timestamp_us,
                 data: data.clone(),
             },
             Signal::AudioHandle { handle, sample_rate, channels } => Signal::AudioHandle {

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use slab::Slab;
 
 /// A handle to a buffer in the pool

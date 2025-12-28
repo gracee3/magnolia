@@ -4,19 +4,14 @@ use tokio::sync::mpsc;
 use talisman_plugin_abi::*;
 use crate::{Signal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal};
 
-use talisman_signals::GpuTextureHandle;
-use crate::resources::gpu_map::GpuTextureViewMap;
-use std::sync::Arc;
-
 pub struct PluginModuleAdapter {
     plugin: PluginLibrary,
     id_cache: String,
     name_cache: String,
-    view_map: Arc<GpuTextureViewMap>,
 }
 
 impl PluginModuleAdapter {
-    pub fn new(plugin: PluginLibrary, view_map: Arc<GpuTextureViewMap>) -> Self {
+    pub fn new(plugin: PluginLibrary) -> Self {
         let (id_cache, name_cache) = unsafe {
             let id = CStr::from_ptr((plugin.vtable.get_id)(plugin.instance as *const _))
                 .to_string_lossy()
@@ -27,7 +22,7 @@ impl PluginModuleAdapter {
             (id, name)
         };
         
-        Self { plugin, id_cache, name_cache, view_map }
+        Self { plugin, id_cache, name_cache }
     }
     
     fn encode_signal(&self, signal: &Signal) -> SignalBuffer {
@@ -42,7 +37,7 @@ impl PluginModuleAdapter {
                     param: 0,
                 }
             }
-            Signal::Audio { sample_rate, channels, data } => {
+            Signal::Audio { sample_rate, channels, timestamp_us: _, data } => {
                 // Transfer ownership of data to the buffer
                 // We clone the data here because we can't easily take ownership from &Signal
                 // But in a real hot-path, efficient movement is key.
@@ -123,6 +118,7 @@ impl PluginModuleAdapter {
                 Some(Signal::Audio {
                     sample_rate,
                     channels,
+                    timestamp_us: 0,
                     data,
                 })
             }
@@ -143,7 +139,7 @@ impl PluginModuleAdapter {
                 use talisman_signals::AstrologyData;
                 if let Ok(data) = serde_json::from_str::<AstrologyData>(&json_str) {
                     Some(Signal::Astrology(data))
-                } else if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                } else if let Ok(_val) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     // Legacy fallback if plugin sends flat structure? 
                     // Current plugin sends: {"sun_sign": ..., "planetary_positions": ...}
                     // This matches AstrologyData struct!

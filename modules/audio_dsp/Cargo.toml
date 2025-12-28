@@ -1,0 +1,13 @@
+[package]
+name = "audio_dsp"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+talisman_core = { path = "../../core" }
+talisman_signals = { path = "../../crates/talisman-signals" }

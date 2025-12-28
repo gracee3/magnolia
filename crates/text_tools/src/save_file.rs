@@ -177,7 +177,7 @@ impl Sink for SaveFileSink {
                 }
             },
 
-            Signal::Audio { sample_rate, channels, data } => {
+            Signal::Audio { sample_rate, channels, timestamp_us: _, data } => {
                 let mut guard = self.audio_writer.lock().unwrap();
                 
                 // Initialize writer if None or if we should check path changes (simplified here)

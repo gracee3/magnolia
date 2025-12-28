@@ -1,6 +1,6 @@
 use tokio::sync::mpsc;
 use async_trait::async_trait;
-use crate::{Signal, ModuleSchema, Source, Sink, ModuleRuntime, ExecutionModel, Priority, RoutedSignal};
+use crate::{Signal, ModuleSchema, Source, Sink, Processor, ModuleRuntime, ExecutionModel, Priority, RoutedSignal};
 
 /// Adapter to run a Source as a ModuleRuntime
 pub struct SourceAdapter<S: Source + 'static> {
@@ -125,5 +125,75 @@ impl<S: Sink + 'static> ModuleRuntime for SinkAdapter<S> {
             }
         }
         log::info!("Sink {} inbox closed, shutting down", self.name());
+    }
+}
+
+/// Adapter to run a Processor as a ModuleRuntime
+pub struct ProcessorAdapter<P: Processor + 'static> {
+    processor: P,
+    schema: ModuleSchema,
+}
+
+impl<P: Processor + 'static> ProcessorAdapter<P> {
+    pub fn new(processor: P) -> Self {
+        let schema = processor.schema();
+        Self { processor, schema }
+    }
+}
+
+#[async_trait]
+impl<P: Processor + 'static> ModuleRuntime for ProcessorAdapter<P> {
+    fn id(&self) -> &str {
+        &self.schema.id
+    }
+    
+    fn name(&self) -> &str {
+        self.processor.name()
+    }
+    
+    fn schema(&self) -> ModuleSchema {
+        self.schema.clone()
+    }
+    
+    fn execution_model(&self) -> ExecutionModel {
+        ExecutionModel::Async
+    }
+    
+    fn priority(&self) -> Priority {
+        Priority::Normal
+    }
+    
+    fn is_enabled(&self) -> bool {
+        self.processor.is_enabled()
+    }
+    
+    fn set_enabled(&mut self, enabled: bool) {
+        self.processor.set_enabled(enabled);
+    }
+    
+    async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<RoutedSignal>) {
+        while let Some(signal) = inbox.recv().await {
+            if !self.is_enabled() {
+                continue;
+            }
+            
+            match self.processor.process(signal).await {
+                Ok(Some(output)) => {
+                    let routed = RoutedSignal {
+                        source_id: self.schema.id.clone(),
+                        signal: output,
+                    };
+                    if outbox.send(routed).await.is_err() {
+                        log::warn!("Processor {} outbox closed, shutting down", self.name());
+                        break;
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log::error!("Processor {} error: {}", self.name(), e);
+                }
+            }
+        }
+        log::info!("Processor {} inbox closed, shutting down", self.name());
     }
 }

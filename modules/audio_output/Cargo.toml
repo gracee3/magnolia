@@ -1,0 +1,16 @@
+[package]
+name = "audio_output"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+cpal = "0.15"
+log = "0.4"
+talisman_core = { path = "../../core", features = ["tile-rendering"] }
+talisman_signals = { path = "../../crates/talisman-signals" }
+nannou = "0.19.0"

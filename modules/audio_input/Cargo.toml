@@ -8,16 +8,17 @@ crate-type = ["rlib"]
 
 [dependencies]
 cpal = "0.15"
-talisman_module_api = { path = "../../crates/talisman-module-api" }
 talisman_signals = { path = "../../crates/talisman-signals" }
 talisman_core = { path = "../../core", features = ["tile-rendering"] }
 log = "0.4"
 anyhow = "1.0"
+async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 num-traits = "0.2"
 nannou = "0.19.0"
 nannou_egui = "0.19.0"
+tokio = { version = "1.0", features = ["time"] }
 
 # Removed: talisman-plugin-helper, talisman-core (to avoid circular deps if possible, though host uses core)
 # We rely on talisman-module-api and talisman-signals for shared types.

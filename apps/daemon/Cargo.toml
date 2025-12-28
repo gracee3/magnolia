@@ -10,6 +10,8 @@ sysinfo = { version = "0.37.2", features = ["default"] }
 
 talisman_core = { path = "../../core", features = ["tile-rendering"] }
 audio_input = { path = "../../modules/audio_input" }
+audio_dsp = { path = "../../modules/audio_dsp" }
+audio_output = { path = "../../modules/audio_output" }
 talisman_module_api = { path = "../../crates/talisman-module-api" }
 nannou_egui = "0.19.0"
 toml = "0.8"

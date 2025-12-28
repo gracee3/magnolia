@@ -1,6 +1,4 @@
 pub use talisman_signals::{Manifest, PortDesc, ControlMsg, ControlSignal};
-use talisman_signals::DataType;
-use anyhow::Result;
 
 /// A restricted context for RT-safe tick operations.
 /// No allocation allowed here for Tier 0 modules.

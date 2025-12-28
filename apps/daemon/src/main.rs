@@ -1,10 +1,15 @@
 use nannou::prelude::*;
 use talisman_core::{Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime, RoutedSignal};
+use talisman_core::{Source, Sink, Processor};
+use talisman_core::adapters::{SourceAdapter, SinkAdapter, ProcessorAdapter};
 use nannou_egui::{self, Egui, egui};
 use tokio::sync::mpsc;
 
-use audio_input::AudioInputModule;
-use talisman_module_api::{StaticModule, TickCx};
+use audio_input::{AudioInputSource, AudioVizSink};
+use audio_input::tile::AudioVisTile;
+use audio_dsp::AudioDspProcessor;
+use audio_output::{AudioOutputSink, AudioOutputState};
+use audio_output::tile::AudioOutputTile;
 // use talisman_core::ring_buffer; // Removed usage
 
 
@@ -71,8 +76,6 @@ struct Model {
     // Keyboard Navigation (keyboard-first UI)
     keyboard_nav: KeyboardNav,
     
-    // Static Modules (Phase 1)
-    audio_input: AudioInputModule,
 }
 
 
@@ -147,25 +150,59 @@ fn model(app: &App) -> Model {
     // Apply patches from layout config (after plugins register their schemas)
     // This will be re-applied after plugin loading
     
-    // Real-Time Audio Input (Static Module Phase 1)
-    let mut audio_input = AudioInputModule::new();
-    audio_input.initialize();
-
     let mut tile_registry = tiles::create_default_registry();
     
-    // Wire up visualization tile
-    if let Some((rx, _sr, channels)) = audio_input.take_receiver() {
-        use audio_input::tile::AudioVisTile;
-        let mut vis_tile = AudioVisTile::new("audio_vis");
-        vis_tile.connect_audio_stream(rx, channels);
-        tile_registry.register(vis_tile);
-        log::info!("Registered AudioVisTile with active stream ({} ch)", channels);
+    // Audio visualization tile (fed by AudioVizSink)
+    let mut vis_tile = AudioVisTile::new("audio_viz");
+    let vis_buffer = vis_tile.get_legacy_buffer();
+    let vis_latency = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    vis_tile.connect_latency_meter(vis_latency.clone());
+    tile_registry.register(vis_tile);
+
+    // Audio output tile (fed by AudioOutputSink)
+    let (audio_output_sink, audio_output_state) = match AudioOutputSink::new("audio_output") {
+        Ok((sink, state)) => (Some(sink), state),
+        Err(e) => {
+            log::error!("Failed to initialize audio output: {}", e);
+            // Create a dummy state to keep UI stable
+            let state = std::sync::Arc::new(AudioOutputState::default());
+            (None, state)
+        }
+    };
+
+    tile_registry.register(AudioOutputTile::new("audio_output", audio_output_state.clone()));
+
+    // Audio pipeline modules
+    if let Ok(audio_input_source) = AudioInputSource::new("audio_input") {
+        let schema = audio_input_source.schema();
+        patch_bay.register_module(schema);
+        if let Err(e) = module_host.spawn(SourceAdapter::new(audio_input_source), 100) {
+            log::error!("Failed to spawn audio input source: {}", e);
+        }
     } else {
-        log::warn!("AudioInputModule failed to initialize stream");
-        // Register fallback tile without stream?
-        use audio_input::tile::AudioVisTile;
-        let vis_tile = AudioVisTile::new("audio_vis");
-        tile_registry.register(vis_tile);
+        log::error!("Audio input source failed to initialize");
+    }
+
+    let audio_dsp = AudioDspProcessor::new("audio_dsp", 1.0);
+    let dsp_schema = audio_dsp.schema();
+    patch_bay.register_module(dsp_schema);
+    if let Err(e) = module_host.spawn(ProcessorAdapter::new(audio_dsp), 100) {
+        log::error!("Failed to spawn audio DSP: {}", e);
+    }
+
+    let audio_viz_sink = AudioVizSink::new("audio_viz", vis_buffer, vis_latency);
+    let viz_schema = audio_viz_sink.schema();
+    patch_bay.register_module(viz_schema);
+    if let Err(e) = module_host.spawn(SinkAdapter::new(audio_viz_sink), 100) {
+        log::error!("Failed to spawn audio viz sink: {}", e);
+    }
+
+    if let Some(output_sink) = audio_output_sink {
+        let output_schema = output_sink.schema();
+        patch_bay.register_module(output_schema);
+        if let Err(e) = module_host.spawn(SinkAdapter::new(output_sink), 100) {
+            log::error!("Failed to spawn audio output sink: {}", e);
+        }
     }
     
     log::info!("Patch Bay initialized - modules will register via PluginManager");
@@ -192,7 +229,7 @@ fn model(app: &App) -> Model {
         
         // Spawn plugins
         for plugin in loader.drain_loaded() {
-            let adapter = PluginModuleAdapter::new(plugin, module_host.view_map.clone());
+            let adapter = PluginModuleAdapter::new(plugin);
             log::info!("Spawning plugin module: {}", adapter.id());
             
             // Register schema if possible? 
@@ -239,7 +276,19 @@ fn model(app: &App) -> Model {
         }
     }
 
-    let mut model = Model {
+    // Apply saved patches from layout config
+    for patch in &layout.config.patches {
+        if let Err(e) = patch_bay.connect(
+            &patch.source_module,
+            &patch.source_port,
+            &patch.sink_module,
+            &patch.sink_port,
+        ) {
+            log::warn!("Failed to apply patch {}: {}", patch.id, e);
+        }
+    }
+
+    let model = Model {
         _receiver: rx_ui,
         router_rx: rx_router,
         egui,
@@ -266,7 +315,6 @@ fn model(app: &App) -> Model {
         start_time: std::time::Instant::now(),
         frame_count: 0,
         keyboard_nav: KeyboardNav::new(),
-        audio_input,
     };
     
     // Apply saved tile settings from layout config
@@ -345,24 +393,14 @@ fn update(app: &App, model: &mut Model, update: Update) {
     model.tile_registry.update_all();
     model.frame_count += 1;
     
-    // TICK STATIC MODULES (Tier 0/1)
-    {
-        let dt = update.since_last.as_secs_f64();
-        let frame = model.frame_count;
-        let mut cx = TickCx::new(frame, dt);
-        model.audio_input.tick(&mut cx);
-        
-        // Audio stream wiring handled in main initialization (Phase 1)
-    }
-    
-    // (Legacy audio_buffer pump removed - AudioVisTile handles polling from ring buffer)
+    // (Audio tiles update independently; module runtime handles audio pipeline)
 
     // Handle Plugin Hot-Reload
     while let Ok(path) = model.plugin_manager.reload_rx.try_recv() {
         log::info!("Hot-reload trigger for: {}", path.display());
         match model.plugin_manager.reload_plugin(&path) {
             Ok(plugin) => {
-                let adapter = PluginModuleAdapter::new(plugin, model.module_host.view_map.clone());
+                let adapter = PluginModuleAdapter::new(plugin);
                 let id = adapter.id().to_string(); // Copy ID
                 log::info!("Replacng module: {}", id);
                 

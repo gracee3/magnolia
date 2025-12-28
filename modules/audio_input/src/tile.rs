@@ -10,6 +10,7 @@ use nannou::prelude::*;
 use nannou_egui::egui;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use talisman_core::{TileRenderer, RenderContext, BindableAction, TileError};
 use talisman_signals::ring_buffer::RingBufferReceiver;
 
@@ -139,6 +140,9 @@ pub struct AudioVisTile {
     
     /// Fallback Arc<Mutex> buffer for when ring buffer isn't connected
     legacy_buffer: Arc<Mutex<Vec<f32>>>,
+
+    /// Optional latency meter (microseconds)
+    latency_us: Option<Arc<AtomicU64>>,
 }
 
 const BUFFER_SIZE: usize = 2048;
@@ -160,6 +164,7 @@ impl AudioVisTile {
             frozen_buffer: Vec::new(),
             error: Some(TileError::info("No audio connected")),
             legacy_buffer: Arc::new(Mutex::new(vec![0.0; BUFFER_SIZE])),
+            latency_us: None,
         }
     }
     
@@ -182,6 +187,11 @@ impl AudioVisTile {
     /// Get the legacy shared buffer for fallback audio input
     pub fn get_legacy_buffer(&self) -> Arc<Mutex<Vec<f32>>> {
         self.legacy_buffer.clone()
+    }
+
+    /// Attach a latency meter (microseconds)
+    pub fn connect_latency_meter(&mut self, latency_us: Arc<AtomicU64>) {
+        self.latency_us = Some(latency_us);
     }
     
     /// Set error state
@@ -399,6 +409,15 @@ impl TileRenderer for AudioVisTile {
                 .color(srgba(0.3, 0.5, 1.0, 0.8))
                 .font_size(9);
         }
+
+        if let Some(latency) = &self.latency_us {
+            let latency_ms = latency.load(Ordering::Relaxed) as f32 / 1000.0;
+            let text = format!("{:.1}ms", latency_ms);
+            draw.text(&text)
+                .xy(pt2(rect.left() + 32.0, status_y))
+                .color(srgba(0.6, 0.7, 0.9, 0.9))
+                .font_size(9);
+        }
     }
     
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
@@ -420,6 +439,15 @@ impl TileRenderer for AudioVisTile {
             .xy(pt2(rect.x(), rect.top() - 50.0))
             .color(srgba(0.5, 0.5, 0.5, 1.0))
             .font_size(12);
+
+        if let Some(latency) = &self.latency_us {
+            let latency_ms = latency.load(Ordering::Relaxed) as f32 / 1000.0;
+            let text = format!("Latency: {:.1} ms", latency_ms);
+            draw.text(&text)
+                .xy(pt2(rect.x(), rect.top() - 70.0))
+                .color(srgba(0.4, 0.6, 0.9, 1.0))
+                .font_size(11);
+        }
         
         // Preview area (right side)
         let preview_rect = Rect::from_x_y_w_h(

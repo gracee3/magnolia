@@ -235,10 +235,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio_dsp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "talisman_core",
+ "talisman_signals",
+]
+
+[[package]]
 name = "audio_input"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "cpal",
  "log",
  "nannou",
@@ -247,7 +258,20 @@ dependencies = [
  "serde",
  "serde_json",
  "talisman_core",
- "talisman_module_api",
+ "talisman_signals",
+ "tokio",
+]
+
+[[package]]
+name = "audio_output"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "cpal",
+ "log",
+ "nannou",
+ "talisman_core",
  "talisman_signals",
 ]
 
@@ -892,7 +916,9 @@ dependencies = [
  "anyhow",
  "arboard",
  "async-trait",
+ "audio_dsp",
  "audio_input",
+ "audio_output",
  "chrono",
  "env_logger",
  "log",

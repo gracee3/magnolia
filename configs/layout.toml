@@ -1,8 +1,5 @@
-grid = "venus"
+grid = "audio_demo"
 columns = [
-    "1fr",
-    "1fr",
-    "1fr",
     "1fr",
     "1fr",
     "1fr",
@@ -12,26 +9,22 @@ rows = [
     "1fr",
     "1fr",
     "1fr",
-    "1fr",
-    "1fr",
-    "1fr",
-    "1fr",
 ]
 is_sleeping = false
 
 [[tiles]]
-id = "audio_vis_1"
+id = "audio_viz"
 col = 0
 row = 0
 colspan = 2
 rowspan = 2
-module = "audio_vis"
+module = "audio_viz"
 enabled = true
 
 [tiles.settings.config]
-color_scheme = "Rainbow"
-sensitivity = 0.800000011920929
-vis_type = "SpectrumBars"
+color_scheme = "CyanReactive"
+sensitivity = 1.0
+vis_type = "Oscilloscope"
 
 [tiles.settings.keybinds]
 freeze = "f"
@@ -39,83 +32,24 @@ next_vis = "n"
 mute = "m"
 
 [[tiles]]
-id = "audio_vis_2"
+id = "audio_output"
 col = 2
 row = 0
 colspan = 2
-rowspan = 2
-module = "audio_vis"
-enabled = true
-
-[tiles.settings.config]
-color_scheme = "Rainbow"
-sensitivity = 0.800000011920929
-vis_type = "SpectrumBars"
-
-[tiles.settings.keybinds]
-mute = "m"
-
-[[tiles]]
-id = "astrology_display"
-col = 4
-row = 0
-colspan = 3
-rowspan = 2
-module = "astro"
-enabled = true
-
-[tiles.settings.config]
-show_degrees = true
-show_moon = true
-
-[tiles.settings.keybinds]
-refresh = "r"
-
-[[tiles]]
-id = "kamea_sigil"
-col = 0
-row = 2
-colspan = 3
-rowspan = 3
-module = "kamea"
-enabled = true
-
-[tiles.settings.config]
-glow_intensity = 0.20000000298023224
-grid_size = 5
-path_color = [
-    0.0,
-    1.0,
-    1.0,
-]
-show_grid_dots = true
-stroke_weight = 2.5
-
-[tiles.settings.keybinds]
-increase_grid = "]"
-decrease_grid = "["
-toggle_dots = "d"
-
-[[tiles]]
-id = "text_input"
-col = 3
-row = 2
-colspan = 4
-rowspan = 3
-module = "text_input"
+rowspan = 1
+module = "audio_output"
 enabled = true
 
 [tiles.settings.config]
 
 [tiles.settings.keybinds]
-clear = "c"
 
 [[tiles]]
 id = "clock"
-col = 0
-row = 5
+col = 2
+row = 1
 colspan = 2
-rowspan = 2
+rowspan = 1
 module = "clock"
 enabled = true
 
@@ -129,36 +63,22 @@ toggle_format = "t"
 toggle_seconds = "s"
 
 [[patches]]
-id = "patch_1"
-source_module = "aphrodite"
-source_port = "astro_out"
-sink_module = "astrology_display"
-sink_port = "astro_in"
+id = "patch_audio_1"
+source_module = "audio_input"
+source_port = "audio_out"
+sink_module = "audio_dsp"
+sink_port = "audio_in"
 
 [[patches]]
-id = "patch_2"
-source_module = "editor"
-source_port = "text_out"
-sink_module = "word_count"
-sink_port = "text_in"
+id = "patch_audio_2"
+source_module = "audio_dsp"
+source_port = "audio_out"
+sink_module = "audio_viz"
+sink_port = "audio_in"
 
 [[patches]]
-id = "patch_3"
-source_module = "editor"
-source_port = "text_out"
-sink_module = "devowelizer"
-sink_port = "text_in"
-
-[[patches]]
-id = "patch_4"
-source_module = "editor"
-source_port = "text_out"
-sink_module = "kamea_printer"
-sink_port = "text_in"
-
-[[patches]]
-id = "patch_5"
-source_module = "aphrodite"
-source_port = "astro_out"
-sink_module = "kamea_printer"
-sink_port = "astro_in"
+id = "patch_audio_3"
+source_module = "audio_dsp"
+source_port = "audio_out"
+sink_module = "audio_output"
+sink_port = "audio_in"

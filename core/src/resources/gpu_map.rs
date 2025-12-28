@@ -1,6 +1,5 @@
 use std::sync::RwLock;
 use slab::Slab;
-use std::sync::Arc;
 
 /// A generic map for GPU resources managed by the host.
 /// Maps opaque integer handles to actual wgpu definitions.
