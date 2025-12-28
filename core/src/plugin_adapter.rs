@@ -121,6 +121,52 @@ impl PluginModuleAdapter {
                     data,
                 })
             }
+            t if t == SignalType::Astrology as u32 => {
+                // Pointer to JSON string
+                if buffer.value.ptr.is_null() {
+                    return Some(Signal::Pulse);
+                }
+                
+                let json_str = unsafe {
+                    // We take ownership of the string to drop it
+                    let len = buffer.size as usize;
+                    let vec = Vec::from_raw_parts(buffer.value.ptr as *mut u8, len, len);
+                    String::from_utf8_lossy(&vec).to_string()
+                };
+                
+                // Parse JSON back to Signal::Astrology handling
+                // We actually want to reconstruct the specific fields or just use the generic deserializer if it matches.
+                // But Signal::Astrology has specific struct fields.
+                // Let's assume the JSON matches the internal definition.
+                // This implies the plugin serialized the *content* of the structure.
+                
+                if let Ok(astrology_data) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    // Extract fields manually or define a helper struct
+                     let sun = astrology_data["sun_sign"].as_str().unwrap_or("Unknown").to_string();
+                     let moon = astrology_data["moon_sign"].as_str().unwrap_or("Unknown").to_string();
+                     let rising = astrology_data["rising_sign"].as_str().unwrap_or("Unknown").to_string();
+                     
+                     let mut planets = Vec::new();
+                     if let Some(arr) = astrology_data["planetary_positions"].as_array() {
+                         for p in arr {
+                             if let Some(name) = p[0].as_str() {
+                                 let deg = p[1].as_f64().unwrap_or(0.0);
+                                 planets.push((name.to_string(), deg));
+                             }
+                         }
+                     }
+                     
+                    Some(Signal::Astrology {
+                        sun_sign: sun,
+                        moon_sign: moon,
+                        rising_sign: rising,
+                        planetary_positions: planets,
+                    })
+                } else {
+                    log::warn!("Failed to parse astrology JSON from plugin");
+                    Some(Signal::Pulse)
+                }
+            }
             t if t == SignalType::GpuContext as u32 => {
                  let device = buffer.value.ptr as usize;
                  let queue = buffer.param as usize;

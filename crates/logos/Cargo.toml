@@ -7,12 +7,16 @@ edition = "2021"
 default = []
 tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:nannou_egui"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 talisman_core = { path = "../../core" }
-async-trait = "0.1"
-tokio = { version = "1.0", features = ["sync", "io-util"] }
+talisman-plugin-helper = { path = "../talisman-plugin-helper" }
+crossbeam-channel = "0.5" # Better mpsc
+
 
 # Optional rendering dependencies
 nannou = { version = "0.19", optional = true }
