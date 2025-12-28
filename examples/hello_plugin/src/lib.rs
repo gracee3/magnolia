@@ -93,8 +93,8 @@ unsafe extern "C" fn hello_poll_signal(instance: *mut c_void, buffer: *mut Signa
         let message_ptr = message_cstring.into_raw();
         
         (*buffer).signal_type = SignalType::Text as u32;
-        (*buffer).data = message_ptr as *mut c_void;
-        (*buffer).data_len = 0; // Null-terminated string
+        (*buffer).value.ptr = message_ptr as *mut c_void;
+        (*buffer).size = 0; // Null-terminated string
         
         true
     } else {

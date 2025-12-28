@@ -12,7 +12,7 @@
 
 // Local tile implementations (remaining - clock is still local)
 pub mod clock;
-pub mod gpu_renderer;
+pub mod compositor;
 
 // Re-export main types from talisman_core
 pub use talisman_core::{
@@ -24,25 +24,16 @@ pub use talisman_core::{
     render_error_overlay,
 };
 
-// Re-export GpuRenderer (daemon-specific)
-pub use gpu_renderer::GpuRenderer;
+// Re-export Compositor (daemon-specific)
+pub use compositor::Compositor;
 
-// Re-export tiles from crates
-pub use kamea::KameaTile;
-pub use aphrodite::AstroTile;
-pub use logos::TextInputTile;
-pub use audio_input::AudioVisTile;
-
-/// Create the default tile registry with demo tiles
+/// Create the default tile registry with local tiles only
+/// External tiles must be loaded via PluginManager
 pub fn create_default_registry() -> TileRegistry {
     let mut registry = TileRegistry::new();
     
-    // Register demo tiles
+    // Register local system tiles
     registry.register(clock::ClockTile::new());
-    registry.register(AstroTile::new());
-    registry.register(TextInputTile::new());
-    registry.register(KameaTile::new());
-    registry.register(AudioVisTile::new("audio_vis"));
     
     registry
 }

@@ -3,8 +3,9 @@ use talisman_core::{Signal, PatchBay, PluginManager, PluginModuleAdapter, Module
 use nannou_egui::{self, Egui, egui};
 use tokio::sync::mpsc;
 
-use audio_input::AudioInputSourceRT;
-use talisman_core::ring_buffer;
+// use audio_input::AudioInputSourceRT; // Removed for microkernel architecture
+// use talisman_core::ring_buffer; // Removed usage
+
 
 // Layout editor and visualizer modules
 mod patch_visualizer;
@@ -16,7 +17,7 @@ mod theme;
 
 
 use layout::Layout;
-use tiles::{TileRegistry, RenderContext, GpuRenderer};
+use tiles::{TileRegistry, RenderContext};
 use input::KeyboardNav;
 
 
@@ -56,12 +57,13 @@ struct Model {
     module_host: talisman_core::ModuleHost,
     plugin_manager: talisman_core::PluginManager,
     
-    // Audio State - Real-time audio ring buffer receiver (for tile system)
-    audio_stream_rx: Option<ring_buffer::RingBufferReceiver<talisman_core::AudioFrame>>,
+    // Audio State - Managed by plugins
+    // audio_stream_rx: Option<ring_buffer::RingBufferReceiver<talisman_core::AudioFrame>>, // Removed
+
     
     // Tile System (Phase 6: Settings Architecture)
     tile_registry: TileRegistry,
-    _gpu_renderer: GpuRenderer,
+    _compositor: tiles::Compositor,
     start_time: std::time::Instant,
     frame_count: u64,
     
@@ -141,7 +143,9 @@ fn model(app: &App) -> Model {
     // Apply patches from layout config (after plugins register their schemas)
     // This will be re-applied after plugin loading
     
+    /*
     // Real-Time Audio Input (SPSC ring buffer for tile system)
+    // Removed: Audio input is now handled by the audio_input plugin directly
     let audio_stream_rx = match AudioInputSourceRT::new(4096) {
         Ok((_source, rx)) => {
             log::info!("AudioInputSourceRT initialized with ring buffer");
@@ -153,6 +157,8 @@ fn model(app: &App) -> Model {
             None
         }
     };
+    */
+
     
     log::info!("Patch Bay initialized - modules will register via PluginManager");
 
@@ -213,11 +219,12 @@ fn model(app: &App) -> Model {
         show_tile_settings: None,
         show_layout_manager: false,
         is_sleeping: initial_sleep_state,
-        audio_stream_rx,
+        // audio_stream_rx, // Removed
+
         module_host,
         plugin_manager,
         tile_registry: tiles::create_default_registry(),
-        _gpu_renderer: GpuRenderer::new(app),
+        _compositor: tiles::Compositor::new(app),
         start_time: std::time::Instant::now(),
         frame_count: 0,
         keyboard_nav: KeyboardNav::new(),
@@ -226,20 +233,13 @@ fn model(app: &App) -> Model {
     // Apply saved tile settings from layout config
     apply_tile_settings(&model.tile_registry, &model.layout);
     
+    /*
     // Connect audio stream to AudioVisTile if available
     if let Some(rx) = model.audio_stream_rx.take() {
-        // Get the audio_vis tile from registry and connect the stream
-        if let Some(tile) = model.tile_registry.get("audio_vis") {
-            if let Ok(_t) = tile.write() {
-                // Downcast to AudioVisTile - this is tricky with trait objects
-                // For now, we'll use a different approach - store the receiver in the model
-                // and poll it in update, pushing to the tile's legacy buffer
-                log::info!("AudioVisTile found - audio stream ready (using polling bridge)");
-            }
-        }
-        // Put the receiver back
-        model.audio_stream_rx = Some(rx);
+        // ... logic removed
     }
+    */
+
     
     model
 }

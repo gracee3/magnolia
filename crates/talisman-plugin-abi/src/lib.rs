@@ -1,7 +1,7 @@
 use std::os::raw::{c_char, c_void};
 
 /// Current ABI version - increment when making breaking changes
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// Plugin manifest - describes the plugin's capabilities
 #[repr(C)]
@@ -98,20 +98,37 @@ pub enum SignalType {
     Pulse = 7,
 }
 
+/// Value/Handle union for Signal Buffer (ABI v3)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union SignalValue {
+    /// Legacy/Direct pointer to data
+    pub ptr: *mut c_void,
+    /// Shared Memory File Descriptor (POSIX shm)
+    pub shm_fd: i64,
+    /// GPU Texture ID / Handle (Backend agnostic ID)
+    pub gpu_id: u64,
+    /// Direct Integer Value
+    pub integer: i64,
+    /// Direct Float Value
+    pub float_val: f64,
+}
+
 /// Opaque signal buffer for passing data across FFI boundary
 #[repr(C)]
 pub struct SignalBuffer {
     pub signal_type: u32,
-    pub data: *mut c_void,
-    pub data_len: usize,
+    pub value: SignalValue,
+    /// Size of data or auxiliary metadata
+    pub size: u64,
 }
 
 impl SignalBuffer {
     pub fn empty() -> Self {
         Self {
             signal_type: SignalType::Pulse as u32,
-            data: std::ptr::null_mut(),
-            data_len: 0,
+            value: SignalValue { ptr: std::ptr::null_mut() },
+            size: 0,
         }
     }
 }

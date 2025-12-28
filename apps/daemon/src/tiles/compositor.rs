@@ -11,12 +11,22 @@ use nannou::prelude::*;
 /// 
 /// Uses Nannou's built-in wgpu integration for efficient rendering.
 /// All draw calls are batched for minimal CPU overhead.
-pub struct GpuRenderer {
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+/// GPU Composite Renderer
+/// 
+/// Manages high-performance rendering of:
+/// 1. Legacy primitives (lines, rects)
+/// 2. External textures from plugins (via ABI v3 handles)
+pub struct Compositor {
     /// Whether GPU acceleration is available
     available: bool,
+    /// Texture Registry: Map ID -> TextureView
+    textures: Arc<Mutex<HashMap<u64, wgpu::TextureView>>>,
 }
 
-impl GpuRenderer {
+impl Compositor {
     /// Create a new GPU renderer
     /// 
     /// Checks for GPU availability and initializes resources.
@@ -25,12 +35,43 @@ impl GpuRenderer {
         // This struct provides optimized drawing utilities
         Self {
             available: true,
+            textures: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
     /// Check if GPU acceleration is available
     pub fn is_available(&self) -> bool {
         self.available
+    }
+    
+    /// Register a texture for composition
+    /// 
+    /// Plugins provide a handle (ID), and we map implementation-specific
+    /// view to it. In shared-process mode, we might pass the View directly.
+    /// In multi-process (future), we would import DMABUF here.
+    pub fn register_texture(&self, id: u64, view: wgpu::TextureView) {
+        if let Ok(mut registry) = self.textures.lock() {
+            registry.insert(id, view);
+        }
+    }
+    
+    /// Unregister a texture
+    pub fn unregister_texture(&self, id: u64) {
+        if let Ok(mut registry) = self.textures.lock() {
+            registry.remove(&id);
+        }
+    }
+    
+    /// Render an external texture to a rectangle
+    pub fn render_texture(&self, draw: &Draw, id: u64, rect: Rect) {
+        if let Ok(registry) = self.textures.lock() {
+            if let Some(view) = registry.get(&id) {
+                // Use Nannou's texture drawing
+                draw.texture(view)
+                    .xy(rect.xy())
+                    .wh(rect.wh());
+            }
+        }
     }
     
     /// Render oscilloscope waveform (GPU path)
@@ -257,9 +298,9 @@ impl GpuRenderer {
     }
 }
 
-impl Default for GpuRenderer {
+impl Default for Compositor {
     fn default() -> Self {
-        Self { available: true }
+        Self { available: true, textures: Arc::new(Mutex::new(HashMap::new())) }
     }
 }
 

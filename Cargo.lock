@@ -889,15 +889,11 @@ name = "daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "aphrodite",
  "arboard",
  "async-trait",
- "audio_input",
  "chrono",
  "env_logger",
- "kamea",
  "log",
- "logos",
  "nannou",
  "nannou_egui",
  "serde",
@@ -905,7 +901,6 @@ dependencies = [
  "sha2",
  "sysinfo",
  "talisman_core",
- "text_tools",
  "tokio",
  "toml 0.8.23",
 ]

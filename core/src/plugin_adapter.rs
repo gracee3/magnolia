@@ -32,8 +32,8 @@ impl PluginModuleAdapter {
                 let cstring = std::ffi::CString::new(text.as_str()).unwrap_or_default();
                 SignalBuffer {
                     signal_type: SignalType::Text as u32,
-                    data: cstring.into_raw() as *mut _,
-                    data_len: 0, // null-terminated
+                    value: SignalValue { ptr: cstring.into_raw() as *mut _ },
+                    size: 0, // null-terminated
                 }
             }
             Signal::Pulse => SignalBuffer::empty(),
@@ -45,10 +45,10 @@ impl PluginModuleAdapter {
     unsafe fn decode_signal(&self, buffer: &SignalBuffer) -> Option<Signal> {
         match buffer.signal_type {
             t if t == SignalType::Text as u32 => {
-                if buffer.data.is_null() {
+                if buffer.value.ptr.is_null() {
                     return None;
                 }
-                let cstr = CStr::from_ptr(buffer.data as *const i8);
+                let cstr = CStr::from_ptr(buffer.value.ptr as *const i8);
                 Some(Signal::Text(cstr.to_string_lossy().into_owned()))
             }
             t if t == SignalType::Pulse as u32 => Some(Signal::Pulse),
@@ -142,8 +142,8 @@ impl ModuleRuntime for PluginModuleAdapter {
                     result = self.decode_signal(&signal_buf);
                     
                     // Free the buffer data if allocated by the plugin
-                     if !signal_buf.data.is_null() && signal_buf.signal_type == SignalType::Text as u32 {
-                        let _ = std::ffi::CString::from_raw(signal_buf.data as *mut i8);
+                     if !signal_buf.value.ptr.is_null() && signal_buf.signal_type == SignalType::Text as u32 {
+                        let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
                     }
                 }
                 result
@@ -160,16 +160,16 @@ impl ModuleRuntime for PluginModuleAdapter {
                     let output_ptr = (self.plugin.vtable.consume_signal)(self.plugin.instance, &signal_buf);
                     
                     // We allocated signal_buf.data in encode_signal, we must free it
-                     if !signal_buf.data.is_null() && signal_buf.signal_type == SignalType::Text as u32 {
-                        let _ = std::ffi::CString::from_raw(signal_buf.data as *mut i8);
+                     if !signal_buf.value.ptr.is_null() && signal_buf.signal_type == SignalType::Text as u32 {
+                        let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
                     }
                     
                     // Check if plugin returned an output signal
                     if !output_ptr.is_null() {
                         let output_signal = self.decode_signal(&*output_ptr);
                         // Free the output buffer that the plugin allocated
-                        if !(*output_ptr).data.is_null() && (*output_ptr).signal_type == SignalType::Text as u32 {
-                            let _ = std::ffi::CString::from_raw((*output_ptr).data as *mut i8);
+                        if !(*output_ptr).value.ptr.is_null() && (*output_ptr).signal_type == SignalType::Text as u32 {
+                            let _ = std::ffi::CString::from_raw((*output_ptr).value.ptr as *mut i8);
                         }
                         // Free the SignalBuffer struct itself (plugin allocated it)
                         let _ = Box::from_raw(output_ptr);
