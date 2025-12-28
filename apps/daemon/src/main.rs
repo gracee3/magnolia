@@ -431,11 +431,12 @@ fn update(app: &App, model: &mut Model, update: Update) {
         }
         
         let mut remaining = active_sinks.len();
+        let mut signal = Some(routed.signal);
         for patch in active_sinks {
             let payload = if remaining == 1 {
-                routed.signal
+                signal.take().expect("signal payload already taken")
             } else {
-                routed.signal.clone()
+                signal.as_ref().expect("signal payload missing").clone()
             };
             remaining -= 1;
             let _ = model.module_host.send_signal(&patch.sink_module, payload);
