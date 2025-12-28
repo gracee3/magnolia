@@ -10,6 +10,7 @@ use std::sync::{Arc, RwLock};
 pub mod clock;
 pub mod astrology;
 pub mod text_input;
+pub mod kamea;
 
 /// Context passed to tiles during rendering
 pub struct RenderContext<'a> {
@@ -116,6 +117,7 @@ pub fn create_default_registry() -> TileRegistry {
     registry.register(clock::ClockTile::new());
     registry.register(astrology::AstroTile::new());
     registry.register(text_input::TextInputTile::new());
+    registry.register(kamea::KameaTile::new());
     
     registry
 }
