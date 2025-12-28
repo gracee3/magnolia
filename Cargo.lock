@@ -246,6 +246,8 @@ dependencies = [
  "num-traits",
  "serde",
  "serde_json",
+ "talisman-plugin-abi",
+ "talisman-plugin-helper",
  "talisman_core",
  "tokio",
 ]
@@ -3641,6 +3643,13 @@ dependencies = [
 [[package]]
 name = "talisman-plugin-abi"
 version = "0.1.0"
+
+[[package]]
+name = "talisman-plugin-helper"
+version = "0.1.0"
+dependencies = [
+ "talisman-plugin-abi",
+]
 
 [[package]]
 name = "talisman_core"

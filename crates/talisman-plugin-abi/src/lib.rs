@@ -119,8 +119,10 @@ pub union SignalValue {
 pub struct SignalBuffer {
     pub signal_type: u32,
     pub value: SignalValue,
-    /// Size of data or auxiliary metadata
+    /// Size of data (bytes or count depending on type)
     pub size: u64,
+    /// Extra parameter for metadata (e.g. sample rate, dimensions)
+    pub param: u64,
 }
 
 impl SignalBuffer {
@@ -129,6 +131,7 @@ impl SignalBuffer {
             signal_type: SignalType::Pulse as u32,
             value: SignalValue { ptr: std::ptr::null_mut() },
             size: 0,
+            param: 0,
         }
     }
 }

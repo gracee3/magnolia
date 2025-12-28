@@ -7,8 +7,13 @@ edition = "2021"
 default = []
 tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:nannou_egui"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 cpal = "0.15"
+talisman-plugin-abi = { path = "../../crates/talisman-plugin-abi" }
+talisman-plugin-helper = { path = "../../crates/talisman-plugin-helper" }
 talisman_core = { path = "../../core" }
 log = "0.4"
 tokio = { version = "1.0", features = ["sync", "time"] }

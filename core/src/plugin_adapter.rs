@@ -34,6 +34,27 @@ impl PluginModuleAdapter {
                     signal_type: SignalType::Text as u32,
                     value: SignalValue { ptr: cstring.into_raw() as *mut _ },
                     size: 0, // null-terminated
+                    param: 0,
+                }
+            }
+            Signal::Audio { sample_rate, channels, data } => {
+                // Transfer ownership of data to the buffer
+                // We clone the data here because we can't easily take ownership from &Signal
+                // But in a real hot-path, efficient movement is key.
+                // For now, adapter clones.
+                let mut data_clone = data.clone();
+                let ptr = data_clone.as_mut_ptr();
+                let len = data_clone.len();
+                std::mem::forget(data_clone); // Leak it (ownership passed to buffer)
+
+                // Pack metadata into param: High 32 = Sample Rate, Low 32 = Channels
+                let param = ((*sample_rate as u64) << 32) | (*channels as u64);
+
+                SignalBuffer {
+                    signal_type: SignalType::Audio as u32,
+                    value: SignalValue { ptr: ptr as *mut _ },
+                    size: len as u64,
+                    param,
                 }
             }
             Signal::Pulse => SignalBuffer::empty(),
@@ -50,6 +71,33 @@ impl PluginModuleAdapter {
                 }
                 let cstr = CStr::from_ptr(buffer.value.ptr as *const i8);
                 Some(Signal::Text(cstr.to_string_lossy().into_owned()))
+            }
+            t if t == SignalType::Audio as u32 => {
+                if buffer.value.ptr.is_null() {
+                    return None;
+                }
+                // Unpack metadata
+                let sample_rate = (buffer.param >> 32) as u32;
+                let channels = (buffer.param & 0xFFFFFFFF) as u16;
+                let size = buffer.size as usize;
+                
+                // Reconstruct Vec from raw parts
+                // Note: We copy here to be safe and own the data in the Signal
+                // effectively treating the input buffer as borrowed.
+                // BUT, to avoid double-free or leak, we need to know who owns it.
+                // The contract is: Consumer takes ownership if it returns ptr?
+                // Or Consumer copies?
+                // The current adapter implementation assumes it TAKES ownership for freeing
+                // but decoding usually returns a new struct.
+                
+                let slice = std::slice::from_raw_parts(buffer.value.ptr as *const f32, size);
+                let data = slice.to_vec(); // Copy
+                
+                Some(Signal::Audio {
+                    sample_rate,
+                    channels,
+                    data,
+                })
             }
             t if t == SignalType::Pulse as u32 => Some(Signal::Pulse),
             _ => None,
@@ -142,8 +190,14 @@ impl ModuleRuntime for PluginModuleAdapter {
                     result = self.decode_signal(&signal_buf);
                     
                     // Free the buffer data if allocated by the plugin
-                     if !signal_buf.value.ptr.is_null() && signal_buf.signal_type == SignalType::Text as u32 {
-                        let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
+                     if !signal_buf.value.ptr.is_null() {
+                        if signal_buf.signal_type == SignalType::Text as u32 {
+                            let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
+                        } else if signal_buf.signal_type == SignalType::Audio as u32 {
+                            let size = signal_buf.size as usize;
+                            // Assume capacity == length (plugin must ensure this)
+                            let _ = Vec::from_raw_parts(signal_buf.value.ptr as *mut f32, size, size);
+                        }
                     }
                 }
                 result
@@ -158,18 +212,27 @@ impl ModuleRuntime for PluginModuleAdapter {
                 let maybe_output = unsafe {
                     let signal_buf = self.encode_signal(&signal);
                     let output_ptr = (self.plugin.vtable.consume_signal)(self.plugin.instance, &signal_buf);
-                    
-                    // We allocated signal_buf.data in encode_signal, we must free it
-                     if !signal_buf.value.ptr.is_null() && signal_buf.signal_type == SignalType::Text as u32 {
-                        let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
-                    }
+                                        // We allocated signal_buf.data in encode_signal, we must free it
+                     if !signal_buf.value.ptr.is_null() {
+                        if signal_buf.signal_type == SignalType::Text as u32 {
+                             let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
+                        } else if signal_buf.signal_type == SignalType::Audio as u32 {
+                             let size = signal_buf.size as usize;
+                             std::mem::drop(Vec::from_raw_parts(signal_buf.value.ptr as *mut f32, size, size));
+                        }
+                     }
                     
                     // Check if plugin returned an output signal
                     if !output_ptr.is_null() {
                         let output_signal = self.decode_signal(&*output_ptr);
                         // Free the output buffer that the plugin allocated
-                        if !(*output_ptr).value.ptr.is_null() && (*output_ptr).signal_type == SignalType::Text as u32 {
-                            let _ = std::ffi::CString::from_raw((*output_ptr).value.ptr as *mut i8);
+                        if !(*output_ptr).value.ptr.is_null() {
+                            if (*output_ptr).signal_type == SignalType::Text as u32 {
+                                let _ = std::ffi::CString::from_raw((*output_ptr).value.ptr as *mut i8);
+                            } else if (*output_ptr).signal_type == SignalType::Audio as u32 {
+                                let size = (*output_ptr).size as usize;
+                                let _ = Vec::from_raw_parts((*output_ptr).value.ptr as *mut f32, size, size);
+                            }
                         }
                         // Free the SignalBuffer struct itself (plugin allocated it)
                         let _ = Box::from_raw(output_ptr);
