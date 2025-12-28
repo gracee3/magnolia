@@ -166,5 +166,56 @@ impl Layout {
         }
         
         resolved
-    }
+   }
+}
+
+// =============================================================================
+// RENDERING HELPERS
+// =============================================================================
+
+/// Generate a deterministic color from a tile ID string
+/// Uses HSL color space for pleasant, distinct hues
+pub fn tile_color(id: &str) -> Srgba<u8> {
+    // Hash the string to get a deterministic value
+    let hash = id.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    
+    // Use golden ratio angle for hue distribution (avoids clustering)
+    let hue = ((hash % 360) as f32) / 360.0;
+    let saturation = 0.7;
+    let lightness = 0.55;
+    
+    // Convert HSL to RGB
+    let c = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let x = c * (1.0 - ((hue * 6.0) % 2.0 - 1.0).abs());
+    let m = lightness - c / 2.0;
+    
+    let (r, g, b) = match (hue * 6.0) as u8 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    
+    Srgba::new(
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+        255
+    )
+}
+
+/// Calculate a point on a cubic bezier curve
+pub fn bezier_point(p0: Point2, p1: Point2, p2: Point2, p3: Point2, t: f32) -> Point2 {
+    let u = 1.0 - t;
+    let tt = t * t;
+    let uu = u * u;
+    let uuu = uu * u;
+    let ttt = tt * t;
+
+    pt2(
+        uuu * p0.x + 3.0 * uu * t * p1.x + 3.0 * u * tt * p2.x + ttt * p3.x,
+        uuu * p0.y + 3.0 * uu * t * p1.y + 3.0 * u * tt * p2.y + ttt * p3.y,
+    )
 }

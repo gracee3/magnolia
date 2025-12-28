@@ -270,10 +270,7 @@ impl KeyboardNav {
         }
     }
 
-    /// Select a specific tile by ID
-    pub fn select_tile(&mut self, tile_id: String) {
-        self.selection = SelectionState::TileSelected { tile_id };
-    }
+
 
     /// Deselect current tile, remembering it for potential re-select
     pub fn deselect(&mut self) {

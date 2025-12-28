@@ -7,20 +7,14 @@ use audio_input::AudioInputSourceRT;
 use talisman_core::ring_buffer;
 
 // Layout editor and visualizer modules
-mod layout_editor;
 mod patch_visualizer;
-mod module_picker;
-mod modal;
-mod signal_handler;
 mod layout;
 mod tiles;
 mod input;
 mod theme;
 
 
-use layout_editor::LayoutEditor;
-use module_picker::ModulePicker;
-use modal::ModalLayer;
+
 use layout::Layout;
 use tiles::{TileRegistry, RenderContext, GpuRenderer};
 use input::KeyboardNav;
@@ -64,13 +58,6 @@ struct Model {
     
     // Audio State - Real-time audio ring buffer receiver (for tile system)
     audio_stream_rx: Option<ring_buffer::RingBufferReceiver<talisman_core::AudioFrame>>,
-    
-    // Layout Editor State (Phase 5)
-    layout_editor: LayoutEditor,
-    module_picker: ModulePicker,
-    
-    // Modal Layer (centralized modal management)
-    modal_layer: ModalLayer,
     
     // Tile System (Phase 6: Settings Architecture)
     tile_registry: TileRegistry,
@@ -230,9 +217,6 @@ fn model(app: &App) -> Model {
         audio_stream_rx,
         module_host,
         plugin_manager,
-        layout_editor: LayoutEditor::new(),
-        module_picker: ModulePicker::new(),
-        modal_layer: ModalLayer::new(),
         tile_registry: tiles::create_default_registry(),
         gpu_renderer: GpuRenderer::new(app),
         start_time: std::time::Instant::now(),
@@ -929,82 +913,12 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
         return;
     }
     
+    
     // Clear context menu if clicking away (and egui didn't want it)
     model.context_menu = None;
 
-    // Phase 5: Edit mode mouse handling - CLICK-BASED (no drag)
-    if model.layout_editor.edit_mode && button == MouseButton::Left {
-        let mouse_pos = app.mouse.position();
-        let (col_tracks, row_tracks) = model.layout.config.generate_tracks();
-        let col_sizes = model.layout.resolve_tracks(&col_tracks, app.window_rect().w());
-        let row_sizes = model.layout.resolve_tracks(&row_tracks, app.window_rect().h());
-        
-        // Get the grid cell under the mouse
-        if let Some((col, row)) = model.layout_editor.get_grid_cell(
-            mouse_pos,
-            app.window_rect(),
-            &col_sizes,
-            &row_sizes
-        ) {
-            // Update cursor position to clicked cell
-            model.layout_editor.cursor_cell = (col, row);
-            
-            use layout_editor::EditState;
-            match &model.layout_editor.edit_state {
-                EditState::Navigation => {
-                    // Click on tile = select it
-                    if let Some(tile) = layout_editor::LayoutEditor::get_tile_at_cell(&model.layout.config, col, row) {
-                        model.layout_editor.select_tile(tile.id.clone());
-                        log::info!("Selected tile: {}", tile.id);
-                    }
-                    // Empty cell click - could open module picker
-                },
-                EditState::TileSelected { .. } => {
-                    // Click elsewhere deselects, or click on another tile selects it
-                    if let Some(tile) = layout_editor::LayoutEditor::get_tile_at_cell(&model.layout.config, col, row) {
-                        model.layout_editor.select_tile(tile.id.clone());
-                        log::info!("Selected tile: {}", tile.id);
-                    } else {
-                        model.layout_editor.deselect();
-                    }
-                },
-                EditState::MoveResize { tile_id, .. } => {
-                    // Handle move/resize clicks
-                    let tile_id = tile_id.clone();
-                    if model.layout_editor.handle_move_resize_click((col, row), &mut model.layout.config) {
-                        log::info!("Move/resize completed for tile: {}", tile_id);
-                    }
-                },
+    // Mouse handling for tile selection (keyboard-first navigation)
 
-                EditState::Patching { tile_id, role } => {
-                    // Complete patch if clicking on another tile
-                    use layout_editor::PatchRole;
-                    if *role != PatchRole::SelectingRole {
-                        if let Some(target_tile) = layout_editor::LayoutEditor::get_tile_at_cell(&model.layout.config, col, row) {
-                            if target_tile.id != *tile_id {
-                                // Complete patch
-                                let tile_to_module = |tid: &str| -> Option<String> {
-                                    model.layout.config.tiles.iter()
-                                        .find(|t| t.id == tid)
-                                        .map(|t| t.module.clone())
-                                };
-                                if let Some(_patch) = model.layout_editor.complete_patch(
-                                    &target_tile.id,
-                                    &model.layout.config,
-                                    tile_to_module
-                                ) {
-                                    log::info!("Patch created (ports to be determined)");
-                                }
-                            }
-                        }
-                    }
-                },
-            }
-            return; // Handled edit mode click
-        }
-    }
-
-    
 
     if button == MouseButton::Left {
 
@@ -1091,22 +1005,8 @@ fn mouse_released(_app: &App, _model: &mut Model, _button: MouseButton) {
     // No-op: All operations are click-based, not drag-based
 }
 
-fn mouse_moved(app: &App, model: &mut Model, pos: Point2) {
-    if !model.layout_editor.edit_mode {
-        return;
-    }
-    
-    // Update hover cell for visual feedback
-    let (col_tracks, row_tracks) = model.layout.config.generate_tracks();
-    let col_sizes = model.layout.resolve_tracks(&col_tracks, app.window_rect().w());
-    let row_sizes = model.layout.resolve_tracks(&row_tracks, app.window_rect().h());
-    
-    model.layout_editor.hover_cell = model.layout_editor.get_grid_cell(
-        pos,
-        app.window_rect(),
-        &col_sizes,
-        &row_sizes
-    );
+fn mouse_moved(_app: &App, _model: &mut Model, _pos: Point2) {
+    // Mouse movement handling - keyboard-first navigation only
 }
 
 /// Dispatch keybinds configured for the currently selected tile
@@ -1152,7 +1052,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     // 1. Egui wants keyboard input (e.g., TextEdit is focused)
     // 2. Modal layer is active (modals handle their own keys via egui)
     if model.egui.ctx().wants_keyboard_input() 
-        || model.modal_layer.is_active() 
+        
     {
         return;
     }
@@ -1241,17 +1141,14 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                                     let new_colspan = (colspan as i32 + delta_col).max(1) as usize;
                                     let new_rowspan = (rowspan as i32 + delta_row).max(1) as usize;
                                     
-                                    // Validate placement
-                                    if model.layout_editor.is_placement_valid(
-                                        &model.layout.config, &tile_id, col, row, new_colspan, new_rowspan
-                                    ) {
-                                        // Now mutate
-                                        if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
-                                            tile.colspan = Some(new_colspan);
-                                            tile.rowspan = Some(new_rowspan);
-                                            model.layout_editor.pending_changes = true;
-                                            log::debug!("Resized tile to {}x{}", new_colspan, new_rowspan);
-                                        }
+                                    // TODO: Re-implement collision detection for interactive layout editing
+                                    // if model.layout_editor.is_placement_valid(...) { ... }
+                                    //
+                                    // For now, allow all resizes
+                                    if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
+                                        tile.colspan = Some(new_colspan);
+                                        tile.rowspan = Some(new_rowspan);
+                                        log::debug!("Resized tile to {}x{}", new_colspan, new_rowspan);
                                     }
                                 }
                             },
@@ -1261,23 +1158,22 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                                 model.keyboard_nav.navigate(direction);
                                 let (new_col, new_row) = model.keyboard_nav.cursor;
                                 
-                                if model.layout_editor.is_placement_valid(
-                                    &model.layout.config, &tile_id, new_col, new_row, 1, 1
-                                ) {
-                                    if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
-                                        tile.col = new_col;
-                                        tile.row = new_row;
-                                        tile.colspan = Some(1);
-                                        tile.rowspan = Some(1);
-                                        model.layout_editor.pending_changes = true;
-                                        log::debug!("Moved tile to ({}, {})", new_col, new_row);
-                                    }
+                                // TODO: Re-implement collision detection for interactive layout editing
+                                // if model.layout_editor.is_placement_valid(...) { ... }
+                                //
+                                // For now, allow all moves
+                                if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
+                                    tile.col = new_col;
+                                    tile.row = new_row;
+                                    tile.colspan = Some(1);
+                                    tile.rowspan = Some(1);
+                                    log::debug!("Moved tile to ({}, {})", new_col, new_row);
                                 }
                             },
                             LayoutSubState::Navigation => {
                                 // Standard cursor navigation in layout mode
                                 model.keyboard_nav.navigate(direction);
-                                model.layout_editor.cursor_cell = model.keyboard_nav.cursor;
+                                // Keyboard cursor is tracked in keyboard_nav
                                 
                                 // Auto-select tile if present
                                 if let Some(tile_id) = model.keyboard_nav.select_tile_at_cursor(&model.layout.config) {
@@ -1307,7 +1203,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                         } else {
                             // No tile selected → enter layout mode
                             model.keyboard_nav.enter_layout_mode();
-                            model.layout_editor.edit_mode = true;
+                            // TODO: Set edit mode flag when interactive editing is re-implemented
                             log::info!("Entered layout mode");
                         }
                     },
@@ -1339,7 +1235,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                     InputMode::Layout => {
                         // Exit layout, enter patch
                         model.keyboard_nav.exit_layout_mode();
-                        model.layout_editor.edit_mode = false;
+                        // Layout editing mode handled by keyboard_nav
                         model.keyboard_nav.enter_patch_mode();
                         log::info!("Switched from layout to patch mode");
                     },
@@ -1423,7 +1319,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                         log::debug!("Exited resize/move mode");
                     },
                     EscapeResult::ExitedMode => {
-                        model.layout_editor.edit_mode = false;
+                        // Layout editing mode handled by keyboard_nav
                         model.selected_tile = None;
                         log::debug!("Exited mode (layout/patch) back to normal");
                     },
@@ -1434,7 +1330,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 }
                 
                 // Sync layout_editor state
-                model.layout_editor.edit_mode = model.keyboard_nav.mode == InputMode::Layout;
+                // Edit mode tracked in keyboard_nav.mode
             },
             
             _ => {}
@@ -1575,68 +1471,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
 
     
-    // Render layout editor overlay (Phase 5) - KEYBOARD-DRIVEN UI
-    if model.layout_editor.edit_mode {
-        let (col_tracks, row_tracks) = model.layout.config.generate_tracks();
-        let col_sizes = model.layout.resolve_tracks(&col_tracks, app.window_rect().w());
-        let row_sizes = model.layout.resolve_tracks(&row_tracks, app.window_rect().h());
-        
-        // Render grid overlay
-        layout_editor::render_edit_overlay(&draw, app.window_rect(), &col_sizes, &row_sizes);
-        
-        // Render cell indicators (cursor, validity, selection)
-        layout_editor::render_cell_indicators(
-            &draw,
-            app.window_rect(),
-            &col_sizes,
-            &row_sizes,
-            &model.layout.config,
-            &model.layout_editor,
-        );
-        
-        // Render tile labels with module names
-        layout_editor::render_tile_labels(
-            &draw,
-            app.window_rect(),
-            &model.layout.config,
-            &col_sizes,
-            &row_sizes,
-            model.layout_editor.selected_tile_id(),
-        );
-        
-        // Render patch cables in edit mode
-        layout_editor::render_patch_cables(
-            &draw,
-            app.window_rect(),
-            &model.layout.config.patches,
-            &model.layout.config,
-            &col_sizes,
-            &row_sizes,
-            |tile_id| tile_to_module(tile_id),
-        );
-        
-        // Show edit mode indicator
-        draw.text("EDIT MODE")
-            .xy(pt2(app.window_rect().left() + 60.0, app.window_rect().top() - 15.0))
-            .color(rgba(0.0, 1.0, 1.0, 0.8))
-            .font_size(12);
-        
-        // Show current state
-        let state_text = match &model.layout_editor.edit_state {
-            layout_editor::EditState::Navigation => "NAV",
-            layout_editor::EditState::TileSelected { .. } => "SEL",
-            layout_editor::EditState::MoveResize { .. } => "MOVE",
-            layout_editor::EditState::Patching { .. } => "PATCH",
-        };
-
-        draw.text(state_text)
-            .xy(pt2(app.window_rect().left() + 130.0, app.window_rect().top() - 15.0))
-            .color(rgba(1.0, 0.8, 0.0, 0.8))
-            .font_size(12);
-    }
     
-    // Render patch cables (always visible if not maximized and not in edit mode)
-    if model.maximized_tile.is_none() && !model.layout.config.patches.is_empty() && !model.layout_editor.edit_mode {
+    // [Future: Interactive layout editing visualization will go here]
+    
+    // Render patch cables (always visible if not maximized)
+    if model.maximized_tile.is_none() && !model.layout.config.patches.is_empty() {
         let mut tile_rects = Vec::new();
         for tile in &model.layout.config.tiles {
             if let Some(rect) = model.layout.calculate_rect(tile) {
