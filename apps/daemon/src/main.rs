@@ -1411,74 +1411,19 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
 
 
-    // 2. PROCESS SIGNALS from Orchestrator (High speed!)
-
-    while let Ok(signal) = model.receiver.try_recv() {
-        match signal {
-            Signal::Text(text) => {
-                model.current_intent = text.clone();
-                
-                let mut hasher = sha2::Sha256::new();
-                use sha2::Digest;
-                hasher.update(text.as_bytes());
-                let result = hasher.finalize();
-                let mut seed = [0u8; 32];
-                seed.copy_from_slice(&result);
-
-                let len_factor = text.len().min(100) as usize; 
-                let size = if len_factor > 10 { 5 } else { 4 };
-                model.config.grid_rows = size;
-                model.config.grid_cols = size;
-                
-                // Find tile for kamea
-                let sigil_tile = model.layout.config.tiles.iter().find(|t| t.module == "kamea_sigil");
-                if let Some(tile) = sigil_tile {
-                     if let Some(rect) = model.layout.calculate_rect(tile) {
-                         model.config.spacing = rect.w() / (size as f32 * 2.0); 
-                     } else {
-                         model.config.spacing = 30.0;
-                     }
-                } else {
-                     model.config.spacing = 30.0;
-                }
-
-                model.path_points = kamea::generate_path(seed, model.config)
-                    .into_iter()
-                    .map(|(x, y)| pt2(x, y))
-                    .collect();
-            },
-            Signal::Computed { source, content } => {
-                if source == "word_count" {
-                    model.word_count = content;
-                } else if source == "devowelizer" {
-                    model.devowel_text = content;
-                }
-            },
-            Signal::Audio { data, .. } => {
-                // Push audio samples to buffer
-                for sample in data {
-                     model.audio_buffer.push_back(sample);
-                }
-                // Maintain buffer size (e.g. 2048)
-                while model.audio_buffer.len() > 2048 {
-                    model.audio_buffer.pop_front();
-                }
-            },
-            Signal::Astrology { sun_sign, moon_sign, rising_sign, planetary_positions } => {
-                // Format planetary positions for display
-                let planets: Vec<String> = planetary_positions.iter()
-                    .take(5) // First 5 planets
-                    .map(|(name, lon)| format!("{}: {:.0}°", name, lon % 360.0))
-                    .collect();
-                
-                model.astro_data = format!(
-                    "{}|{}|{}|{}",
-                    sun_sign, moon_sign, rising_sign, planets.join("|")
-                );
-            },
-            _ => {}
-        }
-    }
+    // 2. PROCESS SIGNALS from Orchestrator (using signal_handler module)
+    signal_handler::process_signals(
+        &model.receiver,
+        &mut model.current_intent,
+        &mut model.word_count,
+        &mut model.devowel_text,
+        &mut model.astro_data,
+        &mut model.path_points,
+        &mut model.config,
+        &model.layout.config,
+        &mut model.audio_buffer,
+        |tile| model.layout.calculate_rect(tile),
+    );
 }
 
 fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {

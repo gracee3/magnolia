@@ -5,37 +5,20 @@
 
 use nannou::prelude::*;
 use talisman_core::Signal;
-use kamea::{self, SigilConfig};
+use kamea::SigilConfig;
 use std::collections::VecDeque;
 use talisman_core::LayoutConfig;
-
-/// Output fields updated by signal processing
-pub struct SignalOutputs {
-    pub current_intent: String,
-    pub word_count: String,
-    pub devowel_text: String,
-    pub astro_data: String,
-    pub path_points: Vec<Point2>,
-}
-
-impl Default for SignalOutputs {
-    fn default() -> Self {
-        Self {
-            current_intent: String::new(),
-            word_count: String::new(),
-            devowel_text: String::new(),
-            astro_data: String::new(),
-            path_points: Vec::new(),
-        }
-    }
-}
 
 /// Process incoming signals from the receiver
 /// 
 /// This function drains the signal channel and updates the relevant state.
 pub fn process_signals(
     receiver: &std::sync::mpsc::Receiver<Signal>,
-    outputs: &mut SignalOutputs,
+    current_intent: &mut String,
+    word_count: &mut String,
+    devowel_text: &mut String,
+    astro_data: &mut String,
+    path_points: &mut Vec<Point2>,
     config: &mut SigilConfig,
     layout_config: &LayoutConfig,
     audio_buffer: &mut VecDeque<f32>,
@@ -44,7 +27,7 @@ pub fn process_signals(
     while let Ok(signal) = receiver.try_recv() {
         match signal {
             Signal::Text(text) => {
-                outputs.current_intent = text.clone();
+                *current_intent = text.clone();
                 
                 let mut hasher = sha2::Sha256::new();
                 use sha2::Digest;
@@ -70,16 +53,16 @@ pub fn process_signals(
                     config.spacing = 30.0;
                 }
 
-                outputs.path_points = kamea::generate_path(seed, *config)
+                *path_points = kamea::generate_path(seed, *config)
                     .into_iter()
                     .map(|(x, y)| pt2(x, y))
                     .collect();
             }
             Signal::Computed { source, content } => {
                 if source == "word_count" {
-                    outputs.word_count = content;
+                    *word_count = content;
                 } else if source == "devowelizer" {
-                    outputs.devowel_text = content;
+                    *devowel_text = content;
                 }
             }
             Signal::Audio { data, .. } => {
@@ -105,7 +88,7 @@ pub fn process_signals(
                     .map(|(name, lon)| format!("{}: {:.0}°", name, lon % 360.0))
                     .collect();
 
-                outputs.astro_data = format!(
+                *astro_data = format!(
                     "{}|{}|{}|{}",
                     sun_sign,
                     moon_sign,

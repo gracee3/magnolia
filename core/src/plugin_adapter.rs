@@ -55,6 +55,44 @@ impl PluginModuleAdapter {
             _ => None,
         }
     }
+    
+    // === HOT-RELOAD LIFECYCLE HOOKS ===
+    
+    /// Called before the plugin is unloaded during hot-reload.
+    /// Allows the plugin to flush pending data, save state, etc.
+    pub fn pre_unload(&mut self) {
+        log::info!("Plugin {} preparing for hot-reload unload", self.id_cache);
+        
+        // Disable the plugin to stop it from processing
+        self.set_enabled(false);
+        
+        // Give it a moment to finish any pending work
+        // In a real implementation, you might want to:
+        // - Flush any pending output signals
+        // - Save plugin state to disk
+        // - Close file handles or network connections
+    }
+    
+    /// Called after a new plugin instance is loaded during hot-reload.
+    /// Can be used to restore state from the previous instance.
+    pub fn post_reload(&mut self, _previous_state: Option<Vec<u8>>) {
+        log::info!("Plugin {} completed hot-reload", self.id_cache);
+        
+        // Re-enable the plugin
+        self.set_enabled(true);
+        
+        // In a real implementation, you might:
+        // - Restore saved state
+        // - Re-establish connections
+        // - Notify the plugin of configuration changes
+    }
+    
+    /// Get plugin state for persistence across hot-reload (placeholder)
+    pub fn get_state(&self) -> Option<Vec<u8>> {
+        // Future: Plugins could implement a get_state callback in the vtable
+        // that returns serialized state
+        None
+    }
 }
 
 #[async_trait]
