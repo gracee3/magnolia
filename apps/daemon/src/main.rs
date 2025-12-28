@@ -246,15 +246,11 @@ fn model(app: &App) -> Model {
 
 
 /// Map tile ID to module ID for PatchBay
+/// Map tile ID to module ID for PatchBay
+/// In the microkernel architecture, we prefer 1:1 mapping or explicit config.
+/// For now, we default to using the tile_id as the module_id.
 fn tile_to_module(tile_id: &str) -> String {
-    match tile_id {
-        "editor_pane" => "editor".to_string(),
-        "wc_pane" => "word_count".to_string(),
-        "dvwl_pane" => "devowelizer".to_string(),
-        "astro_pane" => "astrology_display".to_string(),
-        "sigil_pane" | "kamea_sigil" => "kamea_printer".to_string(),
-        _ => tile_id.to_string(), // fallback: use tile_id as module_id
-    }
+    tile_id.to_string()
 }
 
 /// Apply saved settings from layout config to all tiles in registry

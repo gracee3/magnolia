@@ -27,8 +27,8 @@ impl Layout {
         let content = content.unwrap_or_else(|| {
             println!("Warning: Could not load layout.toml from {:?}, using default.", paths);
             r#"
-            columns = ["250px", "1fr"]
-            rows = ["40px", "1fr", "30px"]
+            columns = ["1fr"]
+            rows = ["1fr"]
             
             [[tiles]]
             id = "clock"
@@ -36,20 +36,6 @@ impl Layout {
             row = 0
             colspan = 1
             module = "clock"
-            
-            [[tiles]]
-            id = "astro"
-            col = 1
-            row = 0
-            colspan = 1
-            module = "astro"
-            
-            [[tiles]]
-            id = "main"
-            col = 0
-            row = 1
-            colspan = 2
-            module = "text_input"
             "# .to_string()
         });
             
