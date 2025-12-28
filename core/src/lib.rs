@@ -34,8 +34,56 @@ pub use sandbox::{create_plugin_sandbox, apply_sandbox};
 
 pub mod plugin_signing;
 pub use plugin_signing::PluginVerifier;
+
+/// Symbolic Kamea grid size names mapped to dimensions
+/// Based on traditional planetary magic squares
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KameaGrid {
+    Saturn,   // 3×3
+    Jupiter,  // 4×4
+    Mars,     // 5×5
+    Sun,      // 6×6
+    Venus,    // 7×7 (default)
+    Mercury,  // 8×8
+    Moon,     // 9×9
+}
+
+impl KameaGrid {
+    /// Get grid dimensions (cols, rows)
+    pub fn dimensions(&self) -> (usize, usize) {
+        match self {
+            KameaGrid::Saturn => (3, 3),
+            KameaGrid::Jupiter => (4, 4),
+            KameaGrid::Mars => (5, 5),
+            KameaGrid::Sun => (6, 6),
+            KameaGrid::Venus => (7, 7),
+            KameaGrid::Mercury => (8, 8),
+            KameaGrid::Moon => (9, 9),
+        }
+    }
+
+    /// Parse from string
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "saturn" | "3" | "3x3" => Some(KameaGrid::Saturn),
+            "jupiter" | "4" | "4x4" => Some(KameaGrid::Jupiter),
+            "mars" | "5" | "5x5" => Some(KameaGrid::Mars),
+            "sun" | "6" | "6x6" => Some(KameaGrid::Sun),
+            "venus" | "7" | "7x7" => Some(KameaGrid::Venus),
+            "mercury" | "8" | "8x8" => Some(KameaGrid::Mercury),
+            "moon" | "9" | "9x9" => Some(KameaGrid::Moon),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutConfig {
+    /// Symbolic Kamea grid size (optional, overrides columns/rows when set)
+    /// Values: "saturn" (3×3), "jupiter" (4×4), "mars" (5×5),
+    /// "sun" (6×6), "venus" (7×7), "mercury" (8×8), "moon" (9×9)
+    #[serde(default)]
+    pub grid: Option<String>,
     pub columns: Vec<String>, // e.g. "30%", "1fr", "200px"
     pub rows: Vec<String>,
     pub tiles: Vec<TileConfig>,
@@ -44,6 +92,35 @@ pub struct LayoutConfig {
     #[serde(default)]
     pub is_sleeping: bool,
 }
+
+impl LayoutConfig {
+    /// Resolve grid to column/row counts
+    /// Returns (cols, rows) tuple
+    pub fn resolve_grid(&self) -> (usize, usize) {
+        if let Some(ref grid_name) = self.grid {
+            if let Some(kamea) = KameaGrid::from_str(grid_name) {
+                return kamea.dimensions();
+            }
+        }
+        // Fallback to explicit columns/rows
+        (self.columns.len().max(1), self.rows.len().max(1))
+    }
+
+    /// Generate equal-sized track definitions for symbolic grid
+    pub fn generate_tracks(&self) -> (Vec<String>, Vec<String>) {
+        let (cols, rows) = self.resolve_grid();
+        if self.grid.is_some() {
+            // Generate 1fr tracks for symbolic grid
+            let col_tracks: Vec<String> = (0..cols).map(|_| "1fr".to_string()).collect();
+            let row_tracks: Vec<String> = (0..rows).map(|_| "1fr".to_string()).collect();
+            (col_tracks, row_tracks)
+        } else {
+            (self.columns.clone(), self.rows.clone())
+        }
+    }
+}
+
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TileConfig {

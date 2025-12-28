@@ -1,9 +1,18 @@
+grid = "venus"
 columns = [
-    "40%",
     "1fr",
-    "250px",
+    "1fr",
+    "1fr",
+    "1fr",
+    "1fr",
+    "1fr",
+    "1fr",
 ]
 rows = [
+    "1fr",
+    "1fr",
+    "1fr",
+    "1fr",
     "1fr",
     "1fr",
     "1fr",
@@ -14,37 +23,46 @@ is_sleeping = false
 id = "editor_pane"
 col = 0
 row = 0
-colspan = 1
-rowspan = 2
+colspan = 3
+rowspan = 4
 module = "editor"
 enabled = true
 
 [[tiles]]
 id = "dvwl_pane"
-col = 2
+col = 4
 row = 0
-colspan = 1
-rowspan = 1
+colspan = 3
+rowspan = 2
 module = "devowelizer"
 enabled = true
 
 [[tiles]]
 id = "audio_pane"
-col = 0
-row = 1
+col = 3
+row = 0
 colspan = 1
-rowspan = 1
+rowspan = 2
 module = "audio_input"
 enabled = true
 
 [[tiles]]
 id = "word_count_new"
-col = 2
+col = 4
 row = 2
-colspan = 1
+colspan = 3
 rowspan = 2
 module = "word_count"
 enabled = true
+
+[[tiles]]
+id = "kamea_sigil"
+col = 0
+row = 4
+colspan = 4
+rowspan = 3
+module = "kamea_sigil"
+enabled = false
 
 [[patches]]
 id = "patch_1"

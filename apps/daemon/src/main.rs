@@ -159,8 +159,10 @@ impl Layout {
 
     // Helper to calculate Grid Rect directly from Col/Row
     fn calculate_rect(&self, tile: &TileConfig) -> Option<Rect> {
-        let cols = self.resolve_tracks(&self.config.columns, self.window_rect.w());
-        let rows = self.resolve_tracks(&self.config.rows, self.window_rect.h());
+        let (col_tracks, row_tracks) = self.config.generate_tracks();
+        let cols = self.resolve_tracks(&col_tracks, self.window_rect.w());
+        let rows = self.resolve_tracks(&row_tracks, self.window_rect.h());
+
         
         let start_x = cols.iter().take(tile.col).sum::<f32>();
         let width = cols.iter().skip(tile.col).take(tile.colspan.unwrap_or(1)).sum::<f32>();
@@ -1379,52 +1381,77 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
     // Clear context menu if clicking away (and egui didn't want it)
     model.context_menu = None;
 
-    // Phase 5: Edit mode mouse handling
+    // Phase 5: Edit mode mouse handling - CLICK-BASED (no drag)
     if model.layout_editor.edit_mode && button == MouseButton::Left {
         let mouse_pos = app.mouse.position();
-        let col_sizes = model.layout.resolve_tracks(&model.layout.config.columns, app.window_rect().w());
-        let row_sizes = model.layout.resolve_tracks(&model.layout.config.rows, app.window_rect().h());
+        let (col_tracks, row_tracks) = model.layout.config.generate_tracks();
+        let col_sizes = model.layout.resolve_tracks(&col_tracks, app.window_rect().w());
+        let row_sizes = model.layout.resolve_tracks(&row_tracks, app.window_rect().h());
         
-        // Check if clicking on a resize handle (8px tolerance)
-        let mut x_accum = app.window_rect().left();
-        for (i, &width) in col_sizes.iter().enumerate() {
-            x_accum += width;
-            let handle_x = x_accum;
-            if (mouse_pos.x - handle_x).abs() < 8.0 && i < col_sizes.len() - 1 {
-                model.layout_editor.start_resize_column(i, mouse_pos.x);
-                log::info!("Started resizing column {}", i);
-                return;
+        // Get the grid cell under the mouse
+        if let Some((col, row)) = model.layout_editor.get_grid_cell(
+            mouse_pos,
+            app.window_rect(),
+            &col_sizes,
+            &row_sizes
+        ) {
+            // Update cursor position to clicked cell
+            model.layout_editor.cursor_cell = (col, row);
+            
+            use layout_editor::EditState;
+            match &model.layout_editor.edit_state {
+                EditState::Navigation => {
+                    // Click on tile = select it
+                    if let Some(tile) = layout_editor::LayoutEditor::get_tile_at_cell(&model.layout.config, col, row) {
+                        model.layout_editor.select_tile(tile.id.clone());
+                        log::info!("Selected tile: {}", tile.id);
+                    }
+                    // Empty cell click - could open module picker
+                },
+                EditState::TileSelected { .. } => {
+                    // Click elsewhere deselects, or click on another tile selects it
+                    if let Some(tile) = layout_editor::LayoutEditor::get_tile_at_cell(&model.layout.config, col, row) {
+                        model.layout_editor.select_tile(tile.id.clone());
+                        log::info!("Selected tile: {}", tile.id);
+                    } else {
+                        model.layout_editor.deselect();
+                    }
+                },
+                EditState::SettingPosition { tile_id, start_cell } => {
+                    // Setting position bounds - handle clicks
+                    let tile_id = tile_id.clone();
+                    if model.layout_editor.set_position_cell((col, row), &mut model.layout.config) {
+                        log::info!("Position set for tile: {}", tile_id);
+                    }
+                },
+                EditState::Patching { tile_id, role } => {
+                    // Complete patch if clicking on another tile
+                    use layout_editor::PatchRole;
+                    if *role != PatchRole::SelectingRole {
+                        if let Some(target_tile) = layout_editor::LayoutEditor::get_tile_at_cell(&model.layout.config, col, row) {
+                            if target_tile.id != *tile_id {
+                                // Complete patch
+                                let tile_to_module = |tid: &str| -> Option<String> {
+                                    model.layout.config.tiles.iter()
+                                        .find(|t| t.id == tid)
+                                        .map(|t| t.module.clone())
+                                };
+                                if let Some(_patch) = model.layout_editor.complete_patch(
+                                    &target_tile.id,
+                                    &model.layout.config,
+                                    tile_to_module
+                                ) {
+                                    log::info!("Patch created (ports to be determined)");
+                                }
+                            }
+                        }
+                    }
+                },
             }
-        }
-        
-        let mut y_accum = app.window_rect().top();
-        for (i, &height) in row_sizes.iter().enumerate() {
-            y_accum -= height;
-            let handle_y = y_accum;
-            if (mouse_pos.y - handle_y).abs() < 8.0 && i < row_sizes.len() - 1 {
-                model.layout_editor.start_resize_row(i, mouse_pos.y);
-                log::info!("Started resizing row {}", i);
-                return;
-            }
-        }
-        
-        // Check if clicking on a tile to start dragging
-        for tile in &model.layout.config.tiles {
-            if let Some(rect) = model.layout.calculate_rect(tile) {
-                if rect.contains(mouse_pos) {
-                    let offset = pt2(mouse_pos.x - rect.x(), mouse_pos.y - rect.y());
-                    model.layout_editor.start_drag(
-                        tile.id.clone(),
-                        tile.col,
-                        tile.row,
-                        offset
-                    );
-                    log::info!("Started dragging tile: {}", tile.id);
-                    return;
-                }
-            }
+            return; // Handled edit mode click
         }
     }
+
     
 
     if button == MouseButton::Left {
@@ -1507,48 +1534,9 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
 }
 
 
-fn mouse_released(app: &App, model: &mut Model, button: MouseButton) {
-    if button == MouseButton::Left && model.layout_editor.edit_mode {
-        let mouse_pos = app.mouse.position();
-        let col_sizes = model.layout.resolve_tracks(&model.layout.config.columns, app.window_rect().w());
-        let row_sizes = model.layout.resolve_tracks(&model.layout.config.rows, app.window_rect().h());
-        
-        // End resize if resizing
-        if let Some(handle) = &model.layout_editor.resize_handle {
-            match handle {
-                layout_editor::ResizeHandle::Column { index, .. } => {
-                    // Calculate new column sizes
-                    // For now, just cancel - full implementation needs track recalculation
-                    model.layout_editor.cancel_resize();
-                    log::info!("Column resize released (calculation TODO)");
-                },
-                layout_editor::ResizeHandle::Row { index, .. } => {
-                    model.layout_editor.cancel_resize();
-                    log::info!("Row resize released (calculation TODO)");
-                }
-            }
-            model.layout.save();
-            return;
-        }
-        
-        // End tile drag if dragging
-        if model.layout_editor.dragging_tile.is_some() {
-            // Get grid cell under mouse
-            if let Some((col, row)) = model.layout_editor.get_grid_cell(
-                mouse_pos,
-                app.window_rect(),
-                &col_sizes,
-                &row_sizes
-            ) {
-                if model.layout_editor.end_drag(col, row, &mut model.layout.config) {
-                    log::info!("Moved tile to col={}, row={}", col, row);
-                    model.layout.save();
-                }
-            } else {
-                model.layout_editor.cancel_drag();
-            }
-        }
-    }
+
+fn mouse_released(_app: &App, _model: &mut Model, _button: MouseButton) {
+    // No-op: All operations are click-based, not drag-based
 }
 
 fn mouse_moved(app: &App, model: &mut Model, pos: Point2) {
@@ -1556,28 +1544,29 @@ fn mouse_moved(app: &App, model: &mut Model, pos: Point2) {
         return;
     }
     
-    // Update resize preview if resizing
-    if model.layout_editor.resize_handle.is_some() {
-        // Preview resize would update here
-        // For now, just acknowledge movement
-    }
+    // Update hover cell for visual feedback
+    let (col_tracks, row_tracks) = model.layout.config.generate_tracks();
+    let col_sizes = model.layout.resolve_tracks(&col_tracks, app.window_rect().w());
+    let row_sizes = model.layout.resolve_tracks(&row_tracks, app.window_rect().h());
     
-    // Update drag preview if dragging
-    if model.layout_editor.dragging_tile.is_some() {
-        // Drag preview updates automatically via render logic
-    }
+    model.layout_editor.hover_cell = model.layout_editor.get_grid_cell(
+        pos,
+        app.window_rect(),
+        &col_sizes,
+        &row_sizes
+    );
 }
+
 
 fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     let ctrl = _app.keys.mods.ctrl();
+    let shift = _app.keys.mods.shift();
     
     if ctrl {
         match key {
             Key::C => {
                 // COPY logic
                 if let Some(selected) = &model.selected_tile {
-                    // Map selected ID to content
-                    // Note: This relies on known IDs. 
                     let content = if selected == "wc_pane" {
                          Some(model.word_count.clone())
                     } else if selected == "dvwl_pane" {
@@ -1585,11 +1574,8 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                     } else if selected == "astro_pane" {
                          Some(model.astro_data.clone())
                     } else if selected == "editor_pane" {
-                         // Editor copy handled by Egui natively if focused?
-                         // If we clicked the tile but Egui isn't focused, we might want to copy buffer?
                          Some(model.text_buffer.clone())
                     } else if selected == "sigil_pane" {
-                         // Can't copy vector graphics to text clipboard easily
                          None 
                     } else {
                          None
@@ -1607,14 +1593,12 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 }
             },
             Key::V => {
-                 // PASTE Logic
                  if let Some(selected) = &model.selected_tile {
                      if selected == "editor_pane" {
                           if let Some(cb) = &mut model.clipboard {
                                match cb.get_text() {
                                    Ok(text) => {
                                         model.text_buffer.push_str(&text);
-                                        // Trigger Signal
                                         let _ = model.router_tx.try_send(Signal::Text(model.text_buffer.clone()));
                                    },
                                    Err(e) => log::error!("Clipboard Paste Failed: {}", e)
@@ -1628,25 +1612,87 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     } else {
         // Non-Ctrl keys
         match key {
+            // E - Toggle Edit Mode (saves on exit)
             Key::E => {
-                model.layout_editor.toggle_edit_mode();
+                let should_save = model.layout_editor.toggle_edit_mode();
                 if model.layout_editor.edit_mode {
                     log::info!("Layout edit mode: ENABLED");
                 } else {
                     log::info!("Layout edit mode: DISABLED");
-                    model.layout.save();
+                    if should_save {
+                        model.layout.save();
+                        log::info!("Layout saved on exit.");
+                    }
                 }
             },
+            
+            // Arrow Keys - Navigate grid cursor (edit mode only)
+            Key::Up | Key::Down | Key::Left | Key::Right => {
+                if model.layout_editor.edit_mode {
+                    let (grid_cols, grid_rows) = model.layout.config.resolve_grid();
+                    let direction = match key {
+                        Key::Up => layout_editor::Direction::Up,
+                        Key::Down => layout_editor::Direction::Down,
+                        Key::Left => layout_editor::Direction::Left,
+                        Key::Right => layout_editor::Direction::Right,
+                        _ => return,
+                    };
+                    model.layout_editor.navigate_cursor(direction, grid_cols, grid_rows);
+                }
+            },
+            
+            // Enter - Select tile at cursor or confirm action
+            Key::Return => {
+                if model.layout_editor.edit_mode {
+                    if let Some(tile_id) = model.layout_editor.select_at_cursor(&model.layout.config) {
+                        log::info!("Selected tile: {}", tile_id);
+                    } else {
+                        // Empty cell - could open module picker
+                        log::info!("Empty cell at cursor - module picker TODO");
+                    }
+                }
+            },
+            
+            // P - Enter Patch Mode (edit mode + tile selected only)
+            Key::P => {
+                if model.layout_editor.edit_mode {
+                    use layout_editor::EditState;
+                    if matches!(&model.layout_editor.edit_state, EditState::TileSelected { .. }) {
+                        model.layout_editor.enter_patch_mode();
+                        log::info!("Entered patch mode");
+                    }
+                }
+            },
+            
+            // R - Enter Position/Resize Mode (edit mode + tile selected only)
+            Key::R => {
+                if model.layout_editor.edit_mode {
+                    use layout_editor::EditState;
+                    if matches!(&model.layout_editor.edit_state, EditState::TileSelected { .. }) {
+                        model.layout_editor.enter_position_mode();
+                        log::info!("Entered position mode - click to set bounds");
+                    }
+                }
+            },
+            
+            // Escape - Cancel current operation or exit edit mode
             Key::Escape => {
                 if model.layout_editor.edit_mode {
-                    if model.layout_editor.dragging_tile.is_some() {
-                        model.layout_editor.cancel_drag();
-                    } else if model.layout_editor.resize_handle.is_some() {
-                        model.layout_editor.cancel_resize();
-                    } else {
-                        model.layout_editor.toggle_edit_mode();
-                        log::info!("Layout edit mode: DISABLED");
-                        model.layout.save();
+                    use layout_editor::EditState;
+                    match &model.layout_editor.edit_state {
+                        EditState::Navigation => {
+                            // Exit edit mode entirely
+                            let should_save = model.layout_editor.toggle_edit_mode();
+                            log::info!("Layout edit mode: DISABLED");
+                            if should_save {
+                                model.layout.save();
+                            }
+                        },
+                        _ => {
+                            // Cancel current operation
+                            model.layout_editor.cancel_operation();
+                            log::info!("Cancelled operation");
+                        }
                     }
                 }
             },
@@ -1654,6 +1700,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
         }
     }
 }
+
 
 fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event::WindowEvent) {
     model.egui.handle_raw_event(event);
@@ -1672,8 +1719,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     // Draw Empty Cell Placeholders
     if model.maximized_tile.is_none() {
-        let cols = model.layout.config.columns.len();
-        let rows = model.layout.config.rows.len();
+        let (cols, rows) = model.layout.config.resolve_grid();
         for c in 0..cols {
             for r in 0..rows {
                  if model.layout.get_tile_at(c, r).is_none() {
@@ -1682,7 +1728,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                          module: String::new(), enabled: true
                      };
                      if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
-                         draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.05, 0.05, 0.05, 0.5)).stroke(stroke_color).stroke_weight(1.0); // Use stroke_color to match theme
+                         draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.05, 0.05, 0.05, 0.5)).stroke(stroke_color).stroke_weight(1.0);
                          draw.text("+")
                              .xy(rect.xy())
                              .color(stroke_color)
@@ -1692,6 +1738,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             }
         }
     }
+
 
     // Iterate over all tiles and render
     for tile in &model.layout.config.tiles {
@@ -1748,29 +1795,67 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
 
     
-    // Render layout editor overlay (Phase 5)
+    // Render layout editor overlay (Phase 5) - KEYBOARD-DRIVEN UI
     if model.layout_editor.edit_mode {
-        let col_sizes = model.layout.resolve_tracks(&model.layout.config.columns, app.window_rect().w());
-        let row_sizes = model.layout.resolve_tracks(&model.layout.config.rows, app.window_rect().h());
+        let (col_tracks, row_tracks) = model.layout.config.generate_tracks();
+        let col_sizes = model.layout.resolve_tracks(&col_tracks, app.window_rect().w());
+        let row_sizes = model.layout.resolve_tracks(&row_tracks, app.window_rect().h());
         
         // Render grid overlay
         layout_editor::render_edit_overlay(&draw, app.window_rect(), &col_sizes, &row_sizes);
         
-        // Render resize handles
-        layout_editor::render_resize_handles(&draw, app.window_rect(), &col_sizes, &row_sizes);
+        // Render cell indicators (cursor, validity, selection)
+        layout_editor::render_cell_indicators(
+            &draw,
+            app.window_rect(),
+            &col_sizes,
+            &row_sizes,
+            &model.layout.config,
+            &model.layout_editor,
+        );
         
-        // Render ghost tile if dragging
-        if let Some(drag_state) = &model.layout_editor.dragging_tile {
-            if let Some(tile) = model.layout.config.tiles.iter().find(|t| t.id == drag_state.tile_id) {
-                if let Some(rect) = model.layout.calculate_rect(tile) {
-                    layout_editor::render_tile_ghost(&draw, rect);
-                }
-            }
-        }
+        // Render tile labels with module names
+        layout_editor::render_tile_labels(
+            &draw,
+            app.window_rect(),
+            &model.layout.config,
+            &col_sizes,
+            &row_sizes,
+            model.layout_editor.selected_tile_id(),
+        );
+        
+        // Render patch cables in edit mode
+        layout_editor::render_patch_cables(
+            &draw,
+            app.window_rect(),
+            &model.layout.config.patches,
+            &model.layout.config,
+            &col_sizes,
+            &row_sizes,
+            |tile_id| tile_to_module(tile_id),
+        );
+        
+        // Show edit mode indicator
+        draw.text("EDIT MODE")
+            .xy(pt2(app.window_rect().left() + 60.0, app.window_rect().top() - 15.0))
+            .color(rgba(0.0, 1.0, 1.0, 0.8))
+            .font_size(12);
+        
+        // Show current state
+        let state_text = match &model.layout_editor.edit_state {
+            layout_editor::EditState::Navigation => "NAV",
+            layout_editor::EditState::TileSelected { tile_id } => "SEL",
+            layout_editor::EditState::SettingPosition { .. } => "POS",
+            layout_editor::EditState::Patching { .. } => "PATCH",
+        };
+        draw.text(state_text)
+            .xy(pt2(app.window_rect().left() + 130.0, app.window_rect().top() - 15.0))
+            .color(rgba(1.0, 0.8, 0.0, 0.8))
+            .font_size(12);
     }
     
-    // Render patch cables (always visible if not maximized)
-    if model.maximized_tile.is_none() && !model.layout.config.patches.is_empty() {
+    // Render patch cables (always visible if not maximized and not in edit mode)
+    if model.maximized_tile.is_none() && !model.layout.config.patches.is_empty() && !model.layout_editor.edit_mode {
         let mut tile_rects = Vec::new();
         for tile in &model.layout.config.tiles {
             if let Some(rect) = model.layout.calculate_rect(tile) {
@@ -1779,6 +1864,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
         }
         patch_visualizer::render_patches(&draw, &model.layout.config.patches, &tile_rects);
     }
+
 
     draw.to_frame(app, &frame).unwrap();
     model.egui.draw_to_frame(&frame).unwrap();

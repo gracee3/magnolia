@@ -197,7 +197,48 @@ impl PatchBay {
     pub fn get_disabled_modules(&self) -> &HashSet<String> {
         &self.disabled_modules
     }
+    
+    /// Check if two modules have any compatible port pairs for connection
+    /// Returns all possible (source_port, sink_port) pairs
+    pub fn get_compatible_ports(
+        &self,
+        source_module: &str,
+        sink_module: &str,
+    ) -> Vec<(String, String)> {
+        let mut compatible = Vec::new();
+        
+        let source_schema = match self.modules.get(source_module) {
+            Some(s) => s,
+            None => return compatible,
+        };
+        let sink_schema = match self.modules.get(sink_module) {
+            Some(s) => s,
+            None => return compatible,
+        };
+        
+        for src_port in &source_schema.ports {
+            if src_port.direction != PortDirection::Output {
+                continue;
+            }
+            for snk_port in &sink_schema.ports {
+                if snk_port.direction != PortDirection::Input {
+                    continue;
+                }
+                if Self::types_compatible(&src_port.data_type, &snk_port.data_type) {
+                    compatible.push((src_port.id.clone(), snk_port.id.clone()));
+                }
+            }
+        }
+        
+        compatible
+    }
+    
+    /// Check if two modules can be connected (have any compatible port pairs)
+    pub fn can_connect_modules(&self, source_module: &str, sink_module: &str) -> bool {
+        !self.get_compatible_ports(source_module, sink_module).is_empty()
+    }
 }
+
 
 /// Errors that can occur during patch bay operations
 #[derive(Debug, Clone)]
