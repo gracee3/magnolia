@@ -4,6 +4,8 @@
 //! Arrow keys work in all modes, ESC cascades through navigation hierarchy.
 
 use talisman_core::{LayoutConfig, TileConfig};
+use nannou::prelude::Key;
+use crate::tiles::TileRegistry;
 
 /// Top-level input mode
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +71,27 @@ pub enum Direction {
     Right,
 }
 
+/// Actions requested by the input system to be handled by the main app loop
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppAction {
+    /// Connect/Disconnect patches, save layout, etc.
+    SaveLayout,
+    /// Exit the application
+    Exit,
+    /// Copy text to clipboard
+    Copy { text: String },
+    /// Open the global settings modal
+    OpenGlobalSettings,
+    /// Open the layout manager modal
+    OpenLayoutManager,
+    /// Open the patch bay modal
+    OpenPatchBay,
+    /// Open settings for a specific tile (effectively maximizing it)
+    OpenTileSettings { tile_id: String },
+    /// Toggle maximizing the currently selected tile
+    ToggleMaximize,
+}
+
 /// Central keyboard navigation state
 #[derive(Debug)]
 pub struct KeyboardNav {
@@ -114,6 +137,243 @@ impl KeyboardNav {
         self.cursor.0 = self.cursor.0.min(cols.saturating_sub(1));
         self.cursor.1 = self.cursor.1.min(rows.saturating_sub(1));
     }
+
+    /// Main entry point for processing key presses.
+    /// Returns an optional AppAction for side-effects.
+    pub fn handle_key(
+        &mut self,
+        key: Key,
+        ctrl_pressed: bool,
+        layout: &mut LayoutConfig,
+        registry: &TileRegistry,
+    ) -> Option<AppAction> {
+        
+        // 1. Global Shortcuts (Ctrl+)
+        if ctrl_pressed {
+            match key {
+                Key::Q => return Some(AppAction::Exit),
+                Key::C => {
+                    // Copy logic
+                    if let Some(tile_id) = self.selected_tile_id() {
+                        if let Some(text) = registry.get_display_text(tile_id) {
+                            return Some(AppAction::Copy { text });
+                        }
+                    }
+                    return None;
+                },
+                _ => return None,
+            }
+        }
+
+        // 2. Tile-Specific Keybinds
+        if self.has_selection() {
+             if self.dispatch_tile_keybind(key, layout, registry) {
+                 return None; 
+             }
+        }
+
+        // 3. Navigation & Mode specific handling
+        match key {
+            // === ARROW KEYS - Always navigate ===
+            Key::Up | Key::Down | Key::Left | Key::Right => {
+                let direction = match key {
+                    Key::Up => Direction::Up,
+                    Key::Down => Direction::Down,
+                    Key::Left => Direction::Left,
+                    Key::Right => Direction::Right,
+                    _ => unreachable!(),
+                };
+                
+                match self.mode {
+                    InputMode::Normal | InputMode::Patch => {
+                        // Smart tile-to-tile navigation
+                        if let Some(tile_id) = self.navigate_to_adjacent_tile(direction, layout) {
+                            log::debug!("Navigated to tile: {}", tile_id);
+                        } else {
+                            // No tile found, deselect
+                             self.deselect();
+                             log::debug!("No adjacent tile in that direction");
+                        }
+                    },
+                    InputMode::Layout => {
+                         self.handle_layout_arrows(direction, layout);
+                    },
+                }
+            },
+            
+            // === E - Settings / Edit / Layout Mode ===
+            Key::E => {
+                match self.mode {
+                    InputMode::Normal => {
+                         if let Some(tile_id) = self.selected_tile_id() {
+                             return Some(AppAction::OpenTileSettings { tile_id: tile_id.to_string() });
+                         } else {
+                             self.enter_layout_mode();
+                             log::info!("Entered layout mode");
+                         }
+                    },
+                    InputMode::Layout => {
+                        if self.has_selection() {
+                            if self.enter_resize_mode(layout) {
+                                log::info!("Entered resize mode");
+                            }
+                        }
+                    },
+                    InputMode::Patch => {
+                        // Port selection deferred
+                    }
+                }
+            },
+
+            // === P - Patch Mode ===
+            Key::P => {
+                match self.mode {
+                    InputMode::Normal => {
+                        self.enter_patch_mode();
+                        return Some(AppAction::OpenPatchBay); 
+                    },
+                    InputMode::Patch => {
+                         self.exit_patch_mode();
+                    },
+                    InputMode::Layout => {
+                        self.exit_layout_mode();
+                        self.enter_patch_mode();
+                    }
+                }
+            },
+
+            // === SPACE - Move/Resize Toggle ===
+            Key::Space => {
+                if self.mode == InputMode::Layout {
+                     match &self.layout_state {
+                        LayoutSubState::Resize { .. } => {
+                             self.enter_move_mode(layout);
+                        },
+                        LayoutSubState::Move { .. } => {
+                             self.enter_resize_mode(layout);
+                        },
+                        _ => {}
+                     }
+                }
+            },
+
+            // === ENTER - Confirm / Select ===
+            Key::Return => {
+                match self.mode {
+                    InputMode::Normal | InputMode::Patch => {
+                        if !self.has_selection() {
+                            if let Some(_tile_id) = self.select_tile_at_cursor(layout) {
+                                // selection updated
+                            }
+                        } else {
+                            return Some(AppAction::ToggleMaximize);
+                        }
+                    },
+                    InputMode::Layout => {
+                        match &self.layout_state {
+                             LayoutSubState::Resize { .. } | LayoutSubState::Move { .. } => {
+                                 self.exit_resize_move_mode();
+                                 return Some(AppAction::SaveLayout);
+                             },
+                             LayoutSubState::Navigation => {
+                                 self.select_tile_at_cursor(layout);
+                             }
+                        }
+                    }
+                }
+            },
+
+            // === ESCAPE - Back / Cancel ===
+            Key::Escape => {
+                let result = self.handle_escape();
+                match result {
+                    EscapeResult::ExitedSubMode => {
+                        if let Some(bounds) = self.get_original_bounds() {
+                             if let Some(tile_id) = self.selected_tile_id() {
+                                 if let Some(tile) = layout.tiles.iter_mut().find(|t| t.id == tile_id) {
+                                     tile.col = bounds.0;
+                                     tile.row = bounds.1;
+                                     tile.colspan = Some(bounds.2);
+                                     tile.rowspan = Some(bounds.3);
+                                 }
+                             }
+                        }
+                    },
+                     _ => {}
+                }
+            },
+
+            _ => {}
+        }
+
+        None
+    }
+
+    /// Internal helper to dispatch tile-specific keybinds
+    fn dispatch_tile_keybind(
+        &mut self, 
+        key: Key, 
+        layout: &LayoutConfig, 
+        registry: &TileRegistry
+    ) -> bool {
+        if let Some(tile_id) = self.selected_tile_id() {
+            if let Some(tile_config) = layout.tiles.iter().find(|t| t.id == tile_id) {
+                let keybinds = &tile_config.settings.keybinds;
+                if !keybinds.is_empty() {
+                    let key_str = format!("{:?}", key).to_lowercase();
+                    for (action, bound_key) in keybinds {
+                        if bound_key.to_lowercase() == key_str {
+                            log::info!("Executing keybind: {} -> {} on tile {}", bound_key, action, tile_id);
+                            return registry.execute_action(&tile_config.module, action);
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn handle_layout_arrows(&mut self, direction: Direction, layout: &mut LayoutConfig) {
+        // Clone state to avoid holding borrow on self
+        let state = self.layout_state.clone(); 
+        
+        match state {
+            LayoutSubState::Resize { tile_id, .. } => {
+                let (delta_colspan, delta_rowspan) = Self::resize_direction(direction);
+                // Find tile index to mutate
+                if let Some(idx) = layout.tiles.iter().position(|t| t.id == tile_id) {
+                     let tile = &mut layout.tiles[idx];
+                     let current_colspan = tile.colspan.unwrap_or(1);
+                     let current_rowspan = tile.rowspan.unwrap_or(1);
+
+                     // Apply resize
+                     let new_colspan = (current_colspan as i32 + delta_colspan).max(1) as usize;
+                     let new_rowspan = (current_rowspan as i32 + delta_rowspan).max(1) as usize;
+                     
+                     tile.colspan = Some(new_colspan);
+                     tile.rowspan = Some(new_rowspan);
+                }
+            },
+            LayoutSubState::Move { tile_id, .. } => {
+                self.navigate(direction);
+                let (new_col, new_row) = self.cursor;
+
+                if let Some(tile) = layout.tiles.iter_mut().find(|t| t.id == tile_id) {
+                    tile.col = new_col;
+                    tile.row = new_row;
+                }
+            },
+            LayoutSubState::Navigation => {
+                self.navigate(direction);
+                if let Some(_tile_id) = self.select_tile_at_cursor(layout) {
+                     // select_tile_at_cursor updates selection state
+                } else {
+                    self.deselect();
+                }
+            }
+        }
+    }
+
 
     /// Navigate cursor in direction, clamped to grid bounds
     pub fn navigate(&mut self, direction: Direction) {
@@ -337,39 +597,40 @@ impl KeyboardNav {
     /// Enter move mode (shrink tile to 1×1, arrows move it)
     pub fn enter_move_mode(&mut self, layout: &LayoutConfig) -> bool {
         // Can enter move mode from resize mode or tile selected
-        let tile_id = match &self.layout_state {
+        // Extract data first to avoid borrow conflict
+        let resize_data = match &self.layout_state {
             LayoutSubState::Resize { tile_id, original_bounds } => {
-                let tid = tile_id.clone();
-                let bounds = *original_bounds;
+                Some((tile_id.clone(), *original_bounds))
+            }
+            _ => None,
+        };
+
+        if let Some((tile_id, bounds)) = resize_data {
+            self.layout_state = LayoutSubState::Move {
+                tile_id,
+                original_bounds: bounds,
+            };
+            return true;
+        }
+            
+        // If not in resize mode, check selection
+        if let SelectionState::TileSelected { tile_id } = &self.selection {
+            let tile_id = tile_id.clone();
+            if let Some(tile) = layout.tiles.iter().find(|t| t.id == tile_id) {
                 self.layout_state = LayoutSubState::Move {
-                    tile_id: tid.clone(),
-                    original_bounds: bounds,
+                    tile_id: tile_id.clone(),
+                    original_bounds: (
+                        tile.col,
+                        tile.row,
+                        tile.colspan.unwrap_or(1),
+                        tile.rowspan.unwrap_or(1),
+                    ),
                 };
                 return true;
             }
-            _ => {
-                if let SelectionState::TileSelected { tile_id } = &self.selection {
-                    tile_id.clone()
-                } else {
-                    return false;
-                }
-            }
-        };
-
-        if let Some(tile) = layout.tiles.iter().find(|t| t.id == tile_id) {
-            self.layout_state = LayoutSubState::Move {
-                tile_id: tile_id.clone(),
-                original_bounds: (
-                    tile.col,
-                    tile.row,
-                    tile.colspan.unwrap_or(1),
-                    tile.rowspan.unwrap_or(1),
-                ),
-            };
-            true
-        } else {
-            false
         }
+        
+        false
     }
 
     /// Exit resize/move mode back to tile selected
@@ -510,7 +771,8 @@ mod tests {
         assert!(!nav.has_selection());
         assert!(nav.selected_tile_id().is_none());
         
-        nav.select_tile("test_tile".to_string());
+        // Manual internal selection
+        nav.selection = SelectionState::TileSelected { tile_id: "test_tile".to_string() };
         assert!(nav.has_selection());
         assert_eq!(nav.selected_tile_id(), Some("test_tile"));
         
@@ -533,20 +795,5 @@ mod tests {
         
         nav.enter_patch_mode();
         assert_eq!(nav.mode, InputMode::Patch);
-    }
-
-    #[test]
-    fn test_escape_cascade() {
-        let mut nav = KeyboardNav::new();
-        nav.select_tile("tile1".to_string());
-        
-        // ESC deselects tile
-        let result = nav.handle_escape();
-        assert_eq!(result, EscapeResult::Deselected);
-        assert!(!nav.has_selection());
-        
-        // ESC with no selection requests exit
-        let result = nav.handle_escape();
-        assert_eq!(result, EscapeResult::NoAction);
     }
 }

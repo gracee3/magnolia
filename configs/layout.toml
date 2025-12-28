@@ -27,8 +27,8 @@ sensitivity = 1.0
 vis_type = "Oscilloscope"
 
 [tiles.settings.keybinds]
-freeze = "f"
 next_vis = "n"
+freeze = "f"
 mute = "m"
 
 [[tiles]]
@@ -88,8 +88,8 @@ show_date = false
 show_seconds = true
 
 [tiles.settings.keybinds]
-toggle_format = "t"
 toggle_seconds = "s"
+toggle_format = "t"
 
 [[patches]]
 id = "patch_audio_1"
