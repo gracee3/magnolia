@@ -96,6 +96,8 @@ pub enum SignalType {
     Control = 5,
     Computed = 6,
     Pulse = 7,
+    GpuContext = 8, 
+    Texture = 9,
 }
 
 /// Value/Handle union for Signal Buffer (ABI v3)

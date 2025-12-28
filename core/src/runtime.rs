@@ -245,6 +245,14 @@ impl ModuleHost {
         
         log::info!("All modules shut down");
     }
+    /// Send a signal to a specific module (non-blocking)
+    pub fn send_signal(&self, module_id: &str, signal: Signal) -> Result<(), String> {
+        if let Some(handle) = self.modules.get(module_id) {
+            handle.try_send(signal).map_err(|e| e.to_string())
+        } else {
+            Err(format!("Module {} not found", module_id))
+        }
+    }
 }
 
 impl Drop for ModuleHost {

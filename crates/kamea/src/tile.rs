@@ -9,7 +9,7 @@
 use nannou::prelude::*;
 use nannou_egui::egui;
 use sha2::{Sha256, Digest};
-use crate::{generate_path, SigilConfig};
+use crate::generator::{generate_path, SigilConfig};
 use std::sync::{Arc, Mutex};
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
 

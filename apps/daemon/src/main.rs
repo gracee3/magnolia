@@ -27,7 +27,7 @@ use input::KeyboardNav;
 struct Model {
     // We use a non-blocking channel for the UI thread to receive updates
     _receiver: std::sync::mpsc::Receiver<Signal>,
-    _router_tx: mpsc::Sender<Signal>, 
+    router_rx: mpsc::Receiver<Signal>,  
     
     // UI State
     egui: Egui,
@@ -95,7 +95,7 @@ fn main() {
 fn model(app: &App) -> Model {
     // 1. Setup Channels
     let (tx_ui, rx_ui) = std::sync::mpsc::channel::<Signal>();
-    let (tx_router, _rx_router) = mpsc::channel::<Signal>(1000);
+    let (tx_router, rx_router) = mpsc::channel::<Signal>(1000);
     
     // Clone for different uses
     let _tx_ui_clone = tx_ui.clone();
@@ -199,11 +199,41 @@ fn model(app: &App) -> Model {
                  log::error!("Failed to spawn plugin: {}", e);
             }
         }
+        
+        // Broadcast GPU Context to all plugins
+        // We do this after spawning to ensure they receive it in their inbox.
+        let window = app.main_window();
+        let device = window.device();
+        let queue = window.queue();
+        
+        let gpu_signal = Signal::GpuContext {
+            device: device as *const _ as usize,
+            queue: queue as *const _ as usize,
+        };
+        
+        // We need to send this to all active modules.
+        // ModuleHost doesn't expose a list of IDs easily?
+        // We know we just spawned them from `loader.loaded()`.
+        // Let's iterate `plugin_manager.loader` again? No, drained.
+        // We should have collected IDs or use `patch_bay`?
+        // ModuleHost has internal map.
+        // Let's just broadcast to known "kamea" for now or verify ModuleHost API.
+        // talisman_core::ModuleHost::send_signal takes id.
+        // Let's assume we can get IDs from PatchBay.
+        
+        for module in patch_bay.get_modules() {
+             // Clone signal for each send
+             let sig = match gpu_signal {
+                 Signal::GpuContext { device, queue } => Signal::GpuContext { device, queue },
+                 _ => Signal::Pulse,
+             };
+             let _ = module_host.send_signal(&module.id, sig);
+        }
     }
 
     let mut model = Model {
         _receiver: rx_ui,
-        _router_tx: tx_router,
+        router_rx: rx_router,
         egui,
         layout,
         selected_tile: None,
@@ -334,6 +364,30 @@ fn update(app: &App, model: &mut Model, update: Update) {
             Err(e) => {
                 log::error!("Failed to reload plugin from {}: {}", path.display(), e);
             }
+        }
+    }
+
+    // Process Router Signals (From Plugins)
+    while let Ok(signal) = model.router_rx.try_recv() {
+        match signal {
+            Signal::Texture { id, view, width, height } => {
+                // Register texture with Compositor
+                unsafe {
+                     // Cast usize back to *const TextureView
+                     use nannou::wgpu; // Use nannou's wgpu re-export
+                     let view_ptr = view as *const wgpu::TextureView;
+                     if !view_ptr.is_null() {
+                         // We need to CLONE the view to store it in Compositor (it expects TextureView, not reference)
+                         // But wgpu::TextureView is a handle (Arc). It IS Clone.
+                         // So we dereference and clone.
+                         let view_ref = &*view_ptr;
+                         model._compositor.register_texture(id, view_ref.clone());
+                         // log::info!("Registered texture {} ({}x{}) from plugin", id, width, height);
+                     }
+                }
+            }
+            // Logic for other signals...
+            _ => {}
         }
     }
 

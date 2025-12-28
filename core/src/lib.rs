@@ -302,6 +302,20 @@ pub enum Signal {
         source: String,
         content: String,
     },
+    /// Pointer to WGPU Context types (Device, Queue) - Unsafe!
+    #[serde(skip)]
+    GpuContext {
+        device: usize, // cast to *const wgpu::Device
+        queue: usize,  // cast to *const wgpu::Queue
+    },
+    /// GPU Texture Handle (for Compositor)
+    #[serde(skip)]
+    Texture {
+        id: u64,
+        view: usize, // cast to *const wgpu::TextureView
+        width: u32,
+        height: u32,
+    },
     /// Empty signal, used for heartbeat or triggers
     Pulse,
 }

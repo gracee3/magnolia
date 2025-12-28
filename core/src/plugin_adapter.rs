@@ -57,6 +57,28 @@ impl PluginModuleAdapter {
                     param,
                 }
             }
+            Signal::GpuContext { device, queue } => {
+                SignalBuffer {
+                    signal_type: SignalType::GpuContext as u32,
+                    value: SignalValue { ptr: *device as *mut _ },
+                    size: 0,
+                    param: *queue as u64,
+                }
+            }
+            Signal::Texture { id, view, width, height } => {
+                let param = ((*width as u64) << 32) | (*height as u64);
+                // Correct mapping:
+                // Value.ptr = View Handle
+                // Size = ID
+                // Param = W/H
+                
+                SignalBuffer {
+                    signal_type: SignalType::Texture as u32,
+                    value: SignalValue { ptr: *view as *mut _ },
+                    size: *id,
+                    param,
+                }
+            }
             Signal::Pulse => SignalBuffer::empty(),
             // TODO: extensive signal mapping
             _ => SignalBuffer::empty(), 
@@ -98,6 +120,18 @@ impl PluginModuleAdapter {
                     channels,
                     data,
                 })
+            }
+            t if t == SignalType::GpuContext as u32 => {
+                 let device = buffer.value.ptr as usize;
+                 let queue = buffer.param as usize;
+                 Some(Signal::GpuContext { device, queue })
+            }
+            t if t == SignalType::Texture as u32 => {
+                 let view = buffer.value.ptr as usize;
+                 let id = buffer.size;
+                 let width = (buffer.param >> 32) as u32;
+                 let height = (buffer.param & 0xFFFFFFFF) as u32;
+                 Some(Signal::Texture { id, view, width, height })
             }
             t if t == SignalType::Pulse as u32 => Some(Signal::Pulse),
             _ => None,
