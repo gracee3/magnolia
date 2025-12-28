@@ -25,8 +25,8 @@ use input::KeyboardNav;
 // --- MODEL ---
 struct Model {
     // We use a non-blocking channel for the UI thread to receive updates
-    receiver: std::sync::mpsc::Receiver<Signal>,
-    router_tx: mpsc::Sender<Signal>, 
+    _receiver: std::sync::mpsc::Receiver<Signal>,
+    _router_tx: mpsc::Sender<Signal>, 
     
     // UI State
     egui: Egui,
@@ -61,7 +61,7 @@ struct Model {
     
     // Tile System (Phase 6: Settings Architecture)
     tile_registry: TileRegistry,
-    gpu_renderer: GpuRenderer,
+    _gpu_renderer: GpuRenderer,
     start_time: std::time::Instant,
     frame_count: u64,
     
@@ -78,8 +78,7 @@ struct ContextMenuState {
 // Layout now imported from layout.rs module
 use talisman_core::TileConfig;
 
-const CLI_GREEN: &str = "\x1b[32m";
-const CLI_RESET: &str = "\x1b[0m";
+
 
 fn main() {
     // Init Logger
@@ -197,8 +196,8 @@ fn model(app: &App) -> Model {
     }
 
     let mut model = Model {
-        receiver: rx_ui,
-        router_tx: tx_router,
+        _receiver: rx_ui,
+        _router_tx: tx_router,
         egui,
         layout,
         selected_tile: None,
@@ -218,7 +217,7 @@ fn model(app: &App) -> Model {
         module_host,
         plugin_manager,
         tile_registry: tiles::create_default_registry(),
-        gpu_renderer: GpuRenderer::new(app),
+        _gpu_renderer: GpuRenderer::new(app),
         start_time: std::time::Instant::now(),
         frame_count: 0,
         keyboard_nav: KeyboardNav::new(),
@@ -1137,7 +1136,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                                     .find(|t| t.id == tile_id)
                                     .map(|t| (t.col, t.row, t.colspan.unwrap_or(1), t.rowspan.unwrap_or(1)));
                                 
-                                if let Some((col, row, colspan, rowspan)) = tile_info {
+                                if let Some((_col, _row, colspan, rowspan)) = tile_info {
                                     let new_colspan = (colspan as i32 + delta_col).max(1) as usize;
                                     let new_rowspan = (rowspan as i32 + delta_row).max(1) as usize;
                                     

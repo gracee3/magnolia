@@ -3,6 +3,8 @@
 //! Provides GPU-optimized rendering for real-time visualizations,
 //! particularly audio waveforms and spectrum analysis.
 
+#![allow(dead_code)] // Shared GPU infrastructure for future tile module use
+
 use nannou::prelude::*;
 
 /// GPU-accelerated rendering for real-time visualizations

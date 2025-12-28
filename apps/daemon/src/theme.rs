@@ -2,6 +2,8 @@
 //!
 //! Centralized visual styling for the dark/cyan reactive aesthetic.
 
+#![allow(dead_code)] // Official color palette preserved for future UI development
+
 use nannou::prelude::*;
 use nannou_egui::egui;
 

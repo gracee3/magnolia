@@ -1,20 +1,6 @@
 use nannou::prelude::*;
-use talisman_core::{Patch, DataType};
+use talisman_core::Patch;
 
-/// Color mapping for different signal types
-pub fn signal_color(data_type: &DataType) -> Srgb<u8> {
-    match data_type {
-        DataType::Text => rgb(100, 255, 100),      // Green
-        DataType::Audio => rgb(255, 150, 50),      // Orange
-        DataType::Astrology => rgb(200, 100, 255), // Purple
-        DataType::Blob => rgb(100, 200, 255),      // Blue
-        DataType::Video => rgb(255, 100, 150),     // Pink
-        DataType::Network => rgb(255, 255, 100),   // Yellow
-        DataType::Numeric => rgb(150, 255, 255),   // Cyan
-        DataType::Control => rgb(255, 100, 100),   // Red
-        DataType::Any => rgb(200, 200, 200),       // Gray
-    }
-}
 
 /// Render a Bézier curve cable between two points
 pub fn draw_cable(draw: &Draw, start: Vec2, end: Vec2, color: Srgb<u8>, thickness: f32) {

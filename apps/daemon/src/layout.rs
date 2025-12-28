@@ -175,6 +175,7 @@ impl Layout {
 
 /// Generate a deterministic color from a tile ID string
 /// Uses HSL color space for pleasant, distinct hues
+#[allow(dead_code)]
 pub fn tile_color(id: &str) -> Srgba<u8> {
     // Hash the string to get a deterministic value
     let hash = id.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
@@ -207,6 +208,7 @@ pub fn tile_color(id: &str) -> Srgba<u8> {
 }
 
 /// Calculate a point on a cubic bezier curve
+#[allow(dead_code)]
 pub fn bezier_point(p0: Point2, p1: Point2, p2: Point2, p3: Point2, t: f32) -> Point2 {
     let u = 1.0 - t;
     let tt = t * t;
