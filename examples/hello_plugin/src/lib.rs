@@ -25,7 +25,7 @@ impl HelloPlugin {
 #[no_mangle]
 pub unsafe extern "C" fn talisman_plugin_manifest() -> PluginManifest {
     PluginManifest {
-        abi_version: ABI_VERSION,
+        abi_version: 3,
         name: "Hello Plugin\0".as_ptr() as *const i8,
         version: "0.1.0\0".as_ptr() as *const i8,
         description: "Example plugin that demonstrates the plugin ABI\0".as_ptr() as *const i8,

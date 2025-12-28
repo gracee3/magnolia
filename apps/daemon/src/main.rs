@@ -382,7 +382,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                          // So we dereference and clone.
                          let view_ref = &*view_ptr;
                          model._compositor.register_texture(id, view_ref.clone());
-                         // log::info!("Registered texture {} ({}x{}) from plugin", id, width, height);
+                         log::info!("Registered texture {} ({}x{}) from plugin", id, width, height);
                      }
                 }
             }

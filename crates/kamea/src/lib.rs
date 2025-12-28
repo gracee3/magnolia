@@ -23,12 +23,22 @@ struct GpuState {
 unsafe impl Send for GpuState {}
 unsafe impl Sync for GpuState {}
 
-#[derive(Default)]
 struct KameaPlugin {
     tile: Option<KameaTile>,
     gpu_state: Option<GpuState>,
     enabled: bool,
     sent_texture: bool,
+}
+
+impl Default for KameaPlugin {
+    fn default() -> Self {
+        Self {
+            tile: None,
+            gpu_state: None,
+            enabled: true,
+            sent_texture: false,
+        }
+    }
 }
 
 impl TalismanPlugin for KameaPlugin {
