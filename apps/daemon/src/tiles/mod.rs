@@ -1,7 +1,7 @@
 //! Tile System - Unified tile rendering and management
 //!
 //! This module re-exports the TileRenderer trait from talisman_core
-//! and provides local tile implementations.
+//! and tile implementations from their respective crates.
 //!
 //! ## Architecture
 //! - **Monitor Mode**: Normal tile view, read-only feedback display
@@ -10,12 +10,9 @@
 
 use nannou::prelude::*;
 
-// Local tile implementations
+// Local tile implementations (remaining - clock is still local)
 pub mod clock;
-pub mod astrology;
-pub mod text_input;
 pub mod gpu_renderer;
-pub mod audio_vis;
 
 // Re-export main types from talisman_core
 pub use talisman_core::{
@@ -33,6 +30,9 @@ pub use gpu_renderer::GpuRenderer;
 
 // Re-export tiles from crates
 pub use kamea::KameaTile;
+pub use aphrodite::AstroTile;
+pub use logos::TextInputTile;
+pub use audio_input::AudioVisTile;
 
 /// Create the default tile registry with demo tiles
 pub fn create_default_registry() -> TileRegistry {
@@ -40,10 +40,10 @@ pub fn create_default_registry() -> TileRegistry {
     
     // Register demo tiles
     registry.register(clock::ClockTile::new());
-    registry.register(astrology::AstroTile::new());
-    registry.register(text_input::TextInputTile::new());
+    registry.register(AstroTile::new());
+    registry.register(TextInputTile::new());
     registry.register(KameaTile::new());
-    registry.register(audio_vis::AudioVisTile::new("audio_vis"));
+    registry.register(AudioVisTile::new("audio_vis"));
     
     registry
 }

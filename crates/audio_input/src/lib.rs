@@ -10,6 +10,12 @@ use tokio::sync::mpsc;
 pub mod realtime;
 pub use realtime::AudioInputSourceRT;
 
+#[cfg(feature = "tile-rendering")]
+pub mod tile;
+
+#[cfg(feature = "tile-rendering")]
+pub use tile::AudioVisTile;
+
 struct SendStream(cpal::Stream);
 unsafe impl Send for SendStream {}
 unsafe impl Sync for SendStream {}

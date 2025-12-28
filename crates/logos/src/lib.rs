@@ -4,4 +4,11 @@
 
 mod source;
 
+#[cfg(feature = "tile-rendering")]
+pub mod tile;
+
 pub use source::LogosSource;
+
+#[cfg(feature = "tile-rendering")]
+pub use tile::TextInputTile;
+

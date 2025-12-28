@@ -154,6 +154,8 @@ dependencies = [
  "chrono",
  "criterion",
  "lazy_static",
+ "nannou",
+ "nannou_egui",
  "serde",
  "serde_json",
  "swisseph",
@@ -239,7 +241,10 @@ dependencies = [
  "cpal",
  "crossbeam-channel",
  "log",
+ "nannou",
+ "nannou_egui",
  "num-traits",
+ "serde",
  "serde_json",
  "talisman_core",
  "tokio",
@@ -2009,6 +2014,8 @@ name = "logos"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "nannou",
+ "nannou_egui",
  "serde",
  "serde_json",
  "talisman_core",

@@ -8,10 +8,10 @@ chrono = "0.4.42"
 nannou = "0.19.0"
 sysinfo = { version = "0.37.2", features = ["default"] }
 
-aphrodite = { path = "../../crates/aphrodite" }
-logos = { path = "../../crates/logos" }
+aphrodite = { path = "../../crates/aphrodite", features = ["tile-rendering"] }
+logos = { path = "../../crates/logos", features = ["tile-rendering"] }
 kamea = { path = "../../crates/kamea", features = ["tile-rendering"] }
-audio_input = { path = "../../crates/audio_input" }
+audio_input = { path = "../../crates/audio_input", features = ["tile-rendering"] }
 talisman_core = { path = "../../core", features = ["tile-rendering"] }
 text_tools = { path = "../../crates/text_tools" }
 nannou_egui = "0.19.0"

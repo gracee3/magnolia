@@ -6,7 +6,7 @@
 use nannou::prelude::*;
 use nannou_egui::egui;
 use std::sync::{Arc, Mutex};
-use super::{TileRenderer, RenderContext, BindableAction};
+use talisman_core::{TileRenderer, RenderContext, BindableAction};
 
 pub struct TextInputTile {
     text_buffer: Arc<Mutex<String>>,

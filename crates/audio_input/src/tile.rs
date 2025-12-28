@@ -11,8 +11,7 @@ use nannou_egui::egui;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use talisman_core::{AudioFrame, ring_buffer::RingBufferReceiver};
-
-use super::{TileRenderer, RenderContext, BindableAction, TileError};
+use talisman_core::{TileRenderer, RenderContext, BindableAction, TileError};
 
 /// Available visualization types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

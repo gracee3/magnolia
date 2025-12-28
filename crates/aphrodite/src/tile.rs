@@ -6,7 +6,7 @@
 use nannou::prelude::*;
 use nannou_egui::egui;
 use chrono::{Local, Timelike, Datelike};
-use super::{TileRenderer, RenderContext, BindableAction};
+use talisman_core::{TileRenderer, RenderContext, BindableAction};
 
 pub struct AstroTile {
     sun_longitude: f64,
@@ -35,7 +35,7 @@ impl AstroTile {
     
     fn calculate_positions(&mut self) {
         // Simplified astrology calculation (approximate)
-        // For real calculations, use aphrodite crate
+        // For real calculations, use the aphrodite ephemeris module
         let now = Local::now();
         let day_of_year = now.ordinal() as f64;
         let hour = now.hour() as f64 + now.minute() as f64 / 60.0;
@@ -47,7 +47,6 @@ impl AstroTile {
         if self.sun_longitude < 0.0 { self.sun_longitude += 360.0; }
         
         // Approximate moon position (moves ~13° per day)
-        // This is a rough approximation
         let days_since_new_moon = (day_of_year + hour / 24.0) % 29.53;
         self.moon_longitude = (days_since_new_moon * (360.0 / 29.53) + self.sun_longitude) % 360.0;
         

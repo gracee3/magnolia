@@ -5,6 +5,10 @@ edition = "2021"
 authors = ["Gaia Tools"]
 license = "AGPL-3.0-or-later"
 
+[features]
+default = []
+tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:nannou_egui"]
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -19,6 +23,10 @@ tokio = { version = "1.0", features = ["full"] }
 uuid = { version = "1.0", features = ["v4"] }
 lazy_static = "1.4"
 
+# Optional rendering dependencies
+nannou = { version = "0.19", optional = true }
+nannou_egui = { version = "0.19", optional = true }
+
 [dev-dependencies]
 criterion = "0.5"
 
@@ -29,3 +37,4 @@ harness = false
 [[bench]]
 name = "aspect_bench"
 harness = false
+

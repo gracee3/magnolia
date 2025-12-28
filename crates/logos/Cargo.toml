@@ -3,9 +3,17 @@ name = "logos"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:nannou_egui"]
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 talisman_core = { path = "../../core" }
 async-trait = "0.1"
-tokio = { version = "1.0", features = ["sync"] }
+tokio = { version = "1.0", features = ["sync", "io-util"] }
+
+# Optional rendering dependencies
+nannou = { version = "0.19", optional = true }
+nannou_egui = { version = "0.19", optional = true }
