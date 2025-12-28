@@ -1,23 +1,23 @@
 use async_trait::async_trait;
 use talisman_core::{Sink, Signal, Result, ModuleSchema, Port, DataType, PortDirection};
 use regex::Regex;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 // --- Word Count Sink ---
 pub struct WordCountSink {
-    tx: Option<Arc<Mutex<Sender<Signal>>>>,
     enabled: bool,
     last_count: Arc<Mutex<usize>>,
 }
 
 impl WordCountSink {
-    pub fn new(tx: Option<Sender<Signal>>) -> Self { 
-        Self { 
-            tx: tx.map(|t| Arc::new(Mutex::new(t))),
+    /// Create a new WordCountSink
+    /// 
+    /// Note: The tx parameter is no longer needed - signals are returned from consume()
+    pub fn new(_tx: Option<std::sync::mpsc::Sender<Signal>>) -> Self {
+        Self {
             enabled: true,
             last_count: Arc::new(Mutex::new(0)),
-        } 
+        }
     }
 }
 
@@ -57,9 +57,9 @@ impl Sink for WordCountSink {
         Some(count.to_string())
     }
 
-    async fn consume(&self, signal: Signal) -> Result<()> {
+    async fn consume(&self, signal: Signal) -> Result<Option<Signal>> {
         if !self.enabled {
-            return Ok(());
+            return Ok(None);
         }
         
         if let Signal::Text(text) = signal {
@@ -67,31 +67,30 @@ impl Sink for WordCountSink {
             *self.last_count.lock().unwrap() = count;
             log::debug!("[WORD_COUNT] Count: {} | Text: '{}'", count, text);
             
-            if let Some(tx) = &self.tx {
-                // Emit computed signal back
-                let _ = tx.lock().unwrap().send(Signal::Computed {
-                    source: "word_count".to_string(),
-                    content: format!("{}", count),
-                });
-            }
+            // Return the computed signal directly instead of using a channel
+            return Ok(Some(Signal::Computed {
+                source: "word_count".to_string(),
+                content: count.to_string(),
+            }));
         }
-        Ok(())
+        Ok(None)
     }
 }
 
 // --- Devowelizer Sink ---
 pub struct DevowelizerSink {
     re: Regex,
-    tx: Option<Arc<Mutex<Sender<Signal>>>>,
     enabled: bool,
     last_output: Arc<Mutex<String>>,
 }
 
 impl DevowelizerSink {
-    pub fn new(tx: Option<Sender<Signal>>) -> Self {
+    /// Create a new DevowelizerSink
+    /// 
+    /// Note: The tx parameter is no longer needed - signals are returned from consume()
+    pub fn new(_tx: Option<std::sync::mpsc::Sender<Signal>>) -> Self {
         Self {
             re: Regex::new(r"(?i)[aeiou]").expect("Invalid regex"),
-            tx: tx.map(|t| Arc::new(Mutex::new(t))),
             enabled: true,
             last_output: Arc::new(Mutex::new(String::new())),
         }
@@ -134,9 +133,9 @@ impl Sink for DevowelizerSink {
         if output.is_empty() { None } else { Some(output) }
     }
 
-    async fn consume(&self, signal: Signal) -> Result<()> {
+    async fn consume(&self, signal: Signal) -> Result<Option<Signal>> {
         if !self.enabled {
-            return Ok(());
+            return Ok(None);
         }
         
         if let Signal::Text(text) = signal {
@@ -144,14 +143,12 @@ impl Sink for DevowelizerSink {
             *self.last_output.lock().unwrap() = devoweled.clone();
             log::debug!("[DEVOWELIZER] '{}'", devoweled);
             
-            if let Some(tx) = &self.tx {
-                let _ = tx.lock().unwrap().send(Signal::Computed {
-                    source: "devowelizer".to_string(),
-                    content: devoweled,
-                });
-            }
+            // Return the computed signal directly instead of using a channel
+            return Ok(Some(Signal::Computed {
+                source: "devowelizer".to_string(),
+                content: devoweled,
+            }));
         }
-        Ok(())
+        Ok(None)
     }
 }
-

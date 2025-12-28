@@ -48,9 +48,9 @@ impl Sink for KameaSink {
     
     fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
     
-    async fn consume(&self, signal: Signal) -> Result<()> {
+    async fn consume(&self, signal: Signal) -> Result<Option<Signal>> {
         if !self.enabled {
-            return Ok(());
+            return Ok(None);
         }
         
         match signal {
@@ -67,7 +67,7 @@ impl Sink for KameaSink {
                 // Ignore other signals
             }
         }
-        Ok(())
+        Ok(None)
     }
 }
 

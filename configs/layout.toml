@@ -20,49 +20,22 @@ rows = [
 is_sleeping = false
 
 [[tiles]]
-id = "editor_pane"
+id = "hello_plugin_new"
 col = 0
-row = 0
-colspan = 3
-rowspan = 4
-module = "editor"
-enabled = true
-
-[[tiles]]
-id = "dvwl_pane"
-col = 4
-row = 0
-colspan = 3
-rowspan = 2
-module = "devowelizer"
-enabled = true
-
-[[tiles]]
-id = "audio_pane"
-col = 3
 row = 0
 colspan = 1
-rowspan = 2
-module = "audio_input"
+rowspan = 4
+module = "hello_plugin"
 enabled = true
 
 [[tiles]]
-id = "word_count_new"
-col = 4
-row = 2
-colspan = 2
+id = "astrology_display_new"
+col = 1
+row = 0
+colspan = 3
 rowspan = 2
-module = "word_count"
+module = "astrology_display"
 enabled = true
-
-[[tiles]]
-id = "kamea_sigil"
-col = 0
-row = 4
-colspan = 4
-rowspan = 3
-module = "kamea_sigil"
-enabled = false
 
 [[patches]]
 id = "patch_1"

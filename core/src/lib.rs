@@ -335,9 +335,16 @@ pub trait Sink: Send + Sync {
     /// Render the current output state as a string for clipboard copy
     fn render_output(&self) -> Option<String> { None }
 
-    /// Consume a signal.
-    /// Returns Ok(()) if processed, or an error if something went wrong.
-    async fn consume(&self, signal: Signal) -> Result<()>;
+    /// Consume a signal and optionally produce an output signal.
+    /// 
+    /// Returns:
+    /// - `Ok(Some(signal))` - Successfully processed and produced an output signal
+    /// - `Ok(None)` - Successfully processed, no output to emit
+    /// - `Err(e)` - Processing failed
+    /// 
+    /// This replaces the previous pattern of passing a sender to the sink,
+    /// allowing cleaner back-channel communication through the return value.
+    async fn consume(&self, signal: Signal) -> Result<Option<Signal>>;
 }
 
 /// A Processor is both a Source and Sink - it transforms signals (middleware).

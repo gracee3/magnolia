@@ -126,9 +126,9 @@ impl Sink for SaveFileSink {
         self.last_saved.lock().unwrap().clone()
     }
     
-    async fn consume(&self, signal: Signal) -> Result<()> {
+    async fn consume(&self, signal: Signal) -> Result<Option<Signal>> {
         if !self.enabled { 
-            return Ok(()); 
+            return Ok(None); 
         }
         
         let path = self.output_path.lock().unwrap().clone();
@@ -222,7 +222,7 @@ impl Sink for SaveFileSink {
                 // Ignore other signal types
             }
         }
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -251,6 +251,6 @@ mod tests {
         let schema = sink.schema();
         
         assert_eq!(schema.id, "save_file");
-        assert_eq!(schema.ports.len(), 2);
+        assert_eq!(schema.ports.len(), 3); // text, blob, audio inputs
     }
 }

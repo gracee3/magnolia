@@ -18,8 +18,11 @@ use text_tools::{SaveFileSink, OutputFormat};
 mod layout_editor;
 mod patch_visualizer;
 mod module_picker;
+mod modal;
+mod signal_handler;
 use layout_editor::LayoutEditor;
 use module_picker::ModulePicker;
+use modal::ModalLayer;
 
 
 // --- MODEL ---
@@ -76,6 +79,9 @@ struct Model {
     // Layout Editor State (Phase 5)
     layout_editor: LayoutEditor,
     module_picker: ModulePicker,
+    
+    // Modal Layer (centralized modal management)
+    modal_layer: ModalLayer,
 }
 
 
@@ -591,6 +597,7 @@ fn model(app: &App) -> Model {
         plugin_manager,
         layout_editor: LayoutEditor::new(),
         module_picker: ModulePicker::new(),
+        modal_layer: ModalLayer::new(),
     }
 }
 
@@ -1328,6 +1335,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 
     // Close Confirmation Dialog (ESC outside edit mode)
+    // NOTE: ESC detection moved to egui input to avoid nannou/egui frame collision
     if model.show_close_confirmation {
         log::debug!("Rendering close confirmation dialog...");
         let screen_rect = ctx.screen_rect();
@@ -1378,6 +1386,26 @@ fn update(app: &App, model: &mut Model, update: Update) {
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             log::info!("User confirmed quit via Enter");
             std::process::exit(0);
+        }
+        
+        // Handle ESC to cancel dialog
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            log::info!("Close confirmation cancelled via ESC");
+            model.show_close_confirmation = false;
+        }
+    } else {
+        // ESC triggers close confirmation when:
+        // - Not in edit mode
+        // - Module picker is not visible
+        // - No other modal is active
+        let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        if esc_pressed 
+            && !model.layout_editor.edit_mode 
+            && !model.module_picker.visible 
+            && model.context_menu.is_none()
+        {
+            log::info!("ESC pressed - showing close confirmation");
+            model.show_close_confirmation = true;
         }
     }
 
@@ -1641,6 +1669,18 @@ fn mouse_moved(app: &App, model: &mut Model, pos: Point2) {
 
 
 fn key_pressed(_app: &App, model: &mut Model, key: Key) {
+    // === INPUT ROUTING GUARD ===
+    // Skip nannou key handling when:
+    // 1. Egui wants keyboard input (e.g., TextEdit is focused)
+    // 2. Modal layer is active (modals handle their own keys via egui)
+    // 3. Close confirmation is showing
+    if model.egui.ctx().wants_keyboard_input() 
+        || model.modal_layer.is_active() 
+        || model.show_close_confirmation 
+    {
+        return;
+    }
+    
     let ctrl = _app.keys.mods.ctrl();
     let shift = _app.keys.mods.shift();
     
