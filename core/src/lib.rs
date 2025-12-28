@@ -46,6 +46,11 @@ pub use sandbox::{create_plugin_sandbox, apply_sandbox};
 pub mod plugin_signing;
 pub use plugin_signing::PluginVerifier;
 
+pub mod resources {
+    pub mod buffer_pool;
+}
+pub use resources::buffer_pool::{BufferPool, AudioBufferPool, BlobBufferPool};
+
 /// Symbolic Kamea grid size names mapped to dimensions
 /// Based on traditional planetary magic squares
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

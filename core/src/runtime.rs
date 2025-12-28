@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::thread::{self, JoinHandle};
 use tokio::sync::mpsc;
@@ -85,10 +86,14 @@ impl ModuleHandle {
     }
 }
 
+use crate::resources::buffer_pool::{AudioBufferPool, BlobBufferPool};
+
 /// Manages the lifecycle of all module runtimes
 pub struct ModuleHost {
     modules: HashMap<String, ModuleHandle>,
     router_tx: mpsc::Sender<Signal>,
+    pub audio_pool: Arc<AudioBufferPool>,
+    pub blob_pool: Arc<BlobBufferPool>,
 }
 
 impl ModuleHost {
@@ -97,6 +102,8 @@ impl ModuleHost {
         Self {
             modules: HashMap::new(),
             router_tx,
+            audio_pool: Arc::new(AudioBufferPool::new()),
+            blob_pool: Arc::new(BlobBufferPool::new()),
         }
     }
     

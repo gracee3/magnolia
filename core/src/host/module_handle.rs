@@ -21,7 +21,7 @@ pub struct ModuleHandle {
 }
 
 impl ModuleHandle {
-    pub fn new_static(mut module: Box<dyn StaticModule>) -> Self {
+    pub fn new_static(module: Box<dyn StaticModule>) -> Self {
         let manifest = module.manifest();
         let ports = module.ports().to_vec();
         

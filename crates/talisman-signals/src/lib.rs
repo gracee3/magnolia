@@ -96,6 +96,22 @@ pub struct Manifest {
 // SIGNAL
 // ============================================================================
 
+/// Handle to a host-managed audio buffer (zero-copy)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct AudioBufferHandle {
+    pub id: u32,
+    pub generation: u32,
+    pub length: usize,
+}
+
+/// Handle to a host-managed binary blob (zero-copy)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct BlobHandle {
+    pub id: u32,
+    pub generation: u32,
+    pub size: usize,
+}
+
 /// The Alchemical Consignment.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "data")]
@@ -119,11 +135,22 @@ pub enum Signal {
         mime_type: String,
         bytes: Vec<u8>,
     },
+    /// Host-managed Blob Handle (zero-copy)
+    BlobHandle {
+        handle: BlobHandle,
+        mime_type: String,
+    },
     /// Audio Signal (PCM) - buffered, copied to each module
     Audio {
         sample_rate: u32,
         channels: u16,
         data: Vec<f32>,
+    },
+    /// Host-managed Audio Buffer Handle (zero-copy)
+    AudioHandle {
+        handle: AudioBufferHandle,
+        sample_rate: u32,
+        channels: u16,
     },
     /// Shared audio data (Arc-wrapped) - one allocation, many readers
     /// Use this for large audio buffers to avoid copying overhead
