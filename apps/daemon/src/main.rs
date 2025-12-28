@@ -1,5 +1,5 @@
 use nannou::prelude::*;
-use talisman_core::{Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime};
+use talisman_core::{Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime, RoutedSignal};
 use nannou_egui::{self, Egui, egui};
 use tokio::sync::mpsc;
 
@@ -28,7 +28,7 @@ use input::KeyboardNav;
 struct Model {
     // We use a non-blocking channel for the UI thread to receive updates
     _receiver: std::sync::mpsc::Receiver<Signal>,
-    router_rx: mpsc::Receiver<Signal>,  
+    router_rx: mpsc::Receiver<RoutedSignal>,
     
     // UI State
     egui: Egui,
@@ -99,7 +99,7 @@ fn main() {
 fn model(app: &App) -> Model {
     // 1. Setup Channels
     let (tx_ui, rx_ui) = std::sync::mpsc::channel::<Signal>();
-    let (tx_router, rx_router) = mpsc::channel::<Signal>(1000);
+    let (tx_router, rx_router) = mpsc::channel::<RoutedSignal>(1000);
     
     // Clone for different uses
     let _tx_ui_clone = tx_ui.clone();
@@ -387,15 +387,58 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 
     // Process Router Signals (From Plugins)
-    while let Ok(signal) = model.router_rx.try_recv() {
-        match signal {
-            Signal::Texture { handle, start_time: _ } => {
-                log::info!("Received texture handle {} ({}x{}) from plugin", handle.id, handle.width, handle.height);
-                // Texture is already registered in view_map by the adapter (when enabled).
-                // Compositor can lookup via handle.id.
+    while let Ok(routed) = model.router_rx.try_recv() {
+        // Handle host-level signals before routing
+        if let Signal::Texture { handle, start_time: _ } = &routed.signal {
+            log::info!(
+                "Received texture handle {} ({}x{}) from plugin",
+                handle.id,
+                handle.width,
+                handle.height
+            );
+            // Texture is already registered in view_map by the adapter (when enabled).
+            // Compositor can lookup via handle.id.
+        }
+        
+        // Route signals through PatchBay
+        let outgoing = model.patch_bay.get_outgoing_patches(&routed.source_id);
+        if outgoing.is_empty() {
+            continue;
+        }
+        
+        let is_audio_stream = matches!(&routed.signal, Signal::AudioStream { .. });
+        if is_audio_stream && outgoing.len() > 1 {
+            log::warn!(
+                "AudioStream from {} has {} sinks; only first sink will receive it",
+                routed.source_id,
+                outgoing.len()
+            );
+        }
+        
+        let active_sinks: Vec<_> = outgoing
+            .into_iter()
+            .filter(|patch| !model.patch_bay.is_module_disabled(&patch.sink_module))
+            .collect();
+        if active_sinks.is_empty() {
+            continue;
+        }
+        
+        if is_audio_stream {
+            if let Some(first) = active_sinks.first() {
+                let _ = model.module_host.send_signal(&first.sink_module, routed.signal);
             }
-            // Logic for other signals...
-            _ => {}
+            continue;
+        }
+        
+        let mut remaining = active_sinks.len();
+        for patch in active_sinks {
+            let payload = if remaining == 1 {
+                routed.signal
+            } else {
+                routed.signal.clone()
+            };
+            remaining -= 1;
+            let _ = model.module_host.send_signal(&patch.sink_module, payload);
         }
     }
 

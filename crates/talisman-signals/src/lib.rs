@@ -139,7 +139,7 @@ pub struct AstrologyData {
 }
 
 /// The Alchemical Consignment.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "data")]
 pub enum Signal {
     /// Pure text content (e.g., from Clipboard, Keyboard, LLM)
@@ -215,4 +215,54 @@ pub enum Signal {
     },
     /// Empty signal, used for heartbeat or triggers
     Pulse,
+}
+
+impl Clone for Signal {
+    fn clone(&self) -> Self {
+        match self {
+            Signal::Text(text) => Signal::Text(text.clone()),
+            Signal::Intent { action, parameters } => Signal::Intent {
+                action: action.clone(),
+                parameters: parameters.clone(),
+            },
+            Signal::Astrology(data) => Signal::Astrology(data.clone()),
+            Signal::Blob { mime_type, bytes } => Signal::Blob {
+                mime_type: mime_type.clone(),
+                bytes: bytes.clone(),
+            },
+            Signal::BlobHandle { handle, mime_type } => Signal::BlobHandle {
+                handle: *handle,
+                mime_type: mime_type.clone(),
+            },
+            Signal::Audio { sample_rate, channels, data } => Signal::Audio {
+                sample_rate: *sample_rate,
+                channels: *channels,
+                data: data.clone(),
+            },
+            Signal::AudioHandle { handle, sample_rate, channels } => Signal::AudioHandle {
+                handle: *handle,
+                sample_rate: *sample_rate,
+                channels: *channels,
+            },
+            Signal::SharedAudio(data) => Signal::SharedAudio(Arc::clone(data)),
+            Signal::AudioStream { .. } => {
+                panic!("Signal::AudioStream cannot be cloned (SPSC receiver)");
+            }
+            Signal::SharedBlob(data) => Signal::SharedBlob(Arc::clone(data)),
+            Signal::Control(signal) => Signal::Control(signal.clone()),
+            Signal::Computed { source, content } => Signal::Computed {
+                source: source.clone(),
+                content: content.clone(),
+            },
+            Signal::GpuContext { device, queue } => Signal::GpuContext {
+                device: *device,
+                queue: *queue,
+            },
+            Signal::Texture { handle, start_time } => Signal::Texture {
+                handle: *handle,
+                start_time: *start_time,
+            },
+            Signal::Pulse => Signal::Pulse,
+        }
+    }
 }

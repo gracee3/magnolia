@@ -57,9 +57,15 @@ pub trait ModuleRuntime: Send + Sync {
     
     /// Run the module's main loop (async)
     /// This will be called in a separate thread/task with a tokio runtime
-    async fn run(&mut self, inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<Signal>);
+    async fn run(&mut self, inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<RoutedSignal>);
 }
 
+/// Envelope for router-bound signals with source attribution
+#[derive(Debug, Clone)]
+pub struct RoutedSignal {
+    pub source_id: String,
+    pub signal: Signal,
+}
 
 /// Handle to a running module instance
 pub struct ModuleHandle {
@@ -92,7 +98,7 @@ use crate::resources::gpu_map::{GpuTextureMap, GpuBufferMap, GpuTextureViewMap};
 /// Manages the lifecycle of all module runtimes
 pub struct ModuleHost {
     modules: HashMap<String, ModuleHandle>,
-    router_tx: mpsc::Sender<Signal>,
+    router_tx: mpsc::Sender<RoutedSignal>,
     pub audio_pool: Arc<AudioBufferPool>,
     pub blob_pool: Arc<BlobBufferPool>,
     pub texture_map: Arc<GpuTextureMap>,
@@ -102,7 +108,7 @@ pub struct ModuleHost {
 
 impl ModuleHost {
     /// Create a new module host
-    pub fn new(router_tx: mpsc::Sender<Signal>) -> Self {
+    pub fn new(router_tx: mpsc::Sender<RoutedSignal>) -> Self {
         Self {
             modules: HashMap::new(),
             router_tx,
@@ -145,11 +151,11 @@ impl ModuleHost {
                                 _ = shutdown_rx.recv() => {
                                     log::info!("Module {} received shutdown signal", module_name_clone);
                                 }
-                                _ = module.run(inbox_rx, outbox) => {
-                                    log::info!("Module {} exited normally", module_name_clone);
-                                }
+                            _ = module.run(inbox_rx, outbox) => {
+                                log::info!("Module {} exited normally", module_name_clone);
                             }
-                        });
+                        }
+                    });
                     }));
                     
                     match result {
@@ -317,7 +323,7 @@ mod tests {
         fn is_enabled(&self) -> bool { self.enabled }
         fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
         
-        async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, _outbox: mpsc::Sender<Signal>) {
+        async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, _outbox: mpsc::Sender<RoutedSignal>) {
             self.ran.store(true, Ordering::SeqCst);
             // Simple echo loop
             while let Some(_signal) = inbox.recv().await {

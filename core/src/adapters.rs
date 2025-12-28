@@ -1,6 +1,6 @@
 use tokio::sync::mpsc;
 use async_trait::async_trait;
-use crate::{Signal, ModuleSchema, Source, Sink, ModuleRuntime, ExecutionModel, Priority};
+use crate::{Signal, ModuleSchema, Source, Sink, ModuleRuntime, ExecutionModel, Priority, RoutedSignal};
 
 /// Adapter to run a Source as a ModuleRuntime
 pub struct SourceAdapter<S: Source + 'static> {
@@ -45,13 +45,17 @@ impl<S: Source + 'static> ModuleRuntime for SourceAdapter<S> {
         self.source.set_enabled(enabled);
     }
     
-    async fn run(&mut self, _inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<Signal>) {
+    async fn run(&mut self, _inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<RoutedSignal>) {
         // Sources don't receive signals, they only emit
         // Clean async/await now that run() is async!
         loop {
             match self.source.poll().await {
                 Some(signal) => {
-                    if outbox.send(signal).await.is_err() {
+                    let routed = RoutedSignal {
+                        source_id: self.schema.id.clone(),
+                        signal,
+                    };
+                    if outbox.send(routed).await.is_err() {
                         log::warn!("Source {} outbox closed, shutting down", self.name());
                         break;
                     }
@@ -108,7 +112,7 @@ impl<S: Sink + 'static> ModuleRuntime for SinkAdapter<S> {
         self.sink.set_enabled(enabled);
     }
     
-    async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, _outbox: mpsc::Sender<Signal>) {
+    async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, _outbox: mpsc::Sender<RoutedSignal>) {
         // Sinks consume signals but don't emit (except via internal channels)
         // Clean async/await - no more runtime nesting!
         while let Some(signal) = inbox.recv().await {

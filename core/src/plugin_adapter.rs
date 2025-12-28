@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::ffi::CStr;
 use tokio::sync::mpsc;
 use talisman_plugin_abi::*;
-use crate::{Signal, ModuleRuntime, ModuleSchema, PluginLibrary};
+use crate::{Signal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal};
 
 use talisman_signals::GpuTextureHandle;
 use crate::resources::gpu_map::GpuTextureViewMap;
@@ -276,7 +276,7 @@ impl ModuleRuntime for PluginModuleAdapter {
         unsafe { (self.plugin.vtable.set_enabled)(self.plugin.instance, enabled) }
     }
     
-    async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<Signal>) {
+    async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<RoutedSignal>) {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(10));
         
         loop {
@@ -307,7 +307,11 @@ impl ModuleRuntime for PluginModuleAdapter {
             };
 
             if let Some(signal) = maybe_signal {
-                let _ = outbox.send(signal).await;
+                let routed = RoutedSignal {
+                    source_id: self.id_cache.clone(),
+                    signal,
+                };
+                let _ = outbox.send(routed).await;
             }
             
             // Send incoming signals to plugin and handle any output
@@ -347,7 +351,11 @@ impl ModuleRuntime for PluginModuleAdapter {
                 
                 // Send any output signal from consume_signal
                 if let Some(output) = maybe_output {
-                    let _ = outbox.send(output).await;
+                    let routed = RoutedSignal {
+                        source_id: self.id_cache.clone(),
+                        signal: output,
+                    };
+                    let _ = outbox.send(routed).await;
                 }
             }
         }

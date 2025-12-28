@@ -17,6 +17,7 @@ pub mod host;
 pub use host::{ModuleHandle, ModuleImpl};
 
 pub mod runtime;
+pub use runtime::RoutedSignal;
 pub use runtime::{ModuleRuntime, ModuleHost, ExecutionModel, Priority};
 
 pub mod adapters;
@@ -308,4 +309,3 @@ pub trait Processor: Send + Sync {
 pub trait Transform: Send + Sync {
     async fn apply(&self, signal: Signal) -> Result<Signal>;
 }
-

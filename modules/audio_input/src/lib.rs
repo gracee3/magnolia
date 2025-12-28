@@ -72,8 +72,8 @@ impl AudioInputModule {
         let sample_rate = config.sample_rate().0;
         let channels = config.channels();
         
-        // Clone sender to move into callback
-        let tx = self.sender.clone().ok_or_else(|| anyhow::anyhow!("No sender available"))?;
+        // Move sender into callback (SPSC: single producer)
+        let tx = self.sender.take().ok_or_else(|| anyhow::anyhow!("No sender available"))?;
 
         let err_fn = |err| error!("cpal stream error: {}", err);
 

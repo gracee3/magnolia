@@ -172,13 +172,6 @@ impl<T: Copy + Default> RingBufferSender<T> {
     }
 }
 
-impl<T: Copy + Default> Clone for RingBufferSender<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
 
 /// Handle to a ring buffer for receiving (consumer side)
 #[derive(Debug)]
@@ -200,13 +193,6 @@ impl<T: Copy + Default> RingBufferReceiver<T> {
     }
 }
 
-impl<T: Copy + Default> Clone for RingBufferReceiver<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
 
 /// Create a new ring buffer channel
 /// 
