@@ -102,9 +102,10 @@ unsafe extern "C" fn hello_poll_signal(instance: *mut c_void, buffer: *mut Signa
     }
 }
 
-unsafe extern "C" fn hello_consume_signal(instance: *mut c_void, _buffer: *const SignalBuffer) {
-    let _plugin = &mut *(instance as *mut HelloPlugin);
+unsafe extern "C" fn hello_consume_signal(_instance: *mut c_void, _buffer: *const SignalBuffer) -> *mut SignalBuffer {
     // This example plugin doesn't consume signals, just produces them
+    // Return null to indicate no output signal
+    std::ptr::null_mut()
 }
 
 unsafe extern "C" fn hello_destroy(instance: *mut c_void) {

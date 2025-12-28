@@ -115,16 +115,35 @@ impl ModuleRuntime for PluginModuleAdapter {
                 let _ = outbox.send(signal).await;
             }
             
-            // Send incoming signals to plugin
+            // Send incoming signals to plugin and handle any output
             while let Ok(signal) = inbox.try_recv() {
-                unsafe {
+                let maybe_output = unsafe {
                     let signal_buf = self.encode_signal(&signal);
-                    (self.plugin.vtable.consume_signal)(self.plugin.instance, &signal_buf);
+                    let output_ptr = (self.plugin.vtable.consume_signal)(self.plugin.instance, &signal_buf);
                     
                     // We allocated signal_buf.data in encode_signal, we must free it
                      if !signal_buf.data.is_null() && signal_buf.signal_type == SignalType::Text as u32 {
                         let _ = std::ffi::CString::from_raw(signal_buf.data as *mut i8);
                     }
+                    
+                    // Check if plugin returned an output signal
+                    if !output_ptr.is_null() {
+                        let output_signal = self.decode_signal(&*output_ptr);
+                        // Free the output buffer that the plugin allocated
+                        if !(*output_ptr).data.is_null() && (*output_ptr).signal_type == SignalType::Text as u32 {
+                            let _ = std::ffi::CString::from_raw((*output_ptr).data as *mut i8);
+                        }
+                        // Free the SignalBuffer struct itself (plugin allocated it)
+                        let _ = Box::from_raw(output_ptr);
+                        output_signal
+                    } else {
+                        None
+                    }
+                };
+                
+                // Send any output signal from consume_signal
+                if let Some(output) = maybe_output {
+                    let _ = outbox.send(output).await;
                 }
             }
         }

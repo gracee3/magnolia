@@ -1,7 +1,7 @@
 use std::os::raw::{c_char, c_void};
 
 /// Current ABI version - increment when making breaking changes
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// Plugin manifest - describes the plugin's capabilities
 #[repr(C)]
@@ -12,6 +12,48 @@ pub struct PluginManifest {
     pub version: *const c_char,
     pub description: *const c_char,
     pub author: *const c_char,
+}
+
+/// Data types for ports (matches core DataType enum)
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataTypeAbi {
+    Text = 0,
+    Audio = 1,
+    Blob = 2,
+    Numeric = 3,
+    Astrology = 4,
+    Control = 5,
+    Any = 255,
+}
+
+/// Port direction
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortDirectionAbi {
+    Input = 0,
+    Output = 1,
+}
+
+/// Port schema for FFI - describes a single port
+#[repr(C)]
+#[derive(Debug)]
+pub struct PortSchemaAbi {
+    pub id: *const c_char,
+    pub label: *const c_char,
+    pub data_type: DataTypeAbi,
+    pub direction: PortDirectionAbi,
+}
+
+/// Module schema for FFI - describes the module's ports
+#[repr(C)]
+#[derive(Debug)]
+pub struct ModuleSchemaAbi {
+    pub id: *const c_char,
+    pub name: *const c_char,
+    pub description: *const c_char,
+    pub ports: *const PortSchemaAbi,
+    pub ports_len: usize,
 }
 
 /// VTable for module runtime callbacks
@@ -35,7 +77,8 @@ pub struct ModuleRuntimeVTable {
     pub poll_signal: unsafe extern "C" fn(*mut c_void, *mut SignalBuffer) -> bool,
     
     /// Consume incoming signal (sink behavior)
-    pub consume_signal: unsafe extern "C" fn(*mut c_void, *const SignalBuffer),
+    /// Returns: 0 = no output, pointer = output signal buffer (caller must free)
+    pub consume_signal: unsafe extern "C" fn(*mut c_void, *const SignalBuffer) -> *mut SignalBuffer,
     
     /// Destroy the module instance
     pub destroy: unsafe extern "C" fn(*mut c_void),
@@ -84,7 +127,14 @@ pub type PluginCreateFn = unsafe extern "C" fn() -> *mut c_void;
 /// Get the vtable for the plugin
 pub type PluginGetVTableFn = unsafe extern "C" fn() -> *const ModuleRuntimeVTable;
 
+/// Get the module schema (optional, for port discovery)
+/// Returns null if not supported
+pub type PluginGetSchemaFn = unsafe extern "C" fn() -> *const ModuleSchemaAbi;
+
 /// Symbol names that plugins must export
 pub const PLUGIN_MANIFEST_SYMBOL: &[u8] = b"talisman_plugin_manifest\0";
 pub const PLUGIN_CREATE_SYMBOL: &[u8] = b"talisman_plugin_create\0";
 pub const PLUGIN_VTABLE_SYMBOL: &[u8] = b"talisman_plugin_get_vtable\0";
+/// Optional schema export symbol
+pub const PLUGIN_SCHEMA_SYMBOL: &[u8] = b"talisman_plugin_get_schema\0";
+
