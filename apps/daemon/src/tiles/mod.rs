@@ -6,6 +6,7 @@
 //! ## Architecture
 //! - **Monitor Mode**: Normal tile view, read-only feedback display
 //! - **Control Mode**: Maximized tile view, settings UI with live preview
+//! - **Error Handling**: Tiles can report errors displayed in monitor view
 
 use nannou::prelude::*;
 use std::collections::HashMap;
@@ -18,6 +19,7 @@ pub mod kamea;
 pub mod gpu_renderer;
 pub mod audio_vis;
 
+// Re-export main types
 pub use gpu_renderer::GpuRenderer;
 
 /// Describes an action that can be bound to a key
@@ -74,6 +76,60 @@ impl<'a> Default for RenderContext<'a> {
     }
 }
 
+/// Represents an error state that a tile can display
+#[derive(Debug, Clone)]
+pub struct TileError {
+    /// Short error message (shown in monitor view)
+    pub message: String,
+    /// Detailed error info (shown in control view)
+    pub details: Option<String>,
+    /// Error severity level
+    pub severity: ErrorSeverity,
+    /// When the error occurred
+    pub timestamp: std::time::Instant,
+}
+
+impl TileError {
+    pub fn new(message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+            details: None,
+            severity: ErrorSeverity::Error,
+            timestamp: std::time::Instant::now(),
+        }
+    }
+    
+    pub fn with_details(mut self, details: &str) -> Self {
+        self.details = Some(details.to_string());
+        self
+    }
+    
+    pub fn warning(message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+            details: None,
+            severity: ErrorSeverity::Warning,
+            timestamp: std::time::Instant::now(),
+        }
+    }
+    
+    pub fn info(message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+            details: None,
+            severity: ErrorSeverity::Info,
+            timestamp: std::time::Instant::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorSeverity {
+    Info,      // Blue - informational
+    Warning,   // Yellow - something might be wrong
+    Error,     // Red - something is wrong
+}
+
 /// Core trait for all renderable tiles
 /// 
 /// Tiles have two rendering modes:
@@ -110,6 +166,17 @@ pub trait TileRenderer: Send + Sync {
     
     /// Whether this tile prefers GPU-accelerated rendering
     fn prefers_gpu(&self) -> bool { false }
+    
+    // === ERROR HANDLING ===
+    
+    /// Get current error state, if any
+    /// 
+    /// Tiles can report errors to be displayed in the monitor view.
+    /// The error will be rendered as an overlay with an icon and message.
+    fn get_error(&self) -> Option<TileError> { None }
+    
+    /// Clear the current error
+    fn clear_error(&mut self) {}
     
     // === LIFECYCLE ===
     
@@ -252,6 +319,25 @@ impl TileRegistry {
         }
         false
     }
+    
+    /// Get error from a tile
+    pub fn get_error(&self, module: &str) -> Option<TileError> {
+        if let Some(tile) = self.tiles.get(module) {
+            if let Ok(t) = tile.read() {
+                return t.get_error();
+            }
+        }
+        None
+    }
+    
+    /// Clear error on a tile
+    pub fn clear_error(&self, module: &str) {
+        if let Some(tile) = self.tiles.get(module) {
+            if let Ok(mut t) = tile.write() {
+                t.clear_error();
+            }
+        }
+    }
 }
 
 impl Default for TileRegistry {
@@ -272,4 +358,49 @@ pub fn create_default_registry() -> TileRegistry {
     registry.register(audio_vis::AudioVisTile::new("audio_vis"));
     
     registry
+}
+
+/// Render an error overlay on a tile
+/// 
+/// This should be called after render_monitor to overlay error information
+pub fn render_error_overlay(draw: &Draw, rect: Rect, error: &TileError) {
+    // Determine color based on severity
+    let (bg_color, fg_color, icon) = match error.severity {
+        ErrorSeverity::Info => (srgba(0.1, 0.2, 0.3, 0.8), srgba(0.5, 0.7, 1.0, 1.0), "ℹ"),
+        ErrorSeverity::Warning => (srgba(0.3, 0.25, 0.1, 0.8), srgba(1.0, 0.8, 0.2, 1.0), "⚠"),
+        ErrorSeverity::Error => (srgba(0.3, 0.1, 0.1, 0.8), srgba(1.0, 0.3, 0.3, 1.0), "✖"),
+    };
+    
+    // Error banner at bottom of tile
+    let banner_height = 24.0;
+    let banner_rect = Rect::from_x_y_w_h(
+        rect.x(),
+        rect.bottom() + banner_height / 2.0,
+        rect.w(),
+        banner_height,
+    );
+    
+    // Background
+    draw.rect()
+        .xy(banner_rect.xy())
+        .wh(banner_rect.wh())
+        .color(bg_color);
+    
+    // Icon
+    draw.text(icon)
+        .xy(pt2(banner_rect.left() + 12.0, banner_rect.y()))
+        .color(fg_color)
+        .font_size(14);
+    
+    // Message (truncated)
+    let msg = if error.message.len() > 40 {
+        format!("{}...", &error.message[..40])
+    } else {
+        error.message.clone()
+    };
+    
+    draw.text(&msg)
+        .xy(pt2(banner_rect.x() + 10.0, banner_rect.y()))
+        .color(fg_color)
+        .font_size(11);
 }

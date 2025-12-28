@@ -4,7 +4,7 @@ use log::{error, info};
 use std::sync::Arc;
 use talisman_core::{
     AudioFrame, DataType, ModuleSchema, Port, PortDirection, Signal, Source,
-    ring_buffer::{self, RingBufferSender},
+    ring_buffer::{self, RingBufferSender, RingBufferReceiver},
 };
 
 struct SendStream(cpal::Stream);
@@ -25,9 +25,11 @@ pub struct AudioInputSourceRT {
 impl AudioInputSourceRT {
     /// Create a new real-time audio input source
     /// 
+    /// Returns the source and a ring buffer receiver for consuming audio frames.
+    /// 
     /// # Arguments
     /// * `ring_buffer_size` - Power of 2, typically 2048-8192 for audio
-    pub fn new(ring_buffer_size: usize) -> anyhow::Result<Self> {
+    pub fn new(ring_buffer_size: usize) -> anyhow::Result<(Self, RingBufferReceiver<AudioFrame>)> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -43,7 +45,7 @@ impl AudioInputSourceRT {
         let channels = config.channels;
 
         // Create ring buffer for audio frames
-        let (ring_tx, _ring_rx) = ring_buffer::channel::<AudioFrame>(ring_buffer_size);
+        let (ring_tx, ring_rx) = ring_buffer::channel::<AudioFrame>(ring_buffer_size);
         let ring_tx_clone = ring_tx.clone();
 
         let err_fn = move |err| {
@@ -65,13 +67,15 @@ impl AudioInputSourceRT {
 
         stream.play()?;
 
-        Ok(Self {
+        let source = Self {
             ring_tx: Some(ring_tx),
             sample_rate,
             channels,
             _stream: SendStream(stream),
             enabled: true,
-        })
+        };
+        
+        Ok((source, ring_rx))
     }
 
     fn run<T>(

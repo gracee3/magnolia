@@ -11,8 +11,9 @@ use std::thread;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use audio_input::AudioInputSource;
+use audio_input::{AudioInputSource, AudioInputSourceRT};
 use text_tools::{SaveFileSink, OutputFormat};
+use talisman_core::ring_buffer;
 
 // Layout editor and visualizer modules
 mod layout_editor;
@@ -80,7 +81,9 @@ struct Model {
     plugin_manager: talisman_core::PluginManager,
     
     // Audio State
-    audio_buffer: VecDeque<f32>, // Circular buffer for oscilloscope
+    audio_buffer: VecDeque<f32>, // Circular buffer for oscilloscope (legacy)
+    /// Real-time audio ring buffer receiver (for new tile system)
+    audio_stream_rx: Option<ring_buffer::RingBufferReceiver<talisman_core::AudioFrame>>,
     
     // Layout Editor State (Phase 5)
     layout_editor: LayoutEditor,
@@ -261,6 +264,28 @@ fn model(app: &App) -> Model {
         },
         Err(e) => log::error!("Failed to init AudioInputSource: {}", e),
     }
+    
+    // Init Real-Time Audio Input (SPSC ring buffer for new tile system)
+    // This provides minimal latency audio streaming (~5-10ns per frame)
+    let audio_stream_rx = match AudioInputSourceRT::new(4096) {
+        Ok((_source, rx)) => {
+            // Source is kept alive by thread ownership
+            // We get the ring buffer receiver directly
+            log::info!("AudioInputSourceRT initialized with ring buffer");
+            
+            // The source runs in the audio thread callback
+            // We keep the receiver for the tile system
+            // Note: source is moved here, stream will stop when it drops
+            // We need to keep it alive - store it or leak it
+            std::mem::forget(_source); // Keep audio stream alive
+            
+            Some(rx)
+        },
+        Err(e) => {
+            log::warn!("Failed to init AudioInputSourceRT: {} - using legacy audio", e);
+            None
+        }
+    };
 
     // Init SaveFileSink (WAV/Text/Image)
     let save_file_sink = SaveFileSink::default();
@@ -411,7 +436,7 @@ fn model(app: &App) -> Model {
         }
     }
 
-    Model {
+    let mut model = Model {
         receiver: rx_ui,
         router_tx: tx_router,
         egui,
@@ -441,6 +466,7 @@ fn model(app: &App) -> Model {
         is_sleeping: initial_sleep_state,
 
         audio_buffer: VecDeque::with_capacity(2048),
+        audio_stream_rx,
         module_host,
         plugin_manager,
         layout_editor: LayoutEditor::new(),
@@ -450,7 +476,27 @@ fn model(app: &App) -> Model {
         gpu_renderer: GpuRenderer::new(app),
         start_time: std::time::Instant::now(),
         frame_count: 0,
+    };
+    
+    // Apply saved tile settings from layout config
+    apply_tile_settings(&model.tile_registry, &model.layout);
+    
+    // Connect audio stream to AudioVisTile if available
+    if let Some(rx) = model.audio_stream_rx.take() {
+        // Get the audio_vis tile from registry and connect the stream
+        if let Some(tile) = model.tile_registry.get("audio_vis") {
+            if let Ok(mut t) = tile.write() {
+                // Downcast to AudioVisTile - this is tricky with trait objects
+                // For now, we'll use a different approach - store the receiver in the model
+                // and poll it in update, pushing to the tile's legacy buffer
+                log::info!("AudioVisTile found - audio stream ready (using polling bridge)");
+            }
+        }
+        // Put the receiver back
+        model.audio_stream_rx = Some(rx);
     }
+    
+    model
 }
 
 
@@ -463,6 +509,34 @@ fn tile_to_module(tile_id: &str) -> String {
         "astro_pane" => "astrology_display".to_string(),
         "sigil_pane" | "kamea_sigil" => "kamea_printer".to_string(),
         _ => tile_id.to_string(), // fallback: use tile_id as module_id
+    }
+}
+
+/// Apply saved settings from layout config to all tiles in registry
+fn apply_tile_settings(registry: &tiles::TileRegistry, layout: &Layout) {
+    for tile in &layout.config.tiles {
+        // Apply config settings if present
+        if tile.settings.config != serde_json::Value::Null {
+            registry.apply_settings(&tile.module, &tile.settings.config);
+            log::debug!("Applied settings to tile {}: {:?}", tile.id, tile.settings.config);
+        }
+    }
+}
+
+/// Save current tile settings from registry back to layout config
+/// Call this when closing a maximized tile to persist any changes
+fn save_tile_settings(registry: &tiles::TileRegistry, layout: &mut Layout, tile_id: &str) {
+    // Find the tile in layout config
+    if let Some(tile) = layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
+        // Get settings from registry
+        let settings = registry.get_settings(&tile.module);
+        if settings != serde_json::Value::Null {
+            tile.settings.config = settings;
+            log::info!("Saved settings for tile {}", tile_id);
+            
+            // Save layout to disk
+            layout.save();
+        }
     }
 }
 
@@ -480,6 +554,10 @@ fn update(app: &App, model: &mut Model, update: Update) {
     if model.is_closing {
         model.anim_factor = (model.anim_factor - 0.1).max(0.0);
         if model.anim_factor <= 0.0 {
+            // Save tile settings before clearing (persist any changes made in control mode)
+            if let Some(ref tile_id) = model.maximized_tile {
+                save_tile_settings(&model.tile_registry, &mut model.layout, tile_id);
+            }
             model.maximized_tile = None;
             model.is_closing = false;
         }
@@ -490,6 +568,20 @@ fn update(app: &App, model: &mut Model, update: Update) {
     // Update tile registry (extends to new tiles with render_monitor/render_controls)
     model.tile_registry.update_all();
     model.frame_count += 1;
+    
+    // Pump audio from ring buffer to legacy audio_buffer for visualization
+    // The new tile system polls this in update(), but we also feed the legacy buffer
+    // for backward compatibility with render_tile()
+    if let Some(ref rx) = model.audio_stream_rx {
+        while let Some(frame) = rx.try_recv() {
+            // Add to circular buffer (mono mix)
+            let sample = (frame.left + frame.right) * 0.5;
+            if model.audio_buffer.len() >= 2048 {
+                model.audio_buffer.pop_front();
+            }
+            model.audio_buffer.push_back(sample);
+        }
+    }
 
     // Handle Plugin Hot-Reload
     while let Ok(path) = model.plugin_manager.reload_rx.try_recv() {
@@ -1759,6 +1851,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 };
                 
                 model.tile_registry.render_monitor(&tile.module, &draw, rect.pad(5.0), &ctx);
+                
+                // Render error overlay if tile has an error
+                if let Some(error) = model.tile_registry.get_error(&tile.module) {
+                    tiles::render_error_overlay(&draw, rect, &error);
+                }
             } else {
                 // Fallback to legacy render_tile
                 render_tile(draw.clone(), tile, rect, model, bc, fg_color, false);

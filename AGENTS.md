@@ -20,28 +20,91 @@ The core logic resides in an asynchronous orchestrator using **Tokio** channels 
 - **`crates/aphrodite`**: Wraps the Swiss Ephemeris. Provides high-precision astrological "Salting".
 - **`crates/logos`**: Handles the ingestion of intent.
 - **`crates/kamea`**: Generates grid-based geometry (Sigils).
-- **`crates/audio_input`**: Real-time audio ingestion using CPAL and Ring Buffers.
+- **`crates/audio_input`**: Real-time audio ingestion using CPAL and SPSC Ring Buffers.
 - **`apps/daemon`**: The central orchestrator and GUI (Nannou + Egui).
 
-## 4. Key Features for Developers
+## 4. Tile System Architecture (New)
+
+The tile system separates **monitor mode** (read-only display) from **control mode** (settings UI).
+
+### TileRenderer Trait (`apps/daemon/src/tiles/mod.rs`)
+```rust
+pub trait TileRenderer: Send + Sync {
+    fn id(&self) -> &str;
+    fn name(&self) -> &str;
+    
+    // Rendering modes
+    fn render_monitor(&self, draw: &Draw, rect: Rect, ctx: &RenderContext);  // Grid view
+    fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool;  // Maximized
+    
+    // Settings
+    fn settings_schema(&self) -> Option<serde_json::Value>;
+    fn apply_settings(&mut self, settings: &serde_json::Value);
+    fn get_settings(&self) -> serde_json::Value;
+    
+    // Keybind actions
+    fn bindable_actions(&self) -> Vec<BindableAction>;
+    fn execute_action(&mut self, action: &str) -> bool;
+    
+    // Error handling
+    fn get_error(&self) -> Option<TileError>;
+    fn clear_error(&mut self);
+    
+    // Lifecycle
+    fn update(&mut self);
+    fn prefers_gpu(&self) -> bool;
+}
+```
+
+### Error Reporting
+Tiles can report errors via `TileError`:
+```rust
+pub struct TileError {
+    pub message: String,
+    pub details: Option<String>,
+    pub severity: ErrorSeverity,  // Info, Warning, Error
+}
+```
+
+### Audio Visualization
+`AudioVisTile` uses SPSC ring buffer for minimal latency:
+- `connect_audio_stream(RingBufferReceiver<AudioFrame>)` - Wire audio source
+- Supports oscilloscope, spectrum bars, VU meter, Lissajous visualizations
+- Keybind actions: mute, freeze, next_vis
+
+### Per-Tile Settings (`configs/layout.toml`)
+```toml
+[[tiles]]
+id = "audio_vis_1"
+module = "audio_vis"
+
+[tiles.settings]
+config = { vis_type = "Oscilloscope", color_scheme = "CyanReactive" }
+keybinds = { mute = "m", freeze = "f", next_vis = "n" }
+```
+
+## 5. Key Features for Developers
 - **Dynamic Plugin System**:
   - Load `.so`/`.dll` plugins at runtime from `./plugins` or `~/.talisman/plugins`.
   - **Hot-Reloading**: Plugins auto-reload on file change during development.
   - **Sandboxing**: Linux plugins restricted via `seccomp-bpf`.
   - **Signing**: Optional Ed25519 signature verification.
 - **Low-Latency Audio**:
-  - Dedicated `SPSCRingBuffer` for lock-free audio streaming.
+  - Dedicated `SPSCRingBuffer` for lock-free audio streaming (~5-10ns per frame).
   - `AudioFrame` structures for optimized memory layout.
+  - `AudioInputSourceRT::new()` returns `(source, RingBufferReceiver)` tuple.
 - **Layout Engine**: `configs/layout.toml` drives the grid system with percentage/pixel/fr tracks.
-- **Immersive UI**: Transparent floating editor, cubic easing animations, and "Retinal Burn" color modes.
+- **Tile Settings**: Per-instance configuration with keybinds, persisted to TOML.
+- **GPU Rendering**: `GpuRenderer` for hardware-accelerated visualizations.
 
-## 5. Focus Areas for Future Agents
+## 6. Focus Areas for Future Agents
 - **Security Audit**: Verify capability-based security model and sandbox rules.
-- **Audio Processing**: Implement DSP processor modules using the new Ring Buffer system.
-- **Layout Manager**: Implement drag-and-drop UI to edit `layout.toml` live (Phase 5).
+- **Audio Processing**: Implement DSP processor modules using the Ring Buffer system.
+- **FFT Spectrum**: Add real FFT to AudioVisTile for proper spectrum analysis.
 - **Marketplace**: Build a registry for community plugins.
+- **Tile Instances**: Support multiple instances of the same tile type with different IDs.
 
-## 6. How to Run
+## 7. How to Run
 ```bash
 # Production mode (Smart logs)
 cargo run -p daemon
@@ -50,7 +113,7 @@ cargo run -p daemon
 RUST_LOG=debug cargo run -p daemon
 ```
 
-## 7. Plugin Development
+## 8. Plugin Development
 See `examples/hello_plugin` for a minimal C ABI plugin implementation.
 To build a plugin:
 ```bash
