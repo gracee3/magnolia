@@ -10,8 +10,8 @@ use nannou::prelude::*;
 use nannou_egui::egui;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use talisman_core::{AudioFrame, ring_buffer::RingBufferReceiver};
 use talisman_core::{TileRenderer, RenderContext, BindableAction, TileError};
+use talisman_signals::ring_buffer::RingBufferReceiver;
 
 /// Available visualization types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,8 +116,11 @@ pub struct AudioVisTile {
     /// Whether display is frozen (shows last captured frame)
     is_frozen: bool,
     
-    /// Ring buffer receiver for audio frames (SPSC, minimal latency)
-    ring_rx: Option<RingBufferReceiver<AudioFrame>>,
+    /// Ring buffer receiver for audio samples (SPSC, f32 stream)
+    ring_rx: Option<RingBufferReceiver<f32>>,
+
+    /// Number of channels in the stream
+    channels: u16,
     
     /// Local buffer for visualization (mono samples)
     buffer: Vec<f32>,
@@ -150,6 +153,7 @@ impl AudioVisTile {
             is_muted: false,
             is_frozen: false,
             ring_rx: None,
+            channels: 2,
             buffer: vec![0.0; BUFFER_SIZE],
             left_buffer: vec![0.0; BUFFER_SIZE / 2],
             right_buffer: vec![0.0; BUFFER_SIZE / 2],
@@ -161,11 +165,13 @@ impl AudioVisTile {
     
     /// Connect a ring buffer receiver for real-time audio streaming
     /// 
-    /// This uses the SPSC ring buffer for minimal latency (~5-10ns per frame)
-    pub fn connect_audio_stream(&mut self, receiver: RingBufferReceiver<AudioFrame>) {
+    /// This uses the SPSC ring buffer for minimal latency.
+    /// Expects interleaved samples (L, R, L, R...) if channels > 1.
+    pub fn connect_audio_stream(&mut self, receiver: RingBufferReceiver<f32>, channels: u16) {
         self.ring_rx = Some(receiver);
+        self.channels = channels;
         self.error = None; // Clear error when connected
-        log::info!("AudioVisTile {}: connected to audio stream", self.instance_id);
+        log::info!("AudioVisTile {}: connected to audio stream ({} ch)", self.instance_id, channels);
     }
     
     /// Check if audio stream is connected
@@ -219,30 +225,114 @@ impl AudioVisTile {
     /// Poll audio from ring buffer and update local buffers
     fn poll_audio(&mut self) {
         if let Some(ref rx) = self.ring_rx {
-            let mut samples_received = 0;
-            
-            // Drain ring buffer, keeping most recent samples
-            while let Some(frame) = rx.try_recv() {
-                // Shift buffers left
-                if samples_received < BUFFER_SIZE {
-                    let idx = samples_received % BUFFER_SIZE;
-                    self.buffer[idx] = (frame.left + frame.right) * 0.5; // Mono mix
-                    
-                    if samples_received < BUFFER_SIZE / 2 {
-                        self.left_buffer[samples_received] = frame.left;
-                        self.right_buffer[samples_received] = frame.right;
-                    }
-                }
-                samples_received += 1;
-            }
-            
-            // If no samples received for a while, that could indicate a problem
-            // (but we won't error immediately - audio might just be silent)
+             let mut frames_processed = 0;
+             let max_frames = BUFFER_SIZE; // Limit processing per frame to avoid stall
+             
+             // Drain ring buffer
+             while frames_processed < max_frames {
+                 match self.channels {
+                     1 => {
+                         if let Some(sample) = rx.try_recv() {
+                             // Shift mono buffer
+                             self.buffer.rotate_left(1);
+                             let len = self.buffer.len();
+                             self.buffer[len - 1] = sample;
+                             
+                             // Update split buffers (duplicate mono)
+                             self.left_buffer.rotate_left(1);
+                             let len_l = self.left_buffer.len();
+                             self.left_buffer[len_l - 1] = sample;
+                             
+                             self.right_buffer.rotate_left(1);
+                             let len_r = self.right_buffer.len();
+                             self.right_buffer[len_r - 1] = sample;
+
+                             frames_processed += 1;
+                         } else {
+                             break;
+                         }
+                     },
+                     2 => {
+                         // Need 2 samples for a frame
+                         // Since rx.try_recv() pops one by one, we need to be careful not to de-sync.
+                         // But for visualization, slight desync is acceptable if we miss a sample.
+                         // Ideally we peek, but ring_buffer might not support peek.
+                         // We'll just try to read 2.
+                         
+                         // Note: SPSC ring buffer is simple. If we get one, we should get the next immediately 
+                         // unless the writer was preempted exactly in between.
+                         if let Some(left) = rx.try_recv() {
+                             let right = rx.try_recv().unwrap_or(0.0); // Simple fallback
+                             
+                             let mono = (left + right) * 0.5;
+                             
+                             self.buffer.rotate_left(1);
+                             let len = self.buffer.len();
+                             self.buffer[len - 1] = mono;
+                             
+                             self.left_buffer.rotate_left(1);
+                             let len_l = self.left_buffer.len();
+                             self.left_buffer[len_l - 1] = left;
+                             
+                             self.right_buffer.rotate_left(1);
+                             let len_r = self.right_buffer.len();
+                             self.right_buffer[len_r - 1] = right;
+                             
+                             frames_processed += 1;
+                         } else {
+                             break;
+                         }
+                     },
+                     ch => {
+                         // Multi-channel: read ch samples, average first 2 for stereo, average all for mono
+                         // This is expensive per-sample loop. Just drain ch samples
+                         let mut sum = 0.0;
+                         let mut got_frame = false;
+                         
+                         // Try to read first sample
+                         if let Some(s1) = rx.try_recv() {
+                             sum += s1;
+                             let mut s2 = 0.0;
+                             
+                             // Read rest
+                             for i in 1..ch {
+                                 let s = rx.try_recv().unwrap_or(0.0);
+                                 sum += s;
+                                 if i == 1 { s2 = s; }
+                             }
+                             
+                             let mono = sum / ch as f32;
+                             
+                             self.buffer.rotate_left(1);
+                             let len = self.buffer.len();
+                             self.buffer[len - 1] = mono;
+                             
+                             self.left_buffer.rotate_left(1);
+                             let len_l = self.left_buffer.len();
+                             self.left_buffer[len_l - 1] = s1;
+                             
+                             self.right_buffer.rotate_left(1);
+                             let len_r = self.right_buffer.len();
+                             self.right_buffer[len_r - 1] = s2;
+                             
+                             got_frame = true;
+                         }
+                         
+                         if got_frame {
+                             frames_processed += 1;
+                         } else {
+                             break;
+                         }
+                     }
+                 }
+             }
         } else {
             // Fall back to legacy buffer
             if let Ok(buf) = self.legacy_buffer.lock() {
                 let len = buf.len().min(BUFFER_SIZE);
-                self.buffer[..len].copy_from_slice(&buf[..len]);
+                if len > 0 {
+                   self.buffer[..len].copy_from_slice(&buf[..len]);
+                }
             }
         }
     }

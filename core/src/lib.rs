@@ -13,8 +13,11 @@ pub use tile::{TileRenderer, TileRegistry, RenderContext, TileError, ErrorSeveri
 pub mod patch_bay;
 pub use patch_bay::{PatchBay, PatchBayError};
 
+pub mod host;
+pub use host::{ModuleHandle, ModuleImpl};
+
 pub mod runtime;
-pub use runtime::{ModuleRuntime, ModuleHost, ModuleHandle, ExecutionModel, Priority};
+pub use runtime::{ModuleRuntime, ModuleHost, ExecutionModel, Priority};
 
 pub mod adapters;
 pub use adapters::{SourceAdapter, SinkAdapter};

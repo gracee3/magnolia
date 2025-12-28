@@ -238,19 +238,16 @@ name = "audio_input"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "cpal",
- "crossbeam-channel",
  "log",
  "nannou",
  "nannou_egui",
  "num-traits",
  "serde",
  "serde_json",
- "talisman-plugin-abi",
- "talisman-plugin-helper",
  "talisman_core",
- "tokio",
+ "talisman_module_api",
+ "talisman_signals",
 ]
 
 [[package]]
@@ -894,6 +891,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "async-trait",
+ "audio_input",
  "chrono",
  "env_logger",
  "log",
@@ -904,6 +902,7 @@ dependencies = [
  "sha2",
  "sysinfo",
  "talisman_core",
+ "talisman_module_api",
  "tokio",
  "toml 0.8.23",
 ]
@@ -3675,8 +3674,30 @@ dependencies = [
  "serde_json",
  "sha2",
  "talisman-plugin-abi",
+ "talisman_module_api",
+ "talisman_signals",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "talisman_module_api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "talisman_signals",
+]
+
+[[package]]
+name = "talisman_signals"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

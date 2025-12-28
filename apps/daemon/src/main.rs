@@ -3,7 +3,8 @@ use talisman_core::{Signal, PatchBay, PluginManager, PluginModuleAdapter, Module
 use nannou_egui::{self, Egui, egui};
 use tokio::sync::mpsc;
 
-// use audio_input::AudioInputSourceRT; // Removed for microkernel architecture
+use audio_input::AudioInputModule;
+use talisman_module_api::{StaticModule, TickCx};
 // use talisman_core::ring_buffer; // Removed usage
 
 
@@ -69,6 +70,9 @@ struct Model {
     
     // Keyboard Navigation (keyboard-first UI)
     keyboard_nav: KeyboardNav,
+    
+    // Static Modules (Phase 1)
+    audio_input: AudioInputModule,
 }
 
 
@@ -143,22 +147,26 @@ fn model(app: &App) -> Model {
     // Apply patches from layout config (after plugins register their schemas)
     // This will be re-applied after plugin loading
     
-    /*
-    // Real-Time Audio Input (SPSC ring buffer for tile system)
-    // Removed: Audio input is now handled by the audio_input plugin directly
-    let audio_stream_rx = match AudioInputSourceRT::new(4096) {
-        Ok((_source, rx)) => {
-            log::info!("AudioInputSourceRT initialized with ring buffer");
-            std::mem::forget(_source); // Keep audio stream alive
-            Some(rx)
-        },
-        Err(e) => {
-            log::warn!("Failed to init AudioInputSourceRT: {} - audio visualization unavailable", e);
-            None
-        }
-    };
-    */
+    // Real-Time Audio Input (Static Module Phase 1)
+    let mut audio_input = AudioInputModule::new();
+    audio_input.initialize();
 
+    let mut tile_registry = tiles::create_default_registry();
+    
+    // Wire up visualization tile
+    if let Some((rx, _sr, channels)) = audio_input.take_receiver() {
+        use audio_input::tile::AudioVisTile;
+        let mut vis_tile = AudioVisTile::new("audio_vis");
+        vis_tile.connect_audio_stream(rx, channels);
+        tile_registry.register(vis_tile);
+        log::info!("Registered AudioVisTile with active stream ({} ch)", channels);
+    } else {
+        log::warn!("AudioInputModule failed to initialize stream");
+        // Register fallback tile without stream?
+        use audio_input::tile::AudioVisTile;
+        let vis_tile = AudioVisTile::new("audio_vis");
+        tile_registry.register(vis_tile);
+    }
     
     log::info!("Patch Bay initialized - modules will register via PluginManager");
 
@@ -253,11 +261,12 @@ fn model(app: &App) -> Model {
 
         module_host,
         plugin_manager,
-        tile_registry: tiles::create_default_registry(),
+        tile_registry,
         _compositor: tiles::Compositor::new(app),
         start_time: std::time::Instant::now(),
         frame_count: 0,
         keyboard_nav: KeyboardNav::new(),
+        audio_input,
     };
     
     // Apply saved tile settings from layout config
@@ -335,6 +344,16 @@ fn update(app: &App, model: &mut Model, update: Update) {
     // Update tile registry (extends to new tiles with render_monitor/render_controls)
     model.tile_registry.update_all();
     model.frame_count += 1;
+    
+    // TICK STATIC MODULES (Tier 0/1)
+    {
+        let dt = update.since_last.as_secs_f64();
+        let frame = model.frame_count;
+        let mut cx = TickCx::new(frame, dt);
+        model.audio_input.tick(&mut cx);
+        
+        // Audio stream wiring handled in main initialization (Phase 1)
+    }
     
     // (Legacy audio_buffer pump removed - AudioVisTile handles polling from ring buffer)
 
