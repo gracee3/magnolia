@@ -87,6 +87,7 @@ impl ModuleHandle {
 }
 
 use crate::resources::buffer_pool::{AudioBufferPool, BlobBufferPool};
+use crate::resources::gpu_map::{GpuTextureMap, GpuBufferMap, GpuTextureViewMap};
 
 /// Manages the lifecycle of all module runtimes
 pub struct ModuleHost {
@@ -94,6 +95,9 @@ pub struct ModuleHost {
     router_tx: mpsc::Sender<Signal>,
     pub audio_pool: Arc<AudioBufferPool>,
     pub blob_pool: Arc<BlobBufferPool>,
+    pub texture_map: Arc<GpuTextureMap>,
+    pub buffer_map: Arc<GpuBufferMap>,
+    pub view_map: Arc<GpuTextureViewMap>,
 }
 
 impl ModuleHost {
@@ -104,6 +108,9 @@ impl ModuleHost {
             router_tx,
             audio_pool: Arc::new(AudioBufferPool::new()),
             blob_pool: Arc::new(BlobBufferPool::new()),
+            texture_map: Arc::new(GpuTextureMap::new()),
+            buffer_map: Arc::new(GpuBufferMap::new()),
+            view_map: Arc::new(GpuTextureViewMap::new()),
         }
     }
     

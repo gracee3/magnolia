@@ -29,6 +29,7 @@ hex = "0.4"
 # Optional rendering dependencies (enabled by tile-rendering feature)
 nannou = { version = "0.19", optional = true }
 nannou_egui = { version = "0.19", optional = true }
+wgpu = "0.17.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 seccompiler = "0.4"

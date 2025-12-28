@@ -112,6 +112,23 @@ pub struct BlobHandle {
     pub size: usize,
 }
 
+/// Handle to a host-managed GPU Texture (zero-copy)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct GpuTextureHandle {
+    pub id: u64,
+    pub generation: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Handle to a host-managed GPU Buffer (zero-copy)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct GpuBufferHandle {
+    pub id: u64,
+    pub generation: u32,
+    pub size: u64,
+}
+
 /// The Alchemical Consignment.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "data")]
@@ -180,6 +197,7 @@ pub enum Signal {
         content: String,
     },
     /// Pointer to WGPU Context types (Device, Queue) - Unsafe!
+    /// DEPRECATED: Use HostGpuApi instead of passing raw pointers
     #[serde(skip)]
     GpuContext {
         device: usize, // cast to *const wgpu::Device
@@ -188,10 +206,8 @@ pub enum Signal {
     /// GPU Texture Handle (for Compositor)
     #[serde(skip)]
     Texture {
-        id: u64,
-        view: usize, // cast to *const wgpu::TextureView
-        width: u32,
-        height: u32,
+        handle: GpuTextureHandle,
+        start_time: f64, // Optional timestamp
     },
     /// Empty signal, used for heartbeat or triggers
     Pulse,

@@ -3679,6 +3679,7 @@ dependencies = [
  "talisman_signals",
  "thiserror",
  "tokio",
+ "wgpu",
 ]
 
 [[package]]

@@ -48,8 +48,10 @@ pub use plugin_signing::PluginVerifier;
 
 pub mod resources {
     pub mod buffer_pool;
+    pub mod gpu_map;
 }
 pub use resources::buffer_pool::{BufferPool, AudioBufferPool, BlobBufferPool};
+pub use resources::gpu_map::{GpuResourceMap, GpuTextureMap, GpuBufferMap, GpuTextureViewMap};
 
 /// Symbolic Kamea grid size names mapped to dimensions
 /// Based on traditional planetary magic squares
