@@ -23,12 +23,17 @@ mod modal;
 mod signal_handler;
 mod layout;
 mod tiles;
+mod input;
+mod theme;
+
 
 use layout_editor::LayoutEditor;
 use module_picker::ModulePicker;
 use modal::ModalLayer;
 use layout::Layout;
 use tiles::{TileRegistry, RenderContext, GpuRenderer};
+use input::KeyboardNav;
+
 
 
 
@@ -97,6 +102,9 @@ struct Model {
     gpu_renderer: GpuRenderer,
     start_time: std::time::Instant,
     frame_count: u64,
+    
+    // Keyboard Navigation (keyboard-first UI)
+    keyboard_nav: KeyboardNav,
 }
 
 
@@ -476,6 +484,7 @@ fn model(app: &App) -> Model {
         gpu_renderer: GpuRenderer::new(app),
         start_time: std::time::Instant::now(),
         frame_count: 0,
+        keyboard_nav: KeyboardNav::new(),
     };
     
     // Apply saved tile settings from layout config
@@ -1612,168 +1621,306 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     }
     
     let ctrl = _app.keys.mods.ctrl();
-    let shift = _app.keys.mods.shift();
+    
+    // Update grid size for navigation
+    let (grid_cols, grid_rows) = model.layout.config.resolve_grid();
+    model.keyboard_nav.set_grid_size(grid_cols, grid_rows);
     
     // === TILE KEYBIND DISPATCH ===
-    // If a tile is selected and not in edit mode, try tile-specific keybinds first
-    if !model.layout_editor.edit_mode && !ctrl && model.selected_tile.is_some() {
+    // If a tile is selected, try tile-specific keybinds first
+    if !ctrl && model.keyboard_nav.has_selection() {
         if dispatch_tile_keybind(model, key) {
             return; // Keybind handled
         }
     }
     
     if ctrl {
+        // Ctrl key combinations (clipboard, etc.)
         match key {
             Key::C => {
                 // COPY logic
-                if let Some(selected) = &model.selected_tile {
-                    let content = if selected == "wc_pane" {
-                         Some(model.word_count.clone())
-                    } else if selected == "dvwl_pane" {
-                         Some(model.devowel_text.clone())
-                    } else if selected == "astro_pane" {
-                         Some(model.astro_data.clone())
-                    } else if selected == "editor_pane" {
-                         Some(model.text_buffer.clone())
-                    } else if selected == "sigil_pane" {
-                         None 
-                    } else {
-                         None
+                if let Some(selected) = model.keyboard_nav.selected_tile_id() {
+                    let content = match selected {
+                        "wc_pane" => Some(model.word_count.clone()),
+                        "dvwl_pane" => Some(model.devowel_text.clone()),
+                        "astro_pane" => Some(model.astro_data.clone()),
+                        "editor_pane" => Some(model.text_buffer.clone()),
+                        _ => None,
                     };
                     
                     if let Some(text) = content {
-                         if let Some(cb) = &mut model.clipboard {
-                             if let Err(e) = cb.set_text(text) {
-                                  log::error!("Clipboard Copy Failed: {}", e);
-                             } else {
-                                  log::info!("Copied to Clipboard");
-                             }
-                         }
+                        if let Some(cb) = &mut model.clipboard {
+                            if let Err(e) = cb.set_text(text) {
+                                log::error!("Clipboard Copy Failed: {}", e);
+                            } else {
+                                log::info!("Copied to Clipboard");
+                            }
+                        }
                     }
                 }
             },
             Key::V => {
-                 if let Some(selected) = &model.selected_tile {
-                     if selected == "editor_pane" {
-                          if let Some(cb) = &mut model.clipboard {
-                               match cb.get_text() {
-                                   Ok(text) => {
-                                        model.text_buffer.push_str(&text);
-                                        let _ = model.router_tx.try_send(Signal::Text(model.text_buffer.clone()));
-                                   },
-                                   Err(e) => log::error!("Clipboard Paste Failed: {}", e)
-                               }
-                          }
-                     }
-                 }
+                if let Some(selected) = model.keyboard_nav.selected_tile_id() {
+                    if selected == "editor_pane" {
+                        if let Some(cb) = &mut model.clipboard {
+                            match cb.get_text() {
+                                Ok(text) => {
+                                    model.text_buffer.push_str(&text);
+                                    let _ = model.router_tx.try_send(Signal::Text(model.text_buffer.clone()));
+                                },
+                                Err(e) => log::error!("Clipboard Paste Failed: {}", e)
+                            }
+                        }
+                    }
+                }
             },
             _ => {}
         }
     } else {
-        // Non-Ctrl keys
+        // Non-Ctrl keys - keyboard-first navigation
+        use input::{InputMode, Direction, LayoutSubState, EscapeResult};
+        
         match key {
-            // E - Toggle Edit Mode (saves on exit)
-            Key::E => {
-                let should_save = model.layout_editor.toggle_edit_mode();
-                if model.layout_editor.edit_mode {
-                    log::info!("Layout edit mode: ENABLED");
-                } else {
-                    log::info!("Layout edit mode: DISABLED");
-                    if should_save {
-                        model.layout.save();
-                        log::info!("Layout saved on exit.");
-                    }
-                }
-            },
-            
-            // Arrow Keys - Navigate grid cursor (edit mode only)
+            // === ARROW KEYS - Always navigate ===
             Key::Up | Key::Down | Key::Left | Key::Right => {
-                if model.layout_editor.edit_mode {
-                    let (grid_cols, grid_rows) = model.layout.config.resolve_grid();
-                    let direction = match key {
-                        Key::Up => layout_editor::Direction::Up,
-                        Key::Down => layout_editor::Direction::Down,
-                        Key::Left => layout_editor::Direction::Left,
-                        Key::Right => layout_editor::Direction::Right,
-                        _ => return,
-                    };
-                    model.layout_editor.navigate_cursor(direction, grid_cols, grid_rows);
+                let direction = match key {
+                    Key::Up => Direction::Up,
+                    Key::Down => Direction::Down,
+                    Key::Left => Direction::Left,
+                    Key::Right => Direction::Right,
+                    _ => return,
+                };
+                
+                match model.keyboard_nav.mode {
+                    InputMode::Normal | InputMode::Patch => {
+                        // Navigate and auto-select tile at cursor
+                        model.keyboard_nav.navigate(direction);
+                        if let Some(tile_id) = model.keyboard_nav.select_tile_at_cursor(&model.layout.config) {
+                            model.selected_tile = Some(tile_id.clone());
+                            log::debug!("Selected tile: {}", tile_id);
+                        } else {
+                            model.selected_tile = None;
+                        }
+                    },
+                    InputMode::Layout => {
+                        match &model.keyboard_nav.layout_state {
+                            LayoutSubState::Resize { tile_id, original_bounds: _ } => {
+                                // Arrow keys resize the tile
+                                let (delta_col, delta_row) = KeyboardNav::resize_direction(direction);
+                                let tile_id = tile_id.clone();
+                                
+                                // First, read the current position and size
+                                let tile_info = model.layout.config.tiles.iter()
+                                    .find(|t| t.id == tile_id)
+                                    .map(|t| (t.col, t.row, t.colspan.unwrap_or(1), t.rowspan.unwrap_or(1)));
+                                
+                                if let Some((col, row, colspan, rowspan)) = tile_info {
+                                    let new_colspan = (colspan as i32 + delta_col).max(1) as usize;
+                                    let new_rowspan = (rowspan as i32 + delta_row).max(1) as usize;
+                                    
+                                    // Validate placement
+                                    if model.layout_editor.is_placement_valid(
+                                        &model.layout.config, &tile_id, col, row, new_colspan, new_rowspan
+                                    ) {
+                                        // Now mutate
+                                        if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
+                                            tile.colspan = Some(new_colspan);
+                                            tile.rowspan = Some(new_rowspan);
+                                            model.layout_editor.pending_changes = true;
+                                            log::debug!("Resized tile to {}x{}", new_colspan, new_rowspan);
+                                        }
+                                    }
+                                }
+                            },
+                            LayoutSubState::Move { tile_id, .. } => {
+                                // Arrow keys move the tile (as 1×1)
+                                let tile_id = tile_id.clone();
+                                model.keyboard_nav.navigate(direction);
+                                let (new_col, new_row) = model.keyboard_nav.cursor;
+                                
+                                if model.layout_editor.is_placement_valid(
+                                    &model.layout.config, &tile_id, new_col, new_row, 1, 1
+                                ) {
+                                    if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
+                                        tile.col = new_col;
+                                        tile.row = new_row;
+                                        tile.colspan = Some(1);
+                                        tile.rowspan = Some(1);
+                                        model.layout_editor.pending_changes = true;
+                                        log::debug!("Moved tile to ({}, {})", new_col, new_row);
+                                    }
+                                }
+                            },
+                            LayoutSubState::Navigation => {
+                                // Standard cursor navigation in layout mode
+                                model.keyboard_nav.navigate(direction);
+                                model.layout_editor.cursor_cell = model.keyboard_nav.cursor;
+                                
+                                // Auto-select tile if present
+                                if let Some(tile_id) = model.keyboard_nav.select_tile_at_cursor(&model.layout.config) {
+                                    model.selected_tile = Some(tile_id);
+                                } else {
+                                    model.keyboard_nav.deselect();
+                                    model.selected_tile = None;
+                                }
+                            },
+                        }
+                    },
                 }
             },
             
-            // Enter - Select tile at cursor or confirm action
-            Key::Return => {
-                if model.layout_editor.edit_mode {
-                    if let Some(tile_id) = model.layout_editor.select_at_cursor(&model.layout.config) {
-                        log::info!("Selected tile: {}", tile_id);
-                    } else {
-                        // Empty cell - could open module picker
-                        log::info!("Empty cell at cursor - module picker TODO");
-                    }
+            // === E - Settings modal OR Layout mode ===
+            Key::E => {
+                match model.keyboard_nav.mode {
+                    InputMode::Normal => {
+                        if model.keyboard_nav.has_selection() {
+                            // Tile selected → open settings modal (maximize tile)
+                            if let Some(tile_id) = model.keyboard_nav.selected_tile_id() {
+                                model.maximized_tile = Some(tile_id.to_string());
+                                model.is_closing = false;
+                                model.anim_factor = 0.0;
+                                log::info!("Opening tile settings: {}", tile_id);
+                            }
+                        } else {
+                            // No tile selected → enter layout mode
+                            model.keyboard_nav.enter_layout_mode();
+                            model.layout_editor.edit_mode = true;
+                            log::info!("Entered layout mode");
+                        }
+                    },
+                    InputMode::Layout => {
+                        if model.keyboard_nav.has_selection() {
+                            // Enter resize mode
+                            if model.keyboard_nav.enter_resize_mode(&model.layout.config) {
+                                log::info!("Entered resize mode - arrows resize, Space to move, Enter to confirm");
+                            }
+                        }
+                    },
+                    InputMode::Patch => {
+                        // E in patch mode could open port selection (deferred)
+                        log::info!("Port selection mode (deferred)");
+                    },
                 }
             },
             
-            // P - Enter Patch Mode (edit mode + tile selected only)
+            // === P - Patch mode ===
             Key::P => {
-                if model.layout_editor.edit_mode {
-                    use layout_editor::EditState;
-                    if matches!(&model.layout_editor.edit_state, EditState::TileSelected { .. }) {
-                        model.layout_editor.enter_patch_mode();
+                match model.keyboard_nav.mode {
+                    InputMode::Normal => {
+                        model.keyboard_nav.enter_patch_mode();
                         log::info!("Entered patch mode");
-                    }
+                    },
+                    InputMode::Patch => {
+                        // Already in patch mode - could toggle or no-op
+                    },
+                    InputMode::Layout => {
+                        // Exit layout, enter patch
+                        model.keyboard_nav.exit_layout_mode();
+                        model.layout_editor.edit_mode = false;
+                        model.keyboard_nav.enter_patch_mode();
+                        log::info!("Switched from layout to patch mode");
+                    },
                 }
             },
             
-            // M - Enter Move/Resize Mode (edit mode + tile selected only)
-            Key::M => {
-                if model.layout_editor.edit_mode {
-                    use layout_editor::EditState;
-                    if matches!(&model.layout_editor.edit_state, EditState::TileSelected { .. }) {
-                        model.layout_editor.enter_move_resize_mode(&model.layout.config);
-                        log::info!("Entered move/resize mode - tile shown as 1×1, click to set bounds");
-                    }
-                }
-            },
-            
-            // Escape - Cascading behavior within edit mode only
-            Key::Escape => {
-                if model.layout_editor.edit_mode {
-                    use layout_editor::EditState;
-                    match &model.layout_editor.edit_state {
-                        EditState::MoveResize { .. } => {
-                            // Revert to original bounds and return to tile selected
-                            model.layout_editor.revert_move_resize(&mut model.layout.config);
-                            log::info!("Reverted move/resize");
-                        },
-                        EditState::Patching { .. } => {
-                            // Return to tile selected
-                            model.layout_editor.cancel_operation();
-                            log::info!("Cancelled patch mode");
-                        },
-                        EditState::TileSelected { .. } => {
-                            // Deselect tile, return to navigation
-                            model.layout_editor.deselect();
-                            log::info!("Deselected tile");
-                        },
-                        EditState::Navigation => {
-                            // Exit edit mode entirely
-                            let should_save = model.layout_editor.toggle_edit_mode();
-                            log::info!("Layout edit mode: DISABLED");
-                            if should_save {
-                                model.layout.save();
+            // === SPACE - Move mode toggle (in Layout resize) ===
+            Key::Space => {
+                if model.keyboard_nav.mode == InputMode::Layout {
+                    match &model.keyboard_nav.layout_state {
+                        LayoutSubState::Resize { .. } => {
+                            // Toggle to move mode
+                            if model.keyboard_nav.enter_move_mode(&model.layout.config) {
+                                log::info!("Entered move mode - arrows move, Space again to resize, Enter to confirm");
                             }
                         },
+                        LayoutSubState::Move { .. } => {
+                            // Toggle back to resize mode
+                            if model.keyboard_nav.enter_resize_mode(&model.layout.config) {
+                                log::info!("Returned to resize mode");
+                            }
+                        },
+                        _ => {}
                     }
                 }
-                // ESC outside edit mode is ignored - use window close button
             },
-
-
-
-
+            
+            // === ENTER - Confirm / Select ===
+            Key::Return => {
+                match model.keyboard_nav.mode {
+                    InputMode::Normal | InputMode::Patch => {
+                        // If no tile selected, try to select at cursor
+                        if !model.keyboard_nav.has_selection() {
+                            if let Some(tile_id) = model.keyboard_nav.select_tile_at_cursor(&model.layout.config) {
+                                model.selected_tile = Some(tile_id.clone());
+                                log::info!("Selected tile: {}", tile_id);
+                            }
+                        }
+                    },
+                    InputMode::Layout => {
+                        match &model.keyboard_nav.layout_state {
+                            LayoutSubState::Resize { .. } | LayoutSubState::Move { .. } => {
+                                // Confirm resize/move
+                                model.keyboard_nav.exit_resize_move_mode();
+                                model.layout.save();
+                                log::info!("Confirmed resize/move, layout saved");
+                            },
+                            LayoutSubState::Navigation => {
+                                // Select tile at cursor
+                                if let Some(tile_id) = model.keyboard_nav.select_tile_at_cursor(&model.layout.config) {
+                                    model.selected_tile = Some(tile_id.clone());
+                                    log::info!("Selected tile: {}", tile_id);
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            
+            // === ESCAPE - Cascading exit ===
+            Key::Escape => {
+                let result = model.keyboard_nav.handle_escape();
+                
+                match result {
+                    EscapeResult::Deselected => {
+                        model.selected_tile = None;
+                        log::debug!("Deselected tile");
+                    },
+                    EscapeResult::ExitedSubMode => {
+                        // Reverted resize/move, restore original bounds
+                        if let Some(bounds) = model.keyboard_nav.get_original_bounds() {
+                            if let Some(tile_id) = model.keyboard_nav.selected_tile_id() {
+                                if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| &t.id == tile_id) {
+                                    tile.col = bounds.0;
+                                    tile.row = bounds.1;
+                                    tile.colspan = Some(bounds.2);
+                                    tile.rowspan = Some(bounds.3);
+                                }
+                            }
+                        }
+                        log::debug!("Exited resize/move mode");
+                    },
+                    EscapeResult::ExitedMode => {
+                        model.layout_editor.edit_mode = false;
+                        model.selected_tile = None;
+                        log::debug!("Exited mode (layout/patch) back to normal");
+                    },
+                    EscapeResult::ExitRequested => {
+                        // Deferred: exit confirmation dialog
+                        // For now, just log
+                        log::debug!("Exit requested (confirmation deferred)");
+                    },
+                }
+                
+                // Sync layout_editor state
+                model.layout_editor.edit_mode = model.keyboard_nav.mode == InputMode::Layout;
+            },
+            
             _ => {}
         }
     }
+    
+    // Sync selected_tile with keyboard_nav (for backward compatibility)
+    model.selected_tile = model.keyboard_nav.selected_tile_id().map(|s| s.to_string());
 }
 
 

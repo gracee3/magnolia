@@ -1,6 +1,3 @@
-# Talisman Layout Configuration
-# Uses Venus (7x7) planetary Kamea grid
-
 grid = "venus"
 columns = [
     "1fr",
@@ -22,10 +19,6 @@ rows = [
 ]
 is_sleeping = false
 
-# ============================================================================
-# TILES WITH PER-INSTANCE SETTINGS
-# ============================================================================
-
 [[tiles]]
 id = "audio_vis_1"
 col = 0
@@ -35,9 +28,15 @@ rowspan = 2
 module = "audio_vis"
 enabled = true
 
-[tiles.settings]
-config = { vis_type = "Oscilloscope", color_scheme = "CyanReactive", sensitivity = 1.0 }
-keybinds = { mute = "m", freeze = "f", next_vis = "n" }
+[tiles.settings.config]
+color_scheme = "Rainbow"
+sensitivity = 0.800000011920929
+vis_type = "SpectrumBars"
+
+[tiles.settings.keybinds]
+freeze = "f"
+next_vis = "n"
+mute = "m"
 
 [[tiles]]
 id = "audio_vis_2"
@@ -48,9 +47,13 @@ rowspan = 2
 module = "audio_vis"
 enabled = true
 
-[tiles.settings]
-config = { vis_type = "SpectrumBars", color_scheme = "Rainbow", sensitivity = 0.8 }
-keybinds = { mute = "m" }
+[tiles.settings.config]
+color_scheme = "Rainbow"
+sensitivity = 0.800000011920929
+vis_type = "SpectrumBars"
+
+[tiles.settings.keybinds]
+mute = "m"
 
 [[tiles]]
 id = "astrology_display"
@@ -61,9 +64,12 @@ rowspan = 2
 module = "astro"
 enabled = true
 
-[tiles.settings]
-config = { show_degrees = true, show_moon = true }
-keybinds = { refresh = "r" }
+[tiles.settings.config]
+show_degrees = true
+show_moon = true
+
+[tiles.settings.keybinds]
+refresh = "r"
 
 [[tiles]]
 id = "kamea_sigil"
@@ -74,9 +80,21 @@ rowspan = 3
 module = "kamea"
 enabled = true
 
-[tiles.settings]
-config = { grid_size = 5, stroke_weight = 2.5, glow_intensity = 0.2, show_grid_dots = true, path_color = [0.0, 1.0, 1.0] }
-keybinds = { toggle_dots = "d", increase_grid = "]", decrease_grid = "[" }
+[tiles.settings.config]
+glow_intensity = 0.20000000298023224
+grid_size = 5
+path_color = [
+    0.0,
+    1.0,
+    1.0,
+]
+show_grid_dots = true
+stroke_weight = 2.5
+
+[tiles.settings.keybinds]
+increase_grid = "]"
+decrease_grid = "["
+toggle_dots = "d"
 
 [[tiles]]
 id = "text_input"
@@ -87,9 +105,10 @@ rowspan = 3
 module = "text_input"
 enabled = true
 
-[tiles.settings]
-config = {}
-keybinds = { clear = "c" }
+[tiles.settings.config]
+
+[tiles.settings.keybinds]
+clear = "c"
 
 [[tiles]]
 id = "clock"
@@ -100,13 +119,14 @@ rowspan = 2
 module = "clock"
 enabled = true
 
-[tiles.settings]
-config = { format = "TwentyFourHour", show_seconds = true, show_date = false }
-keybinds = { toggle_format = "t", toggle_seconds = "s" }
+[tiles.settings.config]
+format = "TwentyFourHour"
+show_date = false
+show_seconds = true
 
-# ============================================================================
-# SIGNAL PATCHES
-# ============================================================================
+[tiles.settings.keybinds]
+toggle_format = "t"
+toggle_seconds = "s"
 
 [[patches]]
 id = "patch_1"
