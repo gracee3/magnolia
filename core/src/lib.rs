@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::collections::HashMap;
 
 pub mod patch_bay;
 pub use patch_bay::{PatchBay, PatchBayError};
@@ -122,6 +123,18 @@ impl LayoutConfig {
 
 
 
+/// Per-tile instance settings stored in layout config
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct TileSettings {
+    /// Module-specific settings as JSON
+    #[serde(default)]
+    pub config: serde_json::Value,
+    
+    /// Keybindings: action name -> key (e.g., "mute" -> "m")
+    #[serde(default)]
+    pub keybinds: HashMap<String, String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TileConfig {
     pub id: String,
@@ -132,6 +145,9 @@ pub struct TileConfig {
     pub module: String, // e.g. "editor", "word_count"
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Per-tile instance settings (module interprets these)
+    #[serde(default)]
+    pub settings: TileSettings,
 }
 
 fn default_enabled() -> bool { true }

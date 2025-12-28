@@ -1,8 +1,12 @@
-//! Text Input Tile - Simple egui TextEdit for testing
+//! Text Input Tile - Egui TextEdit for text entry
+//!
+//! Monitor mode: Read-only preview of current text
+//! Control mode: Full text editor with egui TextEdit
 
 use nannou::prelude::*;
+use nannou_egui::egui;
 use std::sync::{Arc, Mutex};
-use super::{TileRenderer, RenderContext};
+use super::{TileRenderer, RenderContext, BindableAction};
 
 pub struct TextInputTile {
     text_buffer: Arc<Mutex<String>>,
@@ -33,47 +37,142 @@ impl TileRenderer for TextInputTile {
     fn name(&self) -> &str { "Text Input" }
     
     fn update(&mut self) {
-        // Text input is updated via egui in render
+        // Text input is updated via egui in render_controls
     }
     
-    fn render(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) {
+    fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
         // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
-            .color(srgba(0.08, 0.08, 0.08, 0.9));
+            .color(srgba(0.05, 0.05, 0.08, 0.9));
         
-        // Border
+        // Get current text
+        let text = self.text_buffer.lock()
+            .map(|t| t.clone())
+            .unwrap_or_default();
+        
+        // Preview (truncated, read-only)
+        let preview = if text.is_empty() {
+            "[No text - double-click to edit]".to_string()
+        } else if text.len() > 80 {
+            format!("{}...", &text[..80])
+        } else {
+            text.replace('\n', " ").replace('\r', "")
+        };
+        
+        draw.text(&preview)
+            .xy(rect.xy())
+            .w(rect.w() - 20.0)
+            .color(srgba(0.6, 0.6, 0.6, 1.0))
+            .font_size(14);
+        
+        // Word count indicator
+        let word_count = self.text_buffer.lock()
+            .map(|t| t.split_whitespace().count())
+            .unwrap_or(0);
+        draw.text(&format!("{} words", word_count))
+            .xy(pt2(rect.right() - 50.0, rect.bottom() + 15.0))
+            .color(srgba(0.4, 0.4, 0.4, 0.8))
+            .font_size(10);
+        
+        // Label
+        draw.text("TEXT INPUT")
+            .xy(pt2(rect.x(), rect.top() - 15.0))
+            .color(srgba(0.5, 0.5, 0.5, 1.0))
+            .font_size(11);
+        
+        // Edit mode hint
+        draw.text("⏎ to edit")
+            .xy(pt2(rect.left() + 40.0, rect.bottom() + 15.0))
+            .color(srgba(0.0, 0.6, 0.6, 0.6))
+            .font_size(10);
+    }
+    
+    fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
+        // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
-            .no_fill()
-            .stroke_weight(1.0)
-            .stroke(srgba(0.0, 1.0, 1.0, 0.5));
+            .color(srgba(0.02, 0.02, 0.05, 0.98));
         
-        // Draw current text (egui handles actual input)
-        if let Ok(text) = self.text_buffer.lock() {
-            let display = if text.is_empty() {
-                "[Type here via egui...]".to_string()
-            } else {
-                text.clone()
-            };
-            
-            draw.text(&display)
-                .xy(rect.xy())
-                .color(srgb(0.0, 1.0, 1.0))
-                .font_size(16);
-        }
+        // Title
+        draw.text("TEXT EDITOR")
+            .xy(pt2(rect.x(), rect.top() - 30.0))
+            .color(CYAN)
+            .font_size(18);
         
-        // Label
-        draw.text("INPUT")
-            .xy(pt2(rect.x(), rect.top() - 20.0))
+        // Word count
+        let word_count = self.text_buffer.lock()
+            .map(|t| t.split_whitespace().count())
+            .unwrap_or(0);
+        let char_count = self.text_buffer.lock()
+            .map(|t| t.len())
+            .unwrap_or(0);
+        
+        draw.text(&format!("{} words | {} chars", word_count, char_count))
+            .xy(pt2(rect.x(), rect.top() - 55.0))
             .color(srgba(0.5, 0.5, 0.5, 1.0))
             .font_size(12);
         
-        // Note: Actual egui TextEdit is rendered in the main update loop
-        // This just shows the current value
-        let _ = ctx; // Unused for now, egui rendered separately
+        // Egui text editor
+        let mut used_egui = false;
+        if let Some(egui_ctx) = ctx.egui_ctx {
+            used_egui = true;
+            
+            let editor_width = rect.w() - 80.0;
+            let editor_height = rect.h() - 120.0;
+            let panel_x = rect.left() + 40.0 + (rect.w() / 2.0);
+            let panel_y = rect.top() - 80.0 + (rect.h() / 2.0);
+            
+            egui::Area::new(egui::Id::new("text_input_editor"))
+                .fixed_pos(egui::pos2(panel_x, panel_y))
+                .show(egui_ctx, |ui| {
+                    ui.set_max_width(editor_width);
+                    
+                    egui::Frame::none()
+                        .fill(egui::Color32::from_rgba_unmultiplied(5, 5, 10, 250))
+                        .inner_margin(egui::Margin::same(10.0))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 80, 80)))
+                        .show(ui, |ui| {
+                            // Get mutable access to text
+                            if let Ok(mut text) = self.text_buffer.lock() {
+                                let response = ui.add(
+                                    egui::TextEdit::multiline(&mut *text)
+                                        .desired_width(editor_width - 20.0)
+                                        .desired_rows((editor_height / 20.0) as usize)
+                                        .font(egui::TextStyle::Monospace)
+                                        .text_color(egui::Color32::from_rgb(0, 255, 255))
+                                );
+                                
+                                // Auto-focus on open
+                                if !response.has_focus() {
+                                    response.request_focus();
+                                }
+                            }
+                        });
+                });
+        }
+        
+        used_egui
+    }
+    
+    fn bindable_actions(&self) -> Vec<BindableAction> {
+        vec![
+            BindableAction::new("clear", "Clear Text", false),
+        ]
+    }
+    
+    fn execute_action(&mut self, action: &str) -> bool {
+        match action {
+            "clear" => {
+                if let Ok(mut text) = self.text_buffer.lock() {
+                    text.clear();
+                }
+                true
+            },
+            _ => false,
+        }
     }
     
     fn get_display_text(&self) -> Option<String> {

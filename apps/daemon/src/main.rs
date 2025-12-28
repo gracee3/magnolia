@@ -27,7 +27,7 @@ use layout_editor::LayoutEditor;
 use module_picker::ModulePicker;
 use modal::ModalLayer;
 use layout::Layout;
-use tiles::{TileRegistry, RenderContext};
+use tiles::{TileRegistry, RenderContext, GpuRenderer};
 
 
 
@@ -88,6 +88,12 @@ struct Model {
     
     // Modal Layer (centralized modal management)
     modal_layer: ModalLayer,
+    
+    // Tile System (Phase 6: Settings Architecture)
+    tile_registry: TileRegistry,
+    gpu_renderer: GpuRenderer,
+    start_time: std::time::Instant,
+    frame_count: u64,
 }
 
 
@@ -440,6 +446,10 @@ fn model(app: &App) -> Model {
         layout_editor: LayoutEditor::new(),
         module_picker: ModulePicker::new(),
         modal_layer: ModalLayer::new(),
+        tile_registry: tiles::create_default_registry(),
+        gpu_renderer: GpuRenderer::new(app),
+        start_time: std::time::Instant::now(),
+        frame_count: 0,
     }
 }
 
@@ -476,6 +486,10 @@ fn update(app: &App, model: &mut Model, update: Update) {
     } else if model.maximized_tile.is_some() && model.anim_factor < 1.0 {
         model.anim_factor = (model.anim_factor + 0.1).min(1.0);
     }
+    
+    // Update tile registry (extends to new tiles with render_monitor/render_controls)
+    model.tile_registry.update_all();
+    model.frame_count += 1;
 
     // Handle Plugin Hot-Reload
     while let Ok(path) = model.plugin_manager.reload_rx.try_recv() {
@@ -1161,15 +1175,16 @@ fn update(app: &App, model: &mut Model, update: Update) {
                        if ui.button(&module.name).clicked() {
                            // Add to layout
                            model.layout.config.tiles.push(TileConfig {
-                               id: format!("{}_new", module.id),
-                               col: 0,
-                               row: 0,
-                               colspan: Some(1),
-                               rowspan: Some(1),
-                               module: module.id.clone(),
-                               enabled: true,
-                           });
-                           ui.close_menu();
+                                id: format!("{}_new", module.id),
+                                col: 0,
+                                row: 0,
+                                colspan: Some(1),
+                                rowspan: Some(1),
+                                module: module.id.clone(),
+                                enabled: true,
+                                settings: Default::default(),
+                            });
+                            ui.close_menu();
                        }
                    }
                 });
@@ -1392,7 +1407,7 @@ fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
                          if model.layout.get_tile_at(c, r).is_none() {
                              let temp_tile = TileConfig {
                                  id: String::new(), col: c, row: r, colspan: Some(1), rowspan: Some(1),
-                                 module: String::new(), enabled: true
+                                 module: String::new(), enabled: true, settings: Default::default()
                              };
                              
                              if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
@@ -1454,6 +1469,42 @@ fn mouse_moved(app: &App, model: &mut Model, pos: Point2) {
     );
 }
 
+/// Dispatch keybinds configured for the currently selected tile
+/// Returns true if a keybind was executed
+fn dispatch_tile_keybind(model: &mut Model, key: Key) -> bool {
+    // Get selected tile
+    let tile_id = match &model.selected_tile {
+        Some(id) => id.clone(),
+        None => return false,
+    };
+    
+    // Find tile config
+    let tile_config = model.layout.config.tiles.iter()
+        .find(|t| t.id == tile_id);
+    
+    let (module, keybinds) = match tile_config {
+        Some(t) => (t.module.clone(), t.settings.keybinds.clone()),
+        None => return false,
+    };
+    
+    if keybinds.is_empty() {
+        return false;
+    }
+    
+    // Convert key to string for matching
+    let key_str = format!("{:?}", key).to_lowercase();
+    
+    // Find matching keybind
+    for (action, bound_key) in &keybinds {
+        if bound_key.to_lowercase() == key_str {
+            log::info!("Executing keybind: {} -> {} on tile {}", bound_key, action, tile_id);
+            return model.tile_registry.execute_action(&module, action);
+        }
+    }
+    
+    false
+}
+
 
 fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     // === INPUT ROUTING GUARD ===
@@ -1470,6 +1521,14 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     
     let ctrl = _app.keys.mods.ctrl();
     let shift = _app.keys.mods.shift();
+    
+    // === TILE KEYBIND DISPATCH ===
+    // If a tile is selected and not in edit mode, try tile-specific keybinds first
+    if !model.layout_editor.edit_mode && !ctrl && model.selected_tile.is_some() {
+        if dispatch_tile_keybind(model, key) {
+            return; // Keybind handled
+        }
+    }
     
     if ctrl {
         match key {
@@ -1650,7 +1709,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                  if model.layout.get_tile_at(c, r).is_none() {
                      let temp_tile = TileConfig {
                          id: String::new(), col: c, row: r, colspan: Some(1), rowspan: Some(1),
-                         module: String::new(), enabled: true
+                         module: String::new(), enabled: true, settings: Default::default()
                      };
                      if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
                          draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.05, 0.05, 0.05, 0.5)).stroke(stroke_color).stroke_weight(1.0);
@@ -1665,7 +1724,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
 
 
-    // Iterate over all tiles and render
+    // Iterate over all tiles and render (MONITOR MODE - Read-only feedback)
     for tile in &model.layout.config.tiles {
         if model.maximized_tile.as_ref() == Some(&tile.id) {
             continue;
@@ -1677,11 +1736,37 @@ fn view(app: &App, model: &Model, frame: Frame) {
             } else {
                 stroke_color.into_format::<f32>().into_linear().into()
             };
-            render_tile(draw.clone(), tile, rect, model, bc, fg_color, false);
+            
+            // Try tile registry first
+            if model.tile_registry.get(&tile.module).is_some() {
+                // Draw border
+                let is_selected = model.selected_tile.as_ref() == Some(&tile.id);
+                draw.rect()
+                    .xy(rect.xy())
+                    .wh(rect.wh())
+                    .color(rgba(0.0, 0.0, 0.0, 0.0))
+                    .stroke(bc)
+                    .stroke_weight(if is_selected { 2.0 } else { 1.0 });
+                
+                let ctx = RenderContext {
+                    time: model.start_time,
+                    frame_count: model.frame_count,
+                    is_selected,
+                    is_maximized: false,
+                    egui_ctx: None,
+                    tile_settings: Some(&tile.settings.config),
+                    gpu: Some(&model.gpu_renderer),
+                };
+                
+                model.tile_registry.render_monitor(&tile.module, &draw, rect.pad(5.0), &ctx);
+            } else {
+                // Fallback to legacy render_tile
+                render_tile(draw.clone(), tile, rect, model, bc, fg_color, false);
+            }
         }
     }
 
-    // Draw Maximized Tile on top
+    // Draw Maximized Tile on top (CONTROL MODE - Settings UI)
     if let Some(max_id) = &model.maximized_tile {
         if let Some(tile) = model.layout.config.tiles.iter().find(|t| &t.id == max_id) {
             if let Some(source_rect) = model.layout.calculate_rect(tile) {
@@ -1701,7 +1786,25 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 // Draw background for maximized view to hide underlying grid
                 draw.rect().xy(rect.xy()).wh(rect.wh()).color(bg_color);
                 
-                render_tile(draw.clone(), tile, rect, model, CYAN.into_format().into_linear().into(), fg_color, true);
+                // Try to use tile registry for render_controls
+                // Create RenderContext for tile
+                let ctx = RenderContext {
+                    time: model.start_time,
+                    frame_count: model.frame_count,
+                    is_selected: true,
+                    is_maximized: true,
+                    egui_ctx: None, // Will be handled separately
+                    tile_settings: Some(&tile.settings.config),
+                    gpu: Some(&model.gpu_renderer),
+                };
+                
+                // Try tile registry first
+                if model.tile_registry.get(&tile.module).is_some() {
+                    model.tile_registry.render_controls(&tile.module, &draw, rect, &ctx);
+                } else {
+                    // Fallback to legacy render_tile
+                    render_tile(draw.clone(), tile, rect, model, CYAN.into_format().into_linear().into(), fg_color, true);
+                }
             }
         }
     }

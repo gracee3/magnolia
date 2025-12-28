@@ -938,6 +938,8 @@ dependencies = [
  "logos",
  "nannou",
  "nannou_egui",
+ "serde",
+ "serde_json",
  "sha2",
  "sysinfo",
  "talisman_core",

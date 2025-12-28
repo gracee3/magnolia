@@ -1,3 +1,6 @@
+# Talisman Layout Configuration
+# Uses Venus (7x7) planetary Kamea grid
+
 grid = "venus"
 columns = [
     "1fr",
@@ -19,23 +22,91 @@ rows = [
 ]
 is_sleeping = false
 
-[[tiles]]
-id = "hello_plugin_new"
-col = 0
-row = 0
-colspan = 1
-rowspan = 4
-module = "hello_plugin"
-enabled = true
+# ============================================================================
+# TILES WITH PER-INSTANCE SETTINGS
+# ============================================================================
 
 [[tiles]]
-id = "astrology_display_new"
-col = 1
+id = "audio_vis_1"
+col = 0
+row = 0
+colspan = 2
+rowspan = 2
+module = "audio_vis"
+enabled = true
+
+[tiles.settings]
+config = { vis_type = "Oscilloscope", color_scheme = "CyanReactive", sensitivity = 1.0 }
+keybinds = { mute = "m", freeze = "f", next_vis = "n" }
+
+[[tiles]]
+id = "audio_vis_2"
+col = 2
+row = 0
+colspan = 2
+rowspan = 2
+module = "audio_vis"
+enabled = true
+
+[tiles.settings]
+config = { vis_type = "SpectrumBars", color_scheme = "Rainbow", sensitivity = 0.8 }
+keybinds = { mute = "m" }
+
+[[tiles]]
+id = "astrology_display"
+col = 4
 row = 0
 colspan = 3
 rowspan = 2
-module = "astrology_display"
+module = "astro"
 enabled = true
+
+[tiles.settings]
+config = { show_degrees = true, show_moon = true }
+keybinds = { refresh = "r" }
+
+[[tiles]]
+id = "kamea_sigil"
+col = 0
+row = 2
+colspan = 3
+rowspan = 3
+module = "kamea"
+enabled = true
+
+[tiles.settings]
+config = { grid_size = 5, stroke_weight = 2.5, glow_intensity = 0.2, show_grid_dots = true, path_color = [0.0, 1.0, 1.0] }
+keybinds = { toggle_dots = "d", increase_grid = "]", decrease_grid = "[" }
+
+[[tiles]]
+id = "text_input"
+col = 3
+row = 2
+colspan = 4
+rowspan = 3
+module = "text_input"
+enabled = true
+
+[tiles.settings]
+config = {}
+keybinds = { clear = "c" }
+
+[[tiles]]
+id = "clock"
+col = 0
+row = 5
+colspan = 2
+rowspan = 2
+module = "clock"
+enabled = true
+
+[tiles.settings]
+config = { format = "TwentyFourHour", show_seconds = true, show_date = false }
+keybinds = { toggle_format = "t", toggle_seconds = "s" }
+
+# ============================================================================
+# SIGNAL PATCHES
+# ============================================================================
 
 [[patches]]
 id = "patch_1"
