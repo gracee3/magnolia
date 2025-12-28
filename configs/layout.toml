@@ -45,9 +45,38 @@ enabled = true
 [tiles.settings.keybinds]
 
 [[tiles]]
-id = "clock"
+id = "audio_input"
 col = 2
 row = 1
+colspan = 2
+rowspan = 1
+module = "audio_input"
+enabled = true
+
+[tiles.settings.config]
+
+[tiles.settings.keybinds]
+
+[[tiles]]
+id = "audio_dsp"
+col = 0
+row = 2
+colspan = 2
+rowspan = 1
+module = "audio_dsp"
+enabled = true
+
+[tiles.settings.config]
+gain = 1.0
+lowpass_enabled = false
+lowpass_hz = 2000.0
+
+[tiles.settings.keybinds]
+
+[[tiles]]
+id = "clock"
+col = 2
+row = 2
 colspan = 2
 rowspan = 1
 module = "clock"

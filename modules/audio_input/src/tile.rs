@@ -8,8 +8,11 @@
 
 use nannou::prelude::*;
 use nannou_egui::egui;
+use rustfft::num_complex::Complex;
+use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use talisman_core::{TileRenderer, RenderContext, BindableAction, TileError};
 use talisman_signals::ring_buffer::RingBufferReceiver;
@@ -134,6 +137,19 @@ pub struct AudioVisTile {
     
     /// Frozen buffer snapshot
     frozen_buffer: Vec<f32>,
+
+    /// FFT working buffer (complex)
+    fft_buffer: Vec<Complex<f32>>,
+
+    /// Spectrum magnitudes (half-size)
+    spectrum: Vec<f32>,
+
+    /// FFT planner and cached plan
+    fft_planner: FftPlanner<f32>,
+    fft_plan: Option<StdArc<dyn rustfft::Fft<f32>>>,
+
+    /// Window function
+    window: Vec<f32>,
     
     /// Current error state
     error: Option<TileError>,
@@ -162,6 +178,11 @@ impl AudioVisTile {
             left_buffer: vec![0.0; BUFFER_SIZE / 2],
             right_buffer: vec![0.0; BUFFER_SIZE / 2],
             frozen_buffer: Vec::new(),
+            fft_buffer: vec![Complex::new(0.0, 0.0); BUFFER_SIZE],
+            spectrum: vec![0.0; BUFFER_SIZE / 2],
+            fft_planner: FftPlanner::new(),
+            fft_plan: None,
+            window: Vec::new(),
             error: Some(TileError::info("No audio connected")),
             legacy_buffer: Arc::new(Mutex::new(vec![0.0; BUFFER_SIZE])),
             latency_us: None,
@@ -346,6 +367,54 @@ impl AudioVisTile {
             }
         }
     }
+
+    fn ensure_fft(&mut self) {
+        let n = self.buffer.len();
+        if self.window.len() != n {
+            self.window = (0..n)
+                .map(|i| {
+                    let x = i as f32 / (n as f32 - 1.0);
+                    (0.5 - 0.5 * (2.0 * std::f32::consts::PI * x).cos()) as f32
+                })
+                .collect();
+        }
+
+        if self.fft_buffer.len() != n {
+            self.fft_buffer = vec![Complex::new(0.0, 0.0); n];
+        }
+
+        if self.spectrum.len() != n / 2 {
+            self.spectrum = vec![0.0; n / 2];
+        }
+
+        let needs_plan = self
+            .fft_plan
+            .as_ref()
+            .map(|plan| plan.len() != n)
+            .unwrap_or(true);
+        if needs_plan {
+            self.fft_plan = Some(self.fft_planner.plan_fft_forward(n));
+        }
+    }
+
+    fn update_spectrum(&mut self) {
+        self.ensure_fft();
+
+        for (i, sample) in self.buffer.iter().enumerate() {
+            let w = self.window.get(i).copied().unwrap_or(1.0);
+            self.fft_buffer[i] = Complex::new(sample * w, 0.0);
+        }
+
+        if let Some(plan) = &self.fft_plan {
+            plan.process(&mut self.fft_buffer);
+        }
+
+        let n = self.fft_buffer.len();
+        for i in 0..(n / 2) {
+            let mag = self.fft_buffer[i].norm();
+            self.spectrum[i] = mag;
+        }
+    }
 }
 
 impl Default for AudioVisTile {
@@ -373,18 +442,76 @@ impl TileRenderer for AudioVisTile {
         // Render visualization using GPU renderer if available
         let content_rect = rect.pad(5.0);
         
-        // Software rendering fallback (GPU rendering removed for now)
-        let points: Vec<Point2> = buffer.iter().enumerate().map(|(i, &sample)| {
-            let x = map_range(i, 0, buffer.len(), content_rect.left(), content_rect.right());
-            let y = content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
-            pt2(x, y)
-        }).collect();
-        
-        if !points.is_empty() {
-            draw.polyline()
-                .weight(2.0)
-                .points(points)
-                .color(color);
+        match self.vis_type {
+            VisualizationType::Oscilloscope => {
+                let points: Vec<Point2> = buffer.iter().enumerate().map(|(i, &sample)| {
+                    let x = map_range(i, 0, buffer.len(), content_rect.left(), content_rect.right());
+                    let y = content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
+                    pt2(x, y)
+                }).collect();
+
+                if !points.is_empty() {
+                    draw.polyline()
+                        .weight(2.0)
+                        .points(points)
+                        .color(color);
+                }
+            }
+            VisualizationType::SpectrumBars | VisualizationType::SpectrumLine => {
+                let spectrum = &self.spectrum;
+                if spectrum.is_empty() {
+                    return;
+                }
+                let max_mag = spectrum.iter().cloned().fold(0.0_f32, f32::max).max(1e-6);
+
+                if self.vis_type == VisualizationType::SpectrumBars {
+                    let bar_w = content_rect.w() / spectrum.len() as f32;
+                    for (i, &mag) in spectrum.iter().enumerate() {
+                        let norm = (mag / max_mag).min(1.0);
+                        let h = norm * content_rect.h();
+                        let x = content_rect.left() + i as f32 * bar_w + bar_w * 0.5;
+                        draw.rect()
+                            .x_y(x, content_rect.bottom() + h * 0.5)
+                            .w_h(bar_w * 0.8, h)
+                            .color(color);
+                    }
+                } else {
+                    let points: Vec<Point2> = spectrum.iter().enumerate().map(|(i, &mag)| {
+                        let x = map_range(i, 0, spectrum.len(), content_rect.left(), content_rect.right());
+                        let norm = (mag / max_mag).min(1.0);
+                        let y = content_rect.bottom() + norm * content_rect.h();
+                        pt2(x, y)
+                    }).collect();
+                    if !points.is_empty() {
+                        draw.polyline()
+                            .weight(2.0)
+                            .points(points)
+                            .color(color);
+                    }
+                }
+            }
+            VisualizationType::VuMeter => {
+                let amp = buffer.iter().map(|s| s.abs()).sum::<f32>() / buffer.len().max(1) as f32;
+                let norm = (amp * self.sensitivity).min(1.0);
+                let bar_h = norm * content_rect.h();
+                draw.rect()
+                    .x_y(content_rect.x(), content_rect.bottom() + bar_h * 0.5)
+                    .w_h(content_rect.w() * 0.2, bar_h)
+                    .color(color);
+            }
+            VisualizationType::Lissajous => {
+                let points: Vec<Point2> = self.left_buffer.iter().zip(self.right_buffer.iter()).map(|(&l, &r)| {
+                    let x = content_rect.x() + l * content_rect.w() * 0.4 * self.sensitivity;
+                    let y = content_rect.y() + r * content_rect.h() * 0.4 * self.sensitivity;
+                    pt2(x, y)
+                }).collect();
+                if !points.is_empty() {
+                    draw.polyline()
+                        .weight(2.0)
+                        .points(points)
+                        .color(color);
+                }
+            }
         }
         
         // Status indicators (monitor mode - read only)
@@ -567,6 +694,10 @@ impl TileRenderer for AudioVisTile {
         // Poll audio from ring buffer (or legacy buffer)
         if !self.is_frozen && !self.is_muted {
             self.poll_audio();
+        }
+
+        if matches!(self.vis_type, VisualizationType::SpectrumBars | VisualizationType::SpectrumLine) {
+            self.update_spectrum();
         }
     }
     

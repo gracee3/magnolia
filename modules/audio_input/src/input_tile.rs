@@ -2,66 +2,52 @@ use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
 use nannou_egui::egui;
-use talisman_core::{TileRenderer, RenderContext};
+use talisman_core::{TileRenderer, RenderContext, BindableAction};
 
-use crate::{AudioOutputState, AudioOutputSettings};
+use crate::AudioInputSettings;
 
-pub struct AudioOutputTile {
+pub struct AudioInputTile {
     id: String,
-    state: Arc<AudioOutputState>,
-    settings: Arc<AudioOutputSettings>,
+    settings: Arc<AudioInputSettings>,
     selected: Mutex<String>,
 }
 
-impl AudioOutputTile {
-    pub fn new(id: &str, state: Arc<AudioOutputState>, settings: Arc<AudioOutputSettings>) -> Self {
+impl AudioInputTile {
+    pub fn new(id: &str, settings: Arc<AudioInputSettings>) -> Self {
         let selected = settings.selected();
         Self {
             id: id.to_string(),
-            state,
             settings,
             selected: Mutex::new(selected),
         }
     }
 }
 
-impl TileRenderer for AudioOutputTile {
+impl TileRenderer for AudioInputTile {
     fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { "Audio Output" }
+    fn name(&self) -> &str { "Audio Input" }
     fn update(&mut self) {}
-    
+
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(srgba(0.03, 0.03, 0.06, 0.95));
 
-        let latency_ms = self.state.latency_us() as f32 / 1000.0;
-        let level = self.state.level_milli() as f32 / 1000.0;
-
-        draw.text("AUDIO OUT")
-            .xy(pt2(rect.x(), rect.top() - 18.0))
-            .color(srgba(0.6, 0.8, 0.9, 1.0))
-            .font_size(12);
-
-        draw.text(&format!("Latency: {:.1} ms", latency_ms))
-            .xy(pt2(rect.x(), rect.y() + 10.0))
-            .color(srgba(0.5, 0.7, 0.9, 1.0))
-            .font_size(11);
-
         let selected = self
             .selected
             .lock()
             .map(|s| s.clone())
             .unwrap_or_else(|_| "Default".to_string());
-        draw.text(&format!("Device: {}", selected))
-            .xy(pt2(rect.x(), rect.y() - 6.0))
-            .color(srgba(0.5, 0.7, 0.9, 1.0))
-            .font_size(11);
 
-        draw.text(&format!("Level: {:.2}", level))
-            .xy(pt2(rect.x(), rect.y() - 12.0))
-            .color(srgba(0.7, 0.9, 0.6, 1.0))
+        draw.text("AUDIO INPUT")
+            .xy(pt2(rect.x(), rect.top() - 18.0))
+            .color(srgba(0.6, 0.8, 0.9, 1.0))
+            .font_size(12);
+
+        draw.text(&format!("Device: {}", selected))
+            .xy(pt2(rect.x(), rect.y() - 4.0))
+            .color(srgba(0.5, 0.7, 0.9, 1.0))
             .font_size(11);
     }
 
@@ -76,7 +62,7 @@ impl TileRenderer for AudioOutputTile {
             .map(|s| s.clone())
             .unwrap_or_else(|_| "Default".to_string());
 
-        egui::Area::new(egui::Id::new(format!("{}_audio_out_controls", self.id)))
+        egui::Area::new(egui::Id::new(format!("{}_audio_in_controls", self.id)))
             .fixed_pos(egui::pos2(rect.left() + 20.0, rect.top() - 50.0))
             .show(egui_ctx, |ui| {
                 ui.set_max_width(280.0);
@@ -84,9 +70,9 @@ impl TileRenderer for AudioOutputTile {
                     .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 15, 240))
                     .inner_margin(egui::Margin::same(12.0))
                     .show(ui, |ui| {
-                        ui.heading("Output Device");
+                        ui.heading("Input Device");
                         ui.add_space(8.0);
-                        egui::ComboBox::from_id_source("audio_output_device")
+                        egui::ComboBox::from_id_source("audio_input_device")
                             .selected_text(&selected)
                             .width(240.0)
                             .show_ui(ui, |ui| {
@@ -115,7 +101,7 @@ impl TileRenderer for AudioOutputTile {
                 "device": {
                     "type": "string",
                     "default": "Default",
-                    "title": "Output Device"
+                    "title": "Input Device"
                 }
             }
         }))
@@ -138,4 +124,6 @@ impl TileRenderer for AudioOutputTile {
             .unwrap_or_else(|_| "Default".to_string());
         serde_json::json!({ "device": device })
     }
+
+    fn bindable_actions(&self) -> Vec<BindableAction> { vec![] }
 }

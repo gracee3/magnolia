@@ -19,6 +19,7 @@ num-traits = "0.2"
 nannou = "0.19.0"
 nannou_egui = "0.19.0"
 tokio = { version = "1.0", features = ["time"] }
+rustfft = "6.2"
 
 # Removed: talisman-plugin-helper, talisman-core (to avoid circular deps if possible, though host uses core)
 # We rely on talisman-module-api and talisman-signals for shared types.

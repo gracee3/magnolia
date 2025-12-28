@@ -8,6 +8,7 @@ use log::{error, info};
 
 use talisman_core::{Source, ModuleSchema, Port, PortDirection, DataType, Signal};
 use talisman_signals::ring_buffer::{self, RingBufferReceiver, RingBufferSender};
+use crate::AudioInputSettings;
 
 const DEFAULT_CAPACITY: usize = 16384;
 const DEFAULT_FRAME_SAMPLES: usize = 1024;
@@ -36,10 +37,11 @@ pub struct AudioInputSource {
     channels: u16,
     frame_samples: usize,
     last_capture_us: Arc<AtomicU64>,
+    settings: Arc<AudioInputSettings>,
 }
 
 impl AudioInputSource {
-    pub fn new(id: &str) -> anyhow::Result<Self> {
+    pub fn new(id: &str, settings: Arc<AudioInputSettings>) -> anyhow::Result<Self> {
         let (tx, rx) = ring_buffer::channel::<f32>(DEFAULT_CAPACITY);
         let last_capture_us = Arc::new(AtomicU64::new(0));
 
@@ -53,6 +55,7 @@ impl AudioInputSource {
             channels: 2,
             frame_samples: DEFAULT_FRAME_SAMPLES,
             last_capture_us,
+            settings,
         };
 
         source.initialize()?;
@@ -65,9 +68,25 @@ impl AudioInputSource {
         }
 
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow::anyhow!("No input device"))?;
+        let available = host
+            .input_devices()
+            .map(|devices| {
+                devices
+                    .filter_map(|d| d.name().ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        self.settings.set_devices(available);
+
+        let selected = self.settings.selected();
+        let device = if selected == "Default" {
+            host.default_input_device()
+        } else {
+            host.input_devices()
+                .ok()
+                .and_then(|mut devices| devices.find(|d| d.name().ok().as_deref() == Some(&selected)))
+        }
+        .ok_or_else(|| anyhow::anyhow!("No input device"))?;
 
         let config = device.default_input_config()?;
         let sample_rate = config.sample_rate().0;
@@ -94,7 +113,12 @@ impl AudioInputSource {
         };
 
         stream.play()?;
-        info!("AudioInputSource initialized. SR: {}, Ch: {}", sample_rate, channels);
+        info!(
+            "AudioInputSource initialized. SR: {}, Ch: {}, Device: {}",
+            sample_rate,
+            channels,
+            selected
+        );
         self.stream = Some(SendStream { _stream: stream });
         self.sample_rate = sample_rate;
         self.channels = channels;
@@ -132,6 +156,11 @@ impl Source for AudioInputSource {
     }
 
     async fn poll(&mut self) -> Option<Signal> {
+        if self.settings.take_pending() {
+            self.stream = None;
+            let _ = self.initialize();
+        }
+
         if !self.enabled {
             tokio::time::sleep(Duration::from_millis(10)).await;
             return Some(Signal::Pulse);

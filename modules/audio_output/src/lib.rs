@@ -1,7 +1,8 @@
 pub mod tile;
+mod settings;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -10,6 +11,8 @@ use log::{error, info, warn};
 
 use talisman_core::{Sink, ModuleSchema, Port, PortDirection, DataType, Signal};
 use talisman_signals::ring_buffer::{self, RingBufferSender};
+
+pub use settings::AudioOutputSettings;
 
 const OUTPUT_CAPACITY: usize = 32768;
 
@@ -45,23 +48,60 @@ impl AudioOutputState {
 pub struct AudioOutputSink {
     id: String,
     enabled: bool,
+    inner: Mutex<AudioOutputInner>,
+    state: Arc<AudioOutputState>,
+    settings: Arc<AudioOutputSettings>,
+}
+
+struct AudioOutputInner {
     _stream: Option<SendStream>,
     sender: RingBufferSender<f32>,
     sample_rate: u32,
     channels: u16,
-    state: Arc<AudioOutputState>,
     warned_mismatch: AtomicBool,
 }
 
 impl AudioOutputSink {
-    pub fn new(id: &str) -> anyhow::Result<(Self, Arc<AudioOutputState>)> {
-        let (tx, rx) = ring_buffer::channel::<f32>(OUTPUT_CAPACITY);
+    pub fn new(id: &str, settings: Arc<AudioOutputSettings>) -> anyhow::Result<(Self, Arc<AudioOutputState>)> {
         let state = Arc::new(AudioOutputState::default());
 
+        let (inner, devices) = Self::build_stream(&settings)?;
+        settings.set_devices(devices);
+
+        Ok((
+            Self {
+                id: id.to_string(),
+                enabled: true,
+                inner: Mutex::new(inner),
+                state: state.clone(),
+                settings,
+            },
+            state,
+        ))
+    }
+
+    fn build_stream(settings: &AudioOutputSettings) -> anyhow::Result<(AudioOutputInner, Vec<String>)> {
+        let (tx, rx) = ring_buffer::channel::<f32>(OUTPUT_CAPACITY);
+
         let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or_else(|| anyhow::anyhow!("No output device"))?;
+        let available = host
+            .output_devices()
+            .map(|devices| {
+                devices
+                    .filter_map(|d| d.name().ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let selected = settings.selected();
+        let device = if selected == "Default" {
+            host.default_output_device()
+        } else {
+            host.output_devices()
+                .ok()
+                .and_then(|mut devices| devices.find(|d| d.name().ok().as_deref() == Some(&selected)))
+        }
+        .ok_or_else(|| anyhow::anyhow!("No output device"))?;
 
         let config = device.default_output_config()?;
         let sample_rate = config.sample_rate().0;
@@ -84,23 +124,24 @@ impl AudioOutputSink {
         };
 
         stream.play()?;
-        info!("AudioOutputSink initialized. SR: {}, Ch: {}", sample_rate, channels);
+        info!(
+            "AudioOutputSink initialized. SR: {}, Ch: {}, Device: {}",
+            sample_rate,
+            channels,
+            selected
+        );
 
         Ok((
-            Self {
-                id: id.to_string(),
-                enabled: true,
+            AudioOutputInner {
                 _stream: Some(SendStream { _stream: stream }),
                 sender: tx,
                 sample_rate,
                 channels,
-                state: state.clone(),
                 warned_mismatch: AtomicBool::new(false),
             },
-            state,
+            available,
         ))
     }
-
 }
 
 #[async_trait]
@@ -137,6 +178,14 @@ impl Sink for AudioOutputSink {
             return Ok(None);
         }
 
+        if self.settings.take_pending() {
+            if let Ok(mut inner) = self.inner.lock() {
+                let (next, devices) = Self::build_stream(&self.settings)?;
+                *inner = next;
+                self.settings.set_devices(devices);
+            }
+        }
+
         let Signal::Audio {
             sample_rate,
             channels,
@@ -146,14 +195,15 @@ impl Sink for AudioOutputSink {
             return Ok(None);
         };
 
-        if sample_rate != self.sample_rate || channels != self.channels {
-            if !self.warned_mismatch.swap(true, Ordering::Relaxed) {
+        let inner = self.inner.lock().unwrap();
+        if sample_rate != inner.sample_rate || channels != inner.channels {
+            if !inner.warned_mismatch.swap(true, Ordering::Relaxed) {
                 warn!(
                     "AudioOutputSink: format mismatch ({}Hz/{}ch) != output ({}Hz/{}ch)",
                     sample_rate,
                     channels,
-                    self.sample_rate,
-                    self.channels
+                    inner.sample_rate,
+                    inner.channels
                 );
             }
             return Ok(None);
@@ -171,7 +221,7 @@ impl Sink for AudioOutputSink {
         let mut sum = 0.0f64;
         for sample in &data {
             sum += (*sample as f64) * (*sample as f64);
-            let _ = self.sender.try_send(*sample);
+            let _ = inner.sender.try_send(*sample);
         }
 
         if !data.is_empty() {

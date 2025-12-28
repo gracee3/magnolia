@@ -34,6 +34,10 @@ impl PatchBay {
     
     /// Register a module's schema with the patch bay
     pub fn register_module(&mut self, schema: ModuleSchema) {
+        if self.modules.contains_key(&schema.id) {
+            log::warn!("PatchBay: Module '{}' already registered, skipping", schema.id);
+            return;
+        }
         log::debug!("PatchBay: Registered module '{}'", schema.id);
         self.modules.insert(schema.id.clone(), schema);
     }

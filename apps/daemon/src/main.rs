@@ -5,10 +5,11 @@ use talisman_core::adapters::{SourceAdapter, SinkAdapter, ProcessorAdapter};
 use nannou_egui::{self, Egui, egui};
 use tokio::sync::mpsc;
 
-use audio_input::{AudioInputSource, AudioVizSink};
+use audio_input::{AudioInputSource, AudioVizSink, AudioInputSettings, AudioInputTile};
 use audio_input::tile::AudioVisTile;
-use audio_dsp::AudioDspProcessor;
-use audio_output::{AudioOutputSink, AudioOutputState};
+use audio_dsp::{AudioDspProcessor, AudioDspState};
+use audio_dsp::tile::AudioDspTile;
+use audio_output::{AudioOutputSink, AudioOutputSettings, AudioOutputState};
 use audio_output::tile::AudioOutputTile;
 // use talisman_core::ring_buffer; // Removed usage
 
@@ -152,6 +153,13 @@ fn model(app: &App) -> Model {
     
     let mut tile_registry = tiles::create_default_registry();
     
+    // Audio device settings
+    let audio_input_settings = AudioInputSettings::new();
+    let audio_output_settings = AudioOutputSettings::new();
+
+    // Audio input tile (device selection)
+    tile_registry.register(AudioInputTile::new("audio_input", audio_input_settings.clone()));
+
     // Audio visualization tile (fed by AudioVizSink)
     let mut vis_tile = AudioVisTile::new("audio_viz");
     let vis_buffer = vis_tile.get_legacy_buffer();
@@ -160,7 +168,7 @@ fn model(app: &App) -> Model {
     tile_registry.register(vis_tile);
 
     // Audio output tile (fed by AudioOutputSink)
-    let (audio_output_sink, audio_output_state) = match AudioOutputSink::new("audio_output") {
+    let (audio_output_sink, audio_output_state) = match AudioOutputSink::new("audio_output", audio_output_settings.clone()) {
         Ok((sink, state)) => (Some(sink), state),
         Err(e) => {
             log::error!("Failed to initialize audio output: {}", e);
@@ -170,10 +178,14 @@ fn model(app: &App) -> Model {
         }
     };
 
-    tile_registry.register(AudioOutputTile::new("audio_output", audio_output_state.clone()));
+    tile_registry.register(AudioOutputTile::new("audio_output", audio_output_state.clone(), audio_output_settings.clone()));
+
+    // Audio DSP tile (settings)
+    let dsp_state = AudioDspState::new();
+    tile_registry.register(AudioDspTile::new("audio_dsp", dsp_state.clone()));
 
     // Audio pipeline modules
-    if let Ok(audio_input_source) = AudioInputSource::new("audio_input") {
+    if let Ok(audio_input_source) = AudioInputSource::new("audio_input", audio_input_settings.clone()) {
         let schema = audio_input_source.schema();
         patch_bay.register_module(schema);
         if let Err(e) = module_host.spawn(SourceAdapter::new(audio_input_source), 100) {
@@ -183,7 +195,7 @@ fn model(app: &App) -> Model {
         log::error!("Audio input source failed to initialize");
     }
 
-    let audio_dsp = AudioDspProcessor::new("audio_dsp", 1.0);
+    let audio_dsp = AudioDspProcessor::new("audio_dsp", dsp_state.clone());
     let dsp_schema = audio_dsp.schema();
     patch_bay.register_module(dsp_schema);
     if let Err(e) = module_host.spawn(ProcessorAdapter::new(audio_dsp), 100) {
