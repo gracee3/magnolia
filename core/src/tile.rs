@@ -224,6 +224,13 @@ impl TileRegistry {
     pub fn get(&self, id: &str) -> Option<Arc<RwLock<Box<dyn TileRenderer>>>> {
         self.tiles.get(id).cloned()
     }
+
+    /// List all registered tile module IDs (sorted)
+    pub fn list_tiles(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.tiles.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
     
     /// Update all tiles (call each frame)
     pub fn update_all(&self) {

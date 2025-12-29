@@ -76,14 +76,16 @@ pub enum Direction {
 pub enum AppAction {
     /// Connect/Disconnect patches, save layout, etc.
     SaveLayout,
-    /// Exit the application
-    Exit,
+    /// Quit the application (only mapped to Ctrl+Q)
+    QuitApp,
     /// Copy text to clipboard
     Copy { text: String },
     /// Open the global settings modal
     OpenGlobalSettings,
     /// Open the layout manager modal
     OpenLayoutManager,
+    /// Open the add-tile picker modal at a specific grid cell
+    OpenAddTilePicker { col: usize, row: usize },
     /// Open the patch bay modal
     OpenPatchBay,
     /// Open settings for a specific tile (effectively maximizing it)
@@ -151,7 +153,7 @@ impl KeyboardNav {
         // 1. Global Shortcuts (Ctrl+)
         if ctrl_pressed {
             match key {
-                Key::Q => return Some(AppAction::Exit),
+                Key::Q => return Some(AppAction::QuitApp),
                 Key::C => {
                     // Copy logic
                     if let Some(tile_id) = self.selected_tile_id() {
@@ -276,7 +278,11 @@ impl KeyboardNav {
                                  return Some(AppAction::SaveLayout);
                              },
                              LayoutSubState::Navigation => {
-                                 self.select_tile_at_cursor(layout);
+                                 if self.select_tile_at_cursor(layout).is_none() {
+                                     // Empty cell: open add-tile picker at cursor
+                                     let (col, row) = self.cursor;
+                                     return Some(AppAction::OpenAddTilePicker { col, row });
+                                 }
                              }
                         }
                     }
@@ -343,8 +349,9 @@ impl KeyboardNav {
             // === A - Add tile (Layout mode only) ===
             Key::A => {
                 if self.mode == InputMode::Layout {
-                    // Open layout manager for adding tiles
-                    return Some(AppAction::OpenLayoutManager);
+                    // Open add-tile picker at cursor
+                    let (col, row) = self.cursor;
+                    return Some(AppAction::OpenAddTilePicker { col, row });
                 }
             },
 
@@ -384,6 +391,9 @@ impl KeyboardNav {
     }
 
     fn handle_layout_arrows(&mut self, direction: Direction, layout: &mut LayoutConfig) {
+        // Snapshot for safe rollback if conflict resolution is impossible.
+        let before_tiles = layout.tiles.clone();
+
         // Clone state to avoid holding borrow on self
         let state = self.layout_state.clone(); 
         
@@ -402,6 +412,12 @@ impl KeyboardNav {
                      
                      tile.colspan = Some(new_colspan);
                      tile.rowspan = Some(new_rowspan);
+
+					// Enforce no-overlap policy by resolving conflicts immediately.
+					if let Err(e) = layout.resolve_conflicts(Some(&tile_id)) {
+						log::warn!("Layout conflict resolution failed (reverting resize): {}", e);
+						layout.tiles = before_tiles;
+					}
                 }
             },
             LayoutSubState::Move { tile_id, .. } => {
@@ -412,6 +428,12 @@ impl KeyboardNav {
                     tile.col = new_col;
                     tile.row = new_row;
                 }
+
+				// Enforce no-overlap policy by resolving conflicts immediately.
+				if let Err(e) = layout.resolve_conflicts(Some(&tile_id)) {
+					log::warn!("Layout conflict resolution failed (reverting move): {}", e);
+					layout.tiles = before_tiles;
+				}
             },
             LayoutSubState::Navigation => {
                 self.navigate(direction);
@@ -845,7 +867,7 @@ pub enum ModalState {
     /// Tile maximized/control view (tile_id)
     Maximized { tile_id: String },
     /// Add tile picker (in layout mode)
-    AddTilePicker { cursor_col: usize, cursor_row: usize },
+    AddTilePicker { cursor_col: usize, cursor_row: usize, selected_idx: usize },
 }
 
 /// Modal stack for hierarchical modal management
@@ -929,13 +951,30 @@ impl ModalStack {
     }
 
     /// Check if add tile picker is open
-    pub fn get_add_tile_picker(&self) -> Option<(usize, usize)> {
+    pub fn get_add_tile_picker(&self) -> Option<(usize, usize, usize)> {
         for modal in self.stack.iter().rev() {
-            if let ModalState::AddTilePicker { cursor_col, cursor_row } = modal {
-                return Some((*cursor_col, *cursor_row));
+            if let ModalState::AddTilePicker { cursor_col, cursor_row, selected_idx } = modal {
+                return Some((*cursor_col, *cursor_row, *selected_idx));
             }
         }
         None
+    }
+
+    pub fn open_add_tile_picker(&mut self, col: usize, row: usize) {
+        self.push(ModalState::AddTilePicker { cursor_col: col, cursor_row: row, selected_idx: 0 });
+    }
+
+    pub fn move_add_tile_picker_selection(&mut self, delta: i32, len: usize) {
+        if len == 0 {
+            return;
+        }
+        if let Some(top) = self.stack.last_mut() {
+            if let ModalState::AddTilePicker { selected_idx, .. } = top {
+                let cur = *selected_idx as i32;
+                let next = (cur + delta).rem_euclid(len as i32) as usize;
+                *selected_idx = next;
+            }
+        }
     }
 
     /// Close a specific modal type (removes first match from top)

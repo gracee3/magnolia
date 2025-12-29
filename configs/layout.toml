@@ -16,7 +16,7 @@ is_sleeping = false
 id = "audio_viz"
 col = 0
 row = 0
-colspan = 2
+colspan = 3
 rowspan = 2
 module = "audio_viz"
 enabled = true
@@ -27,9 +27,9 @@ sensitivity = 1.0
 vis_type = "Oscilloscope"
 
 [tiles.settings.keybinds]
-next_vis = "n"
-freeze = "f"
 mute = "m"
+freeze = "f"
+next_vis = "n"
 
 [[tiles]]
 id = "audio_output"
@@ -54,6 +54,7 @@ module = "audio_input"
 enabled = true
 
 [tiles.settings.config]
+device = "Default"
 
 [tiles.settings.keybinds]
 

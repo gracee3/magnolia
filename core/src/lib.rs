@@ -136,6 +136,246 @@ impl LayoutConfig {
             (self.columns.clone(), self.rows.clone())
         }
     }
+
+    /// Resolve tile overlaps by re-packing tiles onto the grid.
+    ///
+    /// Goals:
+    /// - No overlaps.
+    /// - Keep tiles as close as possible to their current position.
+    /// - Allow resizing (shrinking) and moving other tiles if needed.
+    /// - If a specific tile is being edited (move/resize), prefer keeping it fixed
+    ///   at its current (col,row) and only shrink it as a last resort to make the
+    ///   whole layout feasible.
+    ///
+    /// Returns an error when it's impossible to place all tiles (e.g. more tiles
+    /// than grid cells).
+    pub fn resolve_conflicts(&mut self, preferred_tile_id: Option<&str>) -> std::result::Result<(), LayoutResolveError> {
+        let (cols, rows) = self.resolve_grid();
+        self.resolve_conflicts_within(cols, rows, preferred_tile_id)
+    }
+
+    pub fn resolve_conflicts_within(
+        &mut self,
+        cols: usize,
+        rows: usize,
+        preferred_tile_id: Option<&str>,
+    ) -> std::result::Result<(), LayoutResolveError> {
+        if cols == 0 || rows == 0 {
+            return Err(LayoutResolveError::InvalidGrid { cols, rows });
+        }
+        let cell_count = cols.saturating_mul(rows);
+        if self.tiles.len() > cell_count {
+            return Err(LayoutResolveError::TooManyTiles {
+                tiles: self.tiles.len(),
+                cells: cell_count,
+                cols,
+                rows,
+            });
+        }
+
+        // Snapshot for retry logic (we may shrink the preferred tile until feasible).
+        let original_tiles = self.tiles.clone();
+        let preferred_idx = preferred_tile_id.and_then(|id| self.tiles.iter().position(|t| t.id == id));
+
+        let mut preferred_bounds = preferred_idx.map(|idx| {
+            let t = &self.tiles[idx];
+            let col = t.col.min(cols.saturating_sub(1));
+            let row = t.row.min(rows.saturating_sub(1));
+            let mut w = t.colspan.unwrap_or(1).max(1);
+            let mut h = t.rowspan.unwrap_or(1).max(1);
+            w = w.min(cols.saturating_sub(col).max(1));
+            h = h.min(rows.saturating_sub(row).max(1));
+            (idx, col, row, w, h)
+        });
+
+        let max_retry_steps = cols.saturating_mul(rows).max(1);
+        for _ in 0..max_retry_steps {
+            // Reset tiles to original snapshot before attempting a full solve.
+            self.tiles = original_tiles.clone();
+            if let Some((idx, col, row, w, h)) = preferred_bounds {
+                let t = &mut self.tiles[idx];
+                t.col = col;
+                t.row = row;
+                t.colspan = Some(w);
+                t.rowspan = Some(h);
+            }
+
+            match self.try_pack_no_overlap(cols, rows, preferred_idx) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    // If we have a preferred tile, shrink it as a last resort and retry.
+                    if let Some((idx, col, row, mut w, mut h)) = preferred_bounds {
+                        if w == 1 && h == 1 {
+                            return Err(e);
+                        }
+                        // Shrink the larger dimension first.
+                        if w >= h {
+                            w = w.saturating_sub(1).max(1);
+                        } else {
+                            h = h.saturating_sub(1).max(1);
+                        }
+                        preferred_bounds = Some((idx, col, row, w, h));
+                        continue;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+
+        Err(LayoutResolveError::RetryLimit)
+    }
+
+    fn try_pack_no_overlap(
+        &mut self,
+        cols: usize,
+        rows: usize,
+        preferred_idx: Option<usize>,
+    ) -> std::result::Result<(), LayoutResolveError> {
+        let mut occupancy = vec![false; cols.saturating_mul(rows)];
+
+        let mut order: Vec<usize> = (0..self.tiles.len()).collect();
+        if let Some(p) = preferred_idx {
+            order.retain(|&i| i != p);
+            order.insert(0, p);
+        }
+
+        for idx in order {
+            let is_preferred = preferred_idx == Some(idx);
+            let (placed_col, placed_row, placed_w, placed_h) = {
+                let t = &self.tiles[idx];
+                let desired_col = t.col.min(cols.saturating_sub(1));
+                let desired_row = t.row.min(rows.saturating_sub(1));
+                let mut w = t.colspan.unwrap_or(1).max(1);
+                let mut h = t.rowspan.unwrap_or(1).max(1);
+                w = w.min(cols.saturating_sub(desired_col).max(1));
+                h = h.min(rows.saturating_sub(desired_row).max(1));
+
+                if is_preferred {
+                    // Keep preferred tile fixed (no movement), only shrink as needed for bounds.
+                    if !rect_is_free(&occupancy, cols, desired_col, desired_row, w, h) {
+                        return Err(LayoutResolveError::CannotPlace {
+                            tile_id: t.id.clone(),
+                            cols,
+                            rows,
+                        });
+                    }
+                    (desired_col, desired_row, w, h)
+                } else {
+                    place_tile_best_effort(&occupancy, cols, rows, desired_col, desired_row, w, h)
+                        .ok_or_else(|| LayoutResolveError::CannotPlace {
+                            tile_id: t.id.clone(),
+                            cols,
+                            rows,
+                        })?
+                }
+            };
+
+            {
+                let t = &mut self.tiles[idx];
+                t.col = placed_col;
+                t.row = placed_row;
+                t.colspan = Some(placed_w);
+                t.rowspan = Some(placed_h);
+            }
+            rect_occupy(&mut occupancy, cols, placed_col, placed_row, placed_w, placed_h);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+pub enum LayoutResolveError {
+    #[error("invalid grid size cols={cols} rows={rows}")]
+    InvalidGrid { cols: usize, rows: usize },
+
+    #[error("too many tiles for grid ({tiles} tiles > {cells} cells) in {cols}x{rows}")]
+    TooManyTiles { tiles: usize, cells: usize, cols: usize, rows: usize },
+
+    #[error("could not place tile '{tile_id}' without overlap in {cols}x{rows}")]
+    CannotPlace { tile_id: String, cols: usize, rows: usize },
+
+    #[error("layout resolver exceeded retry limit")]
+    RetryLimit,
+}
+
+fn rect_is_free(occupancy: &[bool], cols: usize, col: usize, row: usize, w: usize, h: usize) -> bool {
+    for r in row..row + h {
+        for c in col..col + w {
+            let idx = r.saturating_mul(cols).saturating_add(c);
+            if occupancy.get(idx).copied().unwrap_or(true) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn rect_occupy(occupancy: &mut [bool], cols: usize, col: usize, row: usize, w: usize, h: usize) {
+    for r in row..row + h {
+        for c in col..col + w {
+            let idx = r.saturating_mul(cols).saturating_add(c);
+            if let Some(cell) = occupancy.get_mut(idx) {
+                *cell = true;
+            }
+        }
+    }
+}
+
+fn place_tile_best_effort(
+    occupancy: &[bool],
+    cols: usize,
+    rows: usize,
+    desired_col: usize,
+    desired_row: usize,
+    start_w: usize,
+    start_h: usize,
+) -> Option<(usize, usize, usize, usize)> {
+    let mut w = start_w.max(1);
+    let mut h = start_h.max(1);
+
+    // Precompute candidate origins sorted by Manhattan distance from desired.
+    let mut origins: Vec<(usize, usize)> = Vec::with_capacity(cols.saturating_mul(rows));
+    for r in 0..rows {
+        for c in 0..cols {
+            origins.push((c, r));
+        }
+    }
+    origins.sort_by(|(ac, ar), (bc, br)| {
+        let da = ac.abs_diff(desired_col) + ar.abs_diff(desired_row);
+        let db = bc.abs_diff(desired_col) + br.abs_diff(desired_row);
+        da.cmp(&db).then_with(|| ar.cmp(br)).then_with(|| ac.cmp(bc))
+    });
+
+    while w >= 1 && h >= 1 {
+        // 1) Try the desired origin first.
+        if desired_col + w <= cols && desired_row + h <= rows {
+            if rect_is_free(occupancy, cols, desired_col, desired_row, w, h) {
+                return Some((desired_col, desired_row, w, h));
+            }
+        }
+
+        // 2) Find the closest origin that fits.
+        for (c, r) in &origins {
+            if *c + w <= cols && *r + h <= rows {
+                if rect_is_free(occupancy, cols, *c, *r, w, h) {
+                    return Some((*c, *r, w, h));
+                }
+            }
+        }
+
+        // 3) Shrink and retry.
+        if w == 1 && h == 1 {
+            break;
+        }
+        if w >= h {
+            w = w.saturating_sub(1).max(1);
+        } else {
+            h = h.saturating_sub(1).max(1);
+        }
+    }
+
+    None
 }
 
 

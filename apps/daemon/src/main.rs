@@ -71,6 +71,19 @@ struct Model {
     
 }
 
+fn make_unique_tile_id(layout: &talisman_core::LayoutConfig, base: &str) -> String {
+    if !layout.tiles.iter().any(|t| t.id == base) {
+        return base.to_string();
+    }
+    for i in 2..10_000usize {
+        let candidate = format!("{}_{}", base, i);
+        if !layout.tiles.iter().any(|t| t.id == candidate) {
+            return candidate;
+        }
+    }
+    format!("{}_{}", base, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+}
+
 
 // Layout now imported from layout.rs module
 use talisman_core::TileConfig;
@@ -774,6 +787,9 @@ fn update(app: &App, model: &mut Model, update: Update) {
                             model.layout.config.patches = model.patch_bay.get_patches().to_vec();
                             // Sync global state
                             model.layout.config.is_sleeping = model.is_sleeping;
+						if let Err(e) = model.layout.config.resolve_conflicts(None) {
+							log::warn!("Unable to resolve layout conflicts before saving layout manager changes: {}", e);
+						}
                             model.layout.save();
                             model.modal_stack.close(&ModalState::LayoutManager);
                         }
@@ -873,6 +889,66 @@ fn update(app: &App, model: &mut Model, update: Update) {
             });
     }
 
+    // Add Tile Picker Modal (keyboard-driven)
+    if let Some((col, row, selected_idx)) = model.modal_stack.get_add_tile_picker() {
+        let screen_rect = ctx.screen_rect();
+        let width = 420.0;
+        let height = 380.0;
+        let x = screen_rect.center().x - width / 2.0;
+        let y = screen_rect.center().y - height / 2.0;
+
+        let available = model.tile_registry.list_tiles();
+
+        egui::Window::new("ADD TILE")
+            .fixed_pos(egui::pos2(x, y))
+            .fixed_size(egui::vec2(width, height))
+            .collapsible(false)
+            .resizable(false)
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
+                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 128)),
+                inner_margin: egui::Margin::same(15.0),
+                ..Default::default()
+            })
+            .show(&ctx, |ui| {
+                ui.label(
+                    egui::RichText::new(format!("PLACE TILE @ ({}, {})", col, row))
+                        .heading()
+                        .color(egui::Color32::from_rgb(0, 255, 128)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new("Up/Down: choose   Enter: place   Esc: cancel")
+                        .small()
+                        .color(egui::Color32::GRAY),
+                );
+                ui.add(egui::Separator::default().spacing(10.0));
+
+                if available.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No tile modules registered")
+                            .color(egui::Color32::from_rgb(255, 100, 100)),
+                    );
+                    return;
+                }
+
+                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                    for (i, module_id) in available.iter().enumerate() {
+                        let is_selected = i == selected_idx;
+                        let text = if is_selected {
+                            egui::RichText::new(format!("> {}", module_id))
+                                .strong()
+                                .color(egui::Color32::from_rgb(0, 255, 128))
+                        } else {
+                            egui::RichText::new(format!("  {}", module_id))
+                                .color(egui::Color32::from_rgb(160, 160, 160))
+                        };
+                        ui.label(text);
+                    }
+                });
+            });
+    }
+
     // (Close confirmation dialog removed - ESC is for navigation only, not exit)
 
 
@@ -923,6 +999,53 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     // Update grid size for navigation
     let (grid_cols, grid_rows) = model.layout.config.resolve_grid();
     model.keyboard_nav.set_grid_size(grid_cols, grid_rows);
+
+    // === ADD TILE PICKER INPUT (captures keys while open) ===
+    if let Some((col, row, selected_idx)) = model.modal_stack.get_add_tile_picker() {
+        // Keyboard-only modal: Up/Down choose, Enter confirm.
+        let available = model.tile_registry.list_tiles();
+        if available.is_empty() {
+            return;
+        }
+
+        match key {
+            Key::Up => {
+                model.modal_stack.move_add_tile_picker_selection(-1, available.len());
+                return;
+            }
+            Key::Down => {
+                model.modal_stack.move_add_tile_picker_selection(1, available.len());
+                return;
+            }
+            Key::Return => {
+                let module_id = available.get(selected_idx).cloned();
+                if let Some(module_id) = module_id {
+                    let tile_id = make_unique_tile_id(&model.layout.config, &module_id);
+                    model.layout.config.tiles.push(TileConfig {
+                        id: tile_id.clone(),
+                        col,
+                        row,
+                        colspan: Some(1),
+                        rowspan: Some(1),
+                        module: module_id,
+                        enabled: true,
+                        settings: Default::default(),
+                    });
+                    model.layout.save();
+                    model.modal_stack.close(&ModalState::AddTilePicker { cursor_col: col, cursor_row: row, selected_idx: 0 });
+                    // Select the new tile immediately
+                    model.keyboard_nav.cursor = (col, row);
+                    model.keyboard_nav.selection = input::SelectionState::TileSelected { tile_id: tile_id.clone() };
+                    model.selected_tile = Some(tile_id);
+                }
+                return;
+            }
+            _ => {
+                // Ignore other keys while picker is open
+                return;
+            }
+        }
+    }
     
     // Delegate to unified input controller
     let action = model.keyboard_nav.handle_key(
@@ -936,11 +1059,14 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     if let Some(action) = action {
         match action {
             AppAction::SaveLayout => {
+                if let Err(e) = model.layout.config.resolve_conflicts(None) {
+                    log::warn!("Unable to resolve layout conflicts before save: {}", e);
+                }
                 model.layout.save();
                 log::info!("Layout saved");
             },
-            AppAction::Exit => {
-                log::info!("Exit requested via keyboard");
+            AppAction::QuitApp => {
+                log::info!("Quit requested via Ctrl+Q");
                 std::process::exit(0);
             },
             AppAction::Copy { text } => {
@@ -957,6 +1083,9 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
             },
             AppAction::OpenLayoutManager => {
                 model.modal_stack.push(ModalState::LayoutManager);
+            },
+            AppAction::OpenAddTilePicker { col, row } => {
+                model.modal_stack.open_add_tile_picker(col, row);
             },
             AppAction::OpenPatchBay => {
                 if !model.modal_stack.is_patch_bay_open() {
@@ -1022,6 +1151,29 @@ fn view(app: &App, model: &Model, frame: Frame) {
                      }
                  }
             }
+        }
+    }
+
+    // Layout cursor highlight (supports selecting empty "+" cells)
+    if maximized_tile.is_none() && model.keyboard_nav.mode == input::InputMode::Layout {
+        let (col, row) = model.keyboard_nav.cursor;
+        let temp_tile = TileConfig {
+            id: String::new(),
+            col,
+            row,
+            colspan: Some(1),
+            rowspan: Some(1),
+            module: String::new(),
+            enabled: true,
+            settings: Default::default(),
+        };
+        if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
+            draw.rect()
+                .xy(rect.xy())
+                .wh(rect.wh())
+                .color(rgba(0.0, 0.0, 0.0, 0.0))
+                .stroke(rgba(0.0, 1.0, 0.5, 0.9))
+                .stroke_weight(2.0);
         }
     }
 
