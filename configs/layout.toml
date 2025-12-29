@@ -24,7 +24,7 @@ enabled = true
 [tiles.settings.config]
 color_scheme = "CyanReactive"
 sensitivity = 1.0
-vis_type = "Oscilloscope"
+vis_type = "SpectrumBars"
 
 [tiles.settings.keybinds]
 next_vis = "n"
@@ -93,8 +93,22 @@ toggle_seconds = "s"
 toggle_format = "t"
 
 [[patches]]
-id = "patch_1"
+id = "p1"
+source_module = "audio_input"
+source_port = "audio_out"
+sink_module = "audio_dsp"
+sink_port = "audio_in"
+
+[[patches]]
+id = "p2"
 source_module = "audio_dsp"
 source_port = "audio_out"
 sink_module = "audio_viz"
+sink_port = "audio_in"
+
+[[patches]]
+id = "p3"
+source_module = "audio_dsp"
+source_port = "audio_out"
+sink_module = "audio_output"
 sink_port = "audio_in"

@@ -137,7 +137,7 @@ pub fn render(
         let port = &ports[i];
         let is_input = port.direction == PortDirection::Input;
         let dir_str = if is_input { "IN" } else { "OUT" };
-        let color = if selected { CYAN } else { GREY };
+        let _color = if selected { CYAN } else { GREY };
 
         // Capture position if this is the target port (focused in Ports pane)
         if selected && ports_focused {
@@ -220,18 +220,26 @@ pub fn render(
                 .color(rgba(0.0, 0.2, 0.2, 0.2));
         }
 
-        let label = format!(
-            "{}:{} -> {}:{}",
-            patch.source_module, patch.source_port, patch.sink_module, patch.sink_port
-        );
+        let main_label = format!("{}  ➔  {}", patch.source_module, patch.sink_module);
+        let ports_label = format!("{}:{} ➔ {}:{}", patch.source_module, patch.source_port, patch.sink_module, patch.sink_port);
 
         draw_text(
             draw,
-            FontId::PlexMonoRegular,
-            &label,
-            rect.xy(),
+            FontId::PlexSansBold,
+            &main_label,
+            pt2(rect.x(), rect.y() + 6.0),
             12.0,
             srgba(color.red as f32 / 255.0, color.green as f32 / 255.0, color.blue as f32 / 255.0, 1.0),
+            TextAlignment::Center,
+        );
+        
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &ports_label,
+            pt2(rect.x(), rect.y() - 8.0),
+            10.0,
+            rgba(0.5, 0.5, 0.5, 0.8),
             TextAlignment::Center,
         );
     });
@@ -240,7 +248,11 @@ pub fn render(
     if state.staged_source.is_some() {
         if let Some(start) = staged_src_pos {
             // We have a start point on screen
-            let end = target_port_pos.unwrap_or_else(|| ports_rect.xy()); // Fallback to center of ports pane if not found
+            let end = target_port_pos.unwrap_or_else(|| {
+                // If no port focused, point to the middle of the selected module in Modules list
+                // We'll approximate since we don't have modules_rect here easily without passing it
+                pt2(ports_rect.left(), ports_rect.y())
+            });
 
             crate::patch_visualizer::draw_cable(draw, start, end, MAGENTA, 2.0);
 
@@ -274,7 +286,7 @@ pub fn render(
                 "Select Source Port [Enter] to Stage Connection"
             }
         }
-        PatchBayPane::Patches => "[Enter] to Disconnect, [Del] Delete",
+        PatchBayPane::Patches => "[Del/Back] to Disconnect, [Arrows] Navigate",
     };
 
     draw_text(
@@ -305,12 +317,30 @@ pub fn handle_key(key: Key, state: &mut PatchBayModalState, patch_bay: &mut Patc
         return false;
     }
 
-    // Global Navigation
+    // Global Navigation (Tab or Left/Right arrows for pane switching)
     if let Some(UiNav::Tab) = input.nav {
         state.focus_pane = match state.focus_pane {
             PatchBayPane::Modules => PatchBayPane::Ports,
             PatchBayPane::Ports => PatchBayPane::Patches,
             PatchBayPane::Patches => PatchBayPane::Modules,
+        };
+        return true;
+    }
+
+    // Left/Right arrows for intuitive column navigation
+    if let Some(UiNav::Right) = input.nav {
+        state.focus_pane = match state.focus_pane {
+            PatchBayPane::Modules => PatchBayPane::Ports,
+            PatchBayPane::Ports => PatchBayPane::Patches,
+            PatchBayPane::Patches => PatchBayPane::Patches, // Stay at rightmost
+        };
+        return true;
+    }
+    if let Some(UiNav::Left) = input.nav {
+        state.focus_pane = match state.focus_pane {
+            PatchBayPane::Modules => PatchBayPane::Modules, // Stay at leftmost
+            PatchBayPane::Ports => PatchBayPane::Modules,
+            PatchBayPane::Patches => PatchBayPane::Ports,
         };
         return true;
     }
@@ -372,11 +402,15 @@ pub fn handle_key(key: Key, state: &mut PatchBayModalState, patch_bay: &mut Patc
             let mut disconnect_id = None;
             {
                 let patches = patch_bay.get_patches();
-                if let Some(idx) = List::handle_nav(&mut state.patches_focus, patches.len(), &input)
-                {
-                    if let Some(patch) = patches.get(idx) {
+                let nav = input.nav.as_ref();
+                
+                if matches!(nav, Some(UiNav::Delete)) {
+                    if let Some(patch) = patches.get(state.patches_focus.focused) {
                         disconnect_id = Some(patch.id.clone());
                     }
+                } else {
+                    // Only handle navigation (arrows), don't trigger disconnect on Enter
+                   List::handle_nav(&mut state.patches_focus, patches.len(), &input);
                 }
             }
 

@@ -207,6 +207,7 @@ pub enum UiNav {
     PageDown,
     Tab,
     BackTab,
+    Delete,
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +235,7 @@ impl UiInput {
                     Some(UiNav::Tab)
                 }
             }
+            Key::Delete | Key::Back => Some(UiNav::Delete),
             _ => None,
         };
         Self { nav, shift, ctrl }

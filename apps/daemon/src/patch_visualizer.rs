@@ -4,12 +4,16 @@ use talisman_core::Patch;
 /// Render a Bézier curve cable between two points
 pub fn draw_cable(draw: &Draw, start: Vec2, end: Vec2, color: Srgb<u8>, thickness: f32) {
     // Calculate control points for a nice curve
-    let control_offset = (end.x - start.x).abs() * 0.5;
+    // Use a minimum offset to ensure the curve is visible even when horizontal distance is small
+    let dx = (end.x - start.x).abs();
+    let control_offset = (dx * 0.5).max(40.0);
+    
     let control1 = pt2(start.x + control_offset, start.y);
     let control2 = pt2(end.x - control_offset, end.y);
 
-    // Draw the curve using multiple small line segments
-    let segments = 50;
+    let segments = 32; // Sufficient detail for these curves
+    
+    // Draw Glow/Underlay (Inner Shadow)
     for i in 0..segments {
         let t1 = i as f32 / segments as f32;
         let t2 = (i + 1) as f32 / segments as f32;
@@ -17,10 +21,18 @@ pub fn draw_cable(draw: &Draw, start: Vec2, end: Vec2, color: Srgb<u8>, thicknes
         let p1 = cubic_bezier(start, control1, control2, end, t1);
         let p2 = cubic_bezier(start, control1, control2, end, t2);
 
+        // Wide glow
         draw.line()
             .start(p1)
             .end(p2)
-            .color(color)
+            .rgba(color.red as f32 / 255.0 * 0.3, color.green as f32 / 255.0 * 0.3, color.blue as f32 / 255.0 * 0.3, 0.4)
+            .stroke_weight(thickness * 3.0);
+            
+        // Sharp core
+        draw.line()
+            .start(p1)
+            .end(p2)
+            .rgba(color.red as f32 / 255.0, color.green as f32 / 255.0, color.blue as f32 / 255.0, 1.0)
             .stroke_weight(thickness);
     }
 }
