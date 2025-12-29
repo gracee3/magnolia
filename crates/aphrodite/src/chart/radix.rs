@@ -205,7 +205,6 @@ impl<'a> RadixChart<'a> {
                 pos,
                 self.settings.symbol_scale * 12.0,
                 color,
-                self.settings.stroke_points,
             );
         }
     }
@@ -255,7 +254,6 @@ impl<'a> RadixChart<'a> {
                 text_pos,
                 self.settings.symbol_scale * 14.0,
                 color,
-                self.settings.stroke_axis,
             );
         }
     }
@@ -302,7 +300,6 @@ impl<'a> RadixChart<'a> {
                 num_pos,
                 self.settings.symbol_scale * 10.0,
                 color,
-                1.0,
             );
         }
     }

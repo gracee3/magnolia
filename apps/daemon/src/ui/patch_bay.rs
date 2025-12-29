@@ -113,7 +113,12 @@ pub fn render(
             name,
             rect.xy(),
             14.0,
-            color.into(),
+            srgba(
+                color.red as f32 / 255.0,
+                color.green as f32 / 255.0,
+                color.blue as f32 / 255.0,
+                1.0,
+            ),
             TextAlignment::Center,
         );
     });
@@ -163,15 +168,16 @@ pub fn render(
                 .color(rgba(0.0, 0.2, 0.2, 0.2));
         }
 
-        draw_text(
-            draw,
-            FontId::PlexMonoRegular,
-            dir_str,
-            pt2(rect.left() + 20.0, rect.y()),
-            10.0,
-            if is_input { GREEN } else { ORANGE },
-            TextAlignment::Left,
-        );
+            let color = if is_input { srgba(0.0, 1.0, 0.0, 1.0) } else { srgba(1.0, 0.65, 0.0, 1.0) };
+            draw_text(
+                draw,
+                FontId::PlexMonoRegular,
+                dir_str,
+                pt2(rect.left() + 20.0, rect.y()),
+                10.0,
+                color,
+                TextAlignment::Left,
+            );
 
         draw_text(
             draw,
@@ -179,7 +185,7 @@ pub fn render(
             &port.label,
             pt2(rect.x(), rect.y()),
             14.0,
-            color,
+            srgba(color.red as f32 / 255.0, color.green as f32 / 255.0, color.blue as f32 / 255.0, 1.0),
             TextAlignment::Center,
         );
 
@@ -225,7 +231,7 @@ pub fn render(
             &label,
             rect.xy(),
             12.0,
-            color,
+            srgba(color.red as f32 / 255.0, color.green as f32 / 255.0, color.blue as f32 / 255.0, 1.0),
             TextAlignment::Center,
         );
     });
@@ -236,7 +242,7 @@ pub fn render(
             // We have a start point on screen
             let end = target_port_pos.unwrap_or_else(|| ports_rect.xy()); // Fallback to center of ports pane if not found
 
-            crate::patch_visualizer::draw_cable(draw, start, end, MAGENTA.into(), 2.0);
+            crate::patch_visualizer::draw_cable(draw, start, end, MAGENTA, 2.0);
 
             // Indicator text at start
             draw_text(
@@ -245,7 +251,7 @@ pub fn render(
                 "SOURCE",
                 start + pt2(0.0, 15.0),
                 10.0,
-                MAGENTA,
+                srgba(1.0, 0.0, 1.0, 1.0),
                 TextAlignment::Center,
             );
         } else {
@@ -277,7 +283,7 @@ pub fn render(
         hint,
         pt2(rect.x(), rect.bottom() + 30.0),
         14.0,
-        CYAN,
+        srgba(0.0, 1.0, 1.0, 1.0),
         TextAlignment::Center,
     );
 }

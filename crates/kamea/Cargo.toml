@@ -3,6 +3,10 @@ name = "kamea"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+tile-rendering = ["talisman_core/tile-rendering", "dep:nannou"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -12,11 +16,12 @@ rand_chacha = "0.3"
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-talisman_core = { path = "../../core", features = ["tile-rendering"] }
+talisman_core = { path = "../../core" }
 talisman-plugin-helper = { path = "../../crates/talisman-plugin-helper" }
+talisman-ui = { path = "../../crates/talisman-ui", features = ["tile-rendering"] }
 async-trait = "0.1"
 log = "0.4"
 
 # Rendering
-nannou = "0.19"
+nannou = { version = "0.19", optional = true }
 # nannou_egui removed

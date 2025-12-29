@@ -149,7 +149,9 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
                 nannou::lyon::tessellation::LineJoin::Bevel => {
                     nannou::lyon::tessellation::LineJoin::Miter
                 }
-                _ => model.line_join,
+                nannou::lyon::tessellation::LineJoin::MiterClip => {
+                    nannou::lyon::tessellation::LineJoin::Miter
+                }
             }
         }
         Key::C => {
@@ -163,7 +165,6 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
                 nannou::lyon::tessellation::LineCap::Square => {
                     nannou::lyon::tessellation::LineCap::Butt
                 }
-                _ => model.line_cap,
             }
         }
         Key::F => model.fill = !model.fill,
@@ -339,40 +340,43 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
                     let center = pt2(x, y);
                     let is_selected = i == model.selected_index;
+                    let cell_rect = Rect::from_xy_wh(center, vec2(model.cell_size, model.cell_size));
+                    let (mr, mg, mb) = theme::muted_stroke();
+                    let (cr, cg, cb) = theme::reactive_cyan();
 
                     if is_selected {
                         draw.rect()
-                            .xy(center)
-                            .w_h(model.cell_size, model.cell_size)
+                            .xy(cell_rect.xy())
+                            .wh(cell_rect.wh())
                             .no_fill()
-                            .stroke(CYAN)
+                            .stroke(srgb8(cr, cg, cb))
                             .stroke_weight(3.0);
                     } else {
                         draw.rect()
-                            .xy(center)
-                            .w_h(model.cell_size, model.cell_size)
+                            .xy(cell_rect.xy())
+                            .wh(cell_rect.wh())
                             .no_fill()
-                            .stroke(theme::muted_stroke())
+                            .stroke(srgb8(mr, mg, mb))
                             .stroke_weight(1.0);
                     }
 
                     if model.show_bounds {
                         draw.rect()
                             .xy(center)
-                            .w_h(model.big_glyph_size, model.big_glyph_size)
+                            .wh(vec2(model.big_glyph_size, model.big_glyph_size))
                             .no_fill()
                             .stroke(RED)
                             .stroke_weight(1.0);
                     }
 
-                    let name_color = if is_selected { CYAN } else { WHITE };
+                    let (tr, tg, tb) = if is_selected { (cr, cg, cb) } else { (180, 180, 180) };
                     draw_text(
-                        draw,
+                        &draw,
                         FontId::PlexMonoRegular,
                         name,
-                        center + vec2(0.0, -model.cell_size * 0.4),
-                        10.0,
-                        name_color,
+                        pt2(cell_rect.x(), cell_rect.bottom() - 10.0),
+                        8.0,
+                        srgba(tr as f32 / 255.0, tg as f32 / 255.0, tb as f32 / 255.0, 1.0),
                         TextAlignment::Center,
                     );
 
@@ -437,12 +441,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
             }
 
             draw_text(
-                draw,
+                &draw,
                 FontId::PlexSansBold,
                 name,
                 detail_rect.bottom_left() + vec2(50.0, 50.0),
                 32.0,
-                CYAN,
+                srgba(0.0, 1.0, 1.0, 1.0),
                 TextAlignment::Left,
             );
         }
@@ -460,12 +464,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
     );
 
     draw_text(
-        draw,
+        &draw,
         FontId::PlexMonoRegular,
         &hud_text,
         win.top_left() + vec2(400.0, -40.0),
         16.0,
-        YELLOW,
+        srgba(1.0, 1.0, 0.0, 1.0),
         TextAlignment::Left,
     );
 

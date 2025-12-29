@@ -6,15 +6,20 @@
 //!
 //! Uses SPSC ring buffer for minimal latency audio streaming.
 
+#[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
+#[cfg(feature = "tile-rendering")]
 use rustfft::num_complex::Complex;
+#[cfg(feature = "tile-rendering")]
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc as StdArc;
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "tile-rendering")]
 use talisman_core::{BindableAction, RenderContext, TileError, TileRenderer};
 use talisman_signals::ring_buffer::RingBufferReceiver;
+#[cfg(feature = "tile-rendering")]
 use talisman_ui::{draw_text, FontId, TextAlignment};
 
 /// Available visualization types
@@ -139,19 +144,25 @@ pub struct AudioVisTile {
     frozen_buffer: Vec<f32>,
 
     /// FFT working buffer (complex)
+    #[cfg(feature = "tile-rendering")]
     fft_buffer: Vec<Complex<f32>>,
 
     /// Spectrum magnitudes (half-size)
+    #[cfg(feature = "tile-rendering")]
     spectrum: Vec<f32>,
 
     /// FFT planner and cached plan
+    #[cfg(feature = "tile-rendering")]
     fft_planner: FftPlanner<f32>,
+    #[cfg(feature = "tile-rendering")]
     fft_plan: Option<StdArc<dyn rustfft::Fft<f32>>>,
 
     /// Window function
+    #[cfg(feature = "tile-rendering")]
     window: Vec<f32>,
 
     /// Current error state
+    #[cfg(feature = "tile-rendering")]
     error: Option<TileError>,
 
     /// Fallback Arc<Mutex> buffer for when ring buffer isn't connected
@@ -178,11 +189,17 @@ impl AudioVisTile {
             left_buffer: vec![0.0; BUFFER_SIZE / 2],
             right_buffer: vec![0.0; BUFFER_SIZE / 2],
             frozen_buffer: Vec::new(),
+            #[cfg(feature = "tile-rendering")]
             fft_buffer: vec![Complex::new(0.0, 0.0); BUFFER_SIZE],
+            #[cfg(feature = "tile-rendering")]
             spectrum: vec![0.0; BUFFER_SIZE / 2],
+            #[cfg(feature = "tile-rendering")]
             fft_planner: FftPlanner::new(),
+            #[cfg(feature = "tile-rendering")]
             fft_plan: None,
+            #[cfg(feature = "tile-rendering")]
             window: Vec::new(),
+            #[cfg(feature = "tile-rendering")]
             error: Some(TileError::info("No audio connected")),
             legacy_buffer: Arc::new(Mutex::new(vec![0.0; BUFFER_SIZE])),
             latency_us: None,
@@ -192,7 +209,10 @@ impl AudioVisTile {
     pub fn connect_audio_stream(&mut self, receiver: RingBufferReceiver<f32>, channels: u16) {
         self.ring_rx = Some(receiver);
         self.channels = channels;
-        self.error = None; // Clear error when connected
+        #[cfg(feature = "tile-rendering")]
+        {
+            self.error = None; // Clear error when connected
+        }
         log::info!(
             "AudioVisTile {}: connected to audio stream ({} ch)",
             self.instance_id,
@@ -212,10 +232,12 @@ impl AudioVisTile {
         self.latency_us = Some(latency_us);
     }
 
+    #[cfg(feature = "tile-rendering")]
     pub fn set_error(&mut self, error: TileError) {
         self.error = Some(error);
     }
 
+    #[cfg(feature = "tile-rendering")]
     fn get_color(&self, amplitude: f32) -> LinSrgba {
         match self.color_scheme {
             ColorScheme::CyanReactive => {
@@ -337,6 +359,7 @@ impl AudioVisTile {
         }
     }
 
+    #[cfg(feature = "tile-rendering")]
     fn ensure_fft(&mut self) {
         let n = self.buffer.len();
         if self.window.len() != n {
@@ -366,6 +389,7 @@ impl AudioVisTile {
         }
     }
 
+    #[cfg(feature = "tile-rendering")]
     fn update_spectrum(&mut self) {
         self.ensure_fft();
 
@@ -392,6 +416,7 @@ impl Default for AudioVisTile {
     }
 }
 
+#[cfg(feature = "tile-rendering")]
 impl TileRenderer for AudioVisTile {
     fn id(&self) -> &str {
         &self.instance_id
@@ -568,7 +593,7 @@ impl TileRenderer for AudioVisTile {
             "AUDIO VISUALIZER",
             pt2(rect.x(), rect.top() - 30.0),
             18.0,
-            CYAN.into(),
+            srgba(0.0, 1.0, 1.0, 1.0),
             TextAlignment::Center,
         );
 
@@ -579,7 +604,7 @@ impl TileRenderer for AudioVisTile {
             &subtitle,
             pt2(rect.x(), rect.top() - 50.0),
             12.0,
-            srgba(0.5, 0.5, 0.5, 1.0).into(),
+            srgba(0.5, 0.5, 0.5, 1.0),
             TextAlignment::Center,
         );
 
@@ -630,20 +655,33 @@ impl TileRenderer for AudioVisTile {
             self.poll_audio();
         }
 
-        if matches!(
-            self.vis_type,
-            VisualizationType::SpectrumBars | VisualizationType::SpectrumLine
-        ) {
-            self.update_spectrum();
+        #[cfg(feature = "tile-rendering")]
+        {
+            if matches!(
+                self.vis_type,
+                VisualizationType::SpectrumBars | VisualizationType::SpectrumLine
+            ) {
+                self.update_spectrum();
+            }
         }
     }
 
     fn get_error(&self) -> Option<TileError> {
-        self.error.clone()
+        #[cfg(feature = "tile-rendering")]
+        {
+            self.error.clone()
+        }
+        #[cfg(not(feature = "tile-rendering"))]
+        {
+            None
+        }
     }
 
     fn clear_error(&mut self) {
-        self.error = None;
+        #[cfg(feature = "tile-rendering")]
+        {
+            self.error = None;
+        }
     }
 
     fn settings_schema(&self) -> Option<serde_json::Value> {

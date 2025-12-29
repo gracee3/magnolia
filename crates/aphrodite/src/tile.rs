@@ -228,7 +228,7 @@ impl TileRenderer for AstroTile {
             &sun_text,
             pt2(rect.x(), rect.y() + line_height * 0.5),
             font_size as f32,
-            srgb(1.0, 0.8, 0.2),
+            srgba(1.0, 0.8, 0.2, 1.0),
             TextAlignment::Center,
         );
 
@@ -245,7 +245,7 @@ impl TileRenderer for AstroTile {
                 &moon_text,
                 pt2(rect.x(), rect.y() - line_height * 0.5),
                 font_size as f32,
-                srgb(0.8, 0.8, 1.0),
+                srgba(0.8, 0.8, 1.0, 1.0),
                 TextAlignment::Center,
             );
         }
@@ -272,7 +272,7 @@ impl TileRenderer for AstroTile {
                 "No data",
                 rect.xy(),
                 14.0,
-                WHITE,
+                srgba(1.0, 1.0, 1.0, 1.0),
                 TextAlignment::Center,
             );
             return false;

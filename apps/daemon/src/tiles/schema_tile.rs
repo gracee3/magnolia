@@ -53,8 +53,8 @@ impl TileRenderer for SchemaTile {
             FontId::PlexSansRegular,
             &self.name,
             rect.xy(),
-            14.0,
-            WHITESMOKE.into(),
+            56.0,
+            srgba(0.96, 0.96, 0.96, 1.0),
             TextAlignment::Center,
         );
 
@@ -77,8 +77,8 @@ impl TileRenderer for SchemaTile {
             FontId::PlexSansBold,
             &format!("{} - SETTINGS", self.name.to_uppercase()),
             rect.xy(),
-            32.0,
-            CYAN.into(),
+            80.0,
+            srgba(0.0, 1.0, 1.0, 1.0),
             TextAlignment::Center,
         );
 
@@ -87,8 +87,8 @@ impl TileRenderer for SchemaTile {
             FontId::PlexSansRegular,
             "Custom Nannou controls coming soon...",
             pt2(rect.x(), rect.y() - 40.0),
-            14.0,
-            GRAY.into(),
+            91.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
             TextAlignment::Center,
         );
 

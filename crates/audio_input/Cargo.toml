@@ -14,6 +14,7 @@ crate-type = ["rlib"]
 cpal = "0.15"
 talisman_signals = { path = "../talisman-signals" }
 talisman_core = { path = "../../core" }
+talisman-ui = { path = "../talisman-ui", features = ["tile-rendering"] }
 log = "0.4"
 anyhow = "1.0"
 async-trait = "0.1"

@@ -36,7 +36,7 @@ pub fn render(draw: &Draw, rect: Rect, state: &GlobalSettingsState, anim: &Modal
         "AUDIO ENGINE",
         pt2(form_rect.left() + 10.0, form_rect.top() - 20.0),
         14.0,
-        CYAN.into(),
+        srgba(0.0, 1.0, 1.0, 1.0),
         TextAlignment::Left,
     );
 

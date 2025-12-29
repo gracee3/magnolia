@@ -7,14 +7,18 @@
 //! Control mode: Settings for grid size, colors, stroke weight
 
 use crate::generator::{generate_path, SigilConfig};
+#[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "tile-rendering")]
 use talisman_core::{BindableAction, RenderContext, TileRenderer};
+#[cfg(feature = "tile-rendering")]
 use talisman_ui::{draw_text, FontId, TextAlignment};
 
 pub struct KameaTile {
     current_text: Arc<Mutex<String>>,
+    #[cfg(feature = "tile-rendering")]
     path_points: Vec<Point2>,
     config: SigilConfig,
     last_text_hash: [u8; 32],
@@ -27,6 +31,7 @@ impl KameaTile {
     pub fn new() -> Self {
         Self {
             current_text: Arc::new(Mutex::new(String::new())),
+            #[cfg(feature = "tile-rendering")]
             path_points: Vec::new(),
             config: SigilConfig {
                 spacing: 40.0,
@@ -57,18 +62,25 @@ impl KameaTile {
         seed.copy_from_slice(&result);
 
         // Check if we need to regenerate
-        if seed == self.last_text_hash && !self.path_points.is_empty() {
-            return;
+        #[cfg(feature = "tile-rendering")]
+        {
+            if seed == self.last_text_hash && !self.path_points.is_empty() {
+                return;
+            }
         }
         self.last_text_hash = seed;
 
         // Generate the path with current config
-        self.path_points = generate_path(seed, self.config)
-            .into_iter()
-            .map(|(x, y)| pt2(x, y))
-            .collect();
+        #[cfg(feature = "tile-rendering")]
+        {
+            self.path_points = generate_path(seed, self.config)
+                .into_iter()
+                .map(|(x, y)| pt2(x, y))
+                .collect();
+        }
     }
 
+    #[cfg(feature = "tile-rendering")]
     fn render_sigil(&self, draw: &Draw, rect: Rect) {
         // Background
         draw.rect()
@@ -164,6 +176,7 @@ impl Default for KameaTile {
     }
 }
 
+#[cfg(feature = "tile-rendering")]
 impl TileRenderer for KameaTile {
     fn id(&self) -> &str {
         "kamea"
@@ -225,7 +238,7 @@ impl TileRenderer for KameaTile {
             "KAMEA SIGIL SETTINGS",
             pt2(rect.x(), rect.top() - 30.0),
             18.0,
-            CYAN,
+            srgba(0.0, 1.0, 1.0, 1.0),
             TextAlignment::Center,
         );
 

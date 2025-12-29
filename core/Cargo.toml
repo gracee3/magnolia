@@ -10,6 +10,7 @@ tile-rendering = ["dep:nannou"]
 [dependencies]
 talisman_signals = { path = "../crates/talisman-signals" }
 talisman_module_api = { path = "../crates/talisman-module-api" }
+talisman-ui = { path = "../crates/talisman-ui", features = ["tile-rendering"] }
 async-trait = "0.1"
 slab = "0.4"
 serde = { version = "1.0", features = ["derive"] }

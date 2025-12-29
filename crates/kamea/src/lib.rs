@@ -1,15 +1,20 @@
+#[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
 pub use talisman_core::KameaGrid;
 use talisman_plugin_helper::{
-    export_plugin, SignalBuffer, SignalType, SignalValue, TalismanPlugin,
+    export_plugin, SignalBuffer, SignalType, TalismanPlugin,
 };
+#[cfg(feature = "tile-rendering")]
+use talisman_plugin_helper::SignalValue;
 
+#[cfg(feature = "tile-rendering")]
 use nannou::wgpu; // Access nannou's re-exported wgpu
 
 mod generator;
 mod tile;
 use tile::KameaTile;
 
+#[cfg(feature = "tile-rendering")]
 struct GpuState {
     device: *const wgpu::Device,
     queue: *const wgpu::Queue,
@@ -20,11 +25,14 @@ struct GpuState {
     height: u32,
 }
 
+#[cfg(feature = "tile-rendering")]
 unsafe impl Send for GpuState {}
+#[cfg(feature = "tile-rendering")]
 unsafe impl Sync for GpuState {}
 
 struct KameaPlugin {
     tile: Option<KameaTile>,
+    #[cfg(feature = "tile-rendering")]
     gpu_state: Option<GpuState>,
     enabled: bool,
     sent_texture: bool,
@@ -34,6 +42,7 @@ impl Default for KameaPlugin {
     fn default() -> Self {
         Self {
             tile: None,
+            #[cfg(feature = "tile-rendering")]
             gpu_state: None,
             enabled: true,
             sent_texture: false,
@@ -70,7 +79,7 @@ impl TalismanPlugin for KameaPlugin {
         self.enabled = enabled;
     }
 
-    fn poll_signal(&mut self, buffer: &mut SignalBuffer) -> bool {
+    fn poll_signal(&mut self, #[cfg_attr(not(feature = "tile-rendering"), allow(unused_variables))] buffer: &mut SignalBuffer) -> bool {
         if !self.enabled {
             return false;
         }
@@ -79,59 +88,60 @@ impl TalismanPlugin for KameaPlugin {
             self.tile = Some(KameaTile::new());
         }
 
-        if let Some(gpu) = &mut self.gpu_state {
-            let tile = self.tile.as_mut().unwrap();
-            use talisman_core::TileRenderer;
-            tile.update();
+        #[cfg(feature = "tile-rendering")]
+        {
+            if let Some(gpu) = &mut self.gpu_state {
+                let tile = self.tile.as_mut().unwrap();
+                use talisman_core::TileRenderer;
+                tile.update();
 
-            let draw = Draw::new();
-            let rect = Rect::from_w_h(gpu.width as f32, gpu.height as f32);
+                let draw = Draw::new();
+                let rect = Rect::from_w_h(gpu.width as f32, gpu.height as f32);
 
-            let ctx = talisman_core::RenderContext {
-                time: std::time::Instant::now(),
-                frame_count: 0,
-                is_selected: false,
-                is_maximized: false,
-                tile_settings: None,
-            };
-
-            tile.render_monitor(&draw, rect, &ctx);
-
-            unsafe {
-                let device = &*gpu.device;
-                let queue = &*gpu.queue;
-
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("kamea_encoder"),
-                });
-
-                gpu.renderer
-                    .render_to_texture(device, &mut encoder, &draw, &gpu.nannou_texture);
-
-                queue.submit(Some(encoder.finish()));
-            }
-
-            if !self.sent_texture {
-                let id = 0xCAFE_BABE;
-
-                buffer.signal_type = SignalType::Texture as u32;
-                // nannou_texture.view() returns a Builder.
-                // We stored the built view in gpu.view (Nannou wrapper).
-                // We must send the pointer to the INNER wgpu::TextureView (Arc)
-                // so the host can clone the Arc.
-                // CAUTION: plugin `gpu.view` owns the inner Arc.
-                // Host `clone` bumps ref count.
-                // `gpu.view.inner()` returns &wgpu::TextureView.
-                let raw_view = gpu.view.inner();
-
-                buffer.value = SignalValue {
-                    ptr: raw_view as *const _ as *mut _,
+                let ctx = talisman_core::RenderContext {
+                    time: std::time::Instant::now(),
+                    frame_count: 0,
+                    is_selected: false,
+                    is_maximized: false,
+                    tile_settings: None,
                 };
-                buffer.size = id;
-                buffer.param = ((gpu.width as u64) << 32) | (gpu.height as u64);
 
-                self.sent_texture = true;
-                return true;
+                tile.render_monitor(&draw, rect, &ctx);
+
+                unsafe {
+                    let device = &*gpu.device;
+                    let queue = &*gpu.queue;
+
+                    let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("kamea_encoder"),
+                        });
+
+                    gpu.renderer.render_to_texture(
+                        device,
+                        &mut encoder,
+                        &draw,
+                        &gpu.nannou_texture,
+                    );
+
+                    queue.submit(Some(encoder.finish()));
+                }
+
+                if !self.sent_texture {
+                    let id = 0xCAFE_BABE;
+
+                    buffer.signal_type = SignalType::Texture as u32;
+                    let raw_view = gpu.view.inner();
+
+                    buffer.value = SignalValue {
+                        ptr: raw_view as *const _ as *mut _,
+                    };
+                    buffer.size = id;
+                    buffer.param = ((gpu.width as u64) << 32) | (gpu.height as u64);
+
+                    self.sent_texture = true;
+                    return true;
+                }
             }
         }
 
@@ -140,6 +150,7 @@ impl TalismanPlugin for KameaPlugin {
 
     fn consume_signal(&mut self, input: &SignalBuffer) -> Option<SignalBuffer> {
         if input.signal_type == SignalType::GpuContext as u32 {
+            #[cfg(feature = "tile-rendering")]
             unsafe {
                 let device_ptr = input.value.ptr as *const wgpu::Device;
                 let queue_ptr = input.param as *const wgpu::Queue;
@@ -169,6 +180,7 @@ impl TalismanPlugin for KameaPlugin {
     }
 }
 
+#[cfg(feature = "tile-rendering")]
 impl KameaPlugin {
     unsafe fn init_gpu(&mut self, device_ptr: *const wgpu::Device, queue_ptr: *const wgpu::Queue) {
         let device = &*device_ptr;

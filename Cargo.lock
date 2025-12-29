@@ -245,6 +245,7 @@ dependencies = [
  "async-trait",
  "nannou",
  "serde_json",
+ "talisman-ui",
  "talisman_core",
  "talisman_signals",
 ]
@@ -262,6 +263,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "talisman-ui",
  "talisman_core",
  "talisman_signals",
  "tokio",
@@ -277,6 +279,7 @@ dependencies = [
  "log",
  "nannou",
  "serde_json",
+ "talisman-ui",
  "talisman_core",
  "talisman_signals",
 ]
@@ -1841,6 +1844,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "talisman-plugin-helper",
+ "talisman-ui",
  "talisman_core",
 ]
 
@@ -3666,6 +3670,7 @@ dependencies = [
  "sha2",
  "slab",
  "talisman-plugin-abi",
+ "talisman-ui",
  "talisman_module_api",
  "talisman_signals",
  "thiserror",

@@ -32,7 +32,7 @@ pub fn draw_heading(draw: &Draw, pos: Point2, text: &str, style: UiStyle) {
         text,
         pos,
         18.0,
-        rgba(0.0, 1.0, 1.0, style.alpha).into(),
+        rgba(0.0, 1.0, 1.0, style.alpha),
         TextAlignment::Center,
     );
 }
@@ -44,7 +44,7 @@ pub fn draw_subtitle(draw: &Draw, pos: Point2, text: &str, style: UiStyle) {
         text,
         pos,
         12.0,
-        rgba(0.55, 0.55, 0.6, style.alpha).into(),
+        rgba(0.55, 0.55, 0.6, style.alpha),
         TextAlignment::Center,
     );
 }
@@ -56,7 +56,7 @@ pub fn draw_section(draw: &Draw, pos: Point2, text: &str, style: UiStyle) {
         text,
         pos,
         11.0,
-        rgba(0.4, 0.5, 0.55, style.alpha).into(),
+        rgba(0.4, 0.5, 0.55, style.alpha),
         TextAlignment::Left,
     );
 }
@@ -111,7 +111,7 @@ pub fn draw_toggle_row(
         pill,
         pt2(rect.right() - VALUE_X_PAD, rect.y()),
         14.0,
-        pill_color.into(),
+        pill_color,
         TextAlignment::Right,
     );
 }
@@ -142,7 +142,7 @@ pub fn draw_stepper_row(
         &format!("< {} >", value_text),
         pt2(rect.right() - VALUE_X_PAD, rect.y()),
         14.0,
-        rgba(0.0, 1.0, 1.0, style.alpha).into(),
+        rgba(0.0, 1.0, 1.0, style.alpha),
         TextAlignment::Right,
     );
 }
@@ -305,7 +305,7 @@ impl<'a> Form<'a> {
             label,
             pt2(rect.left() + LABEL_X_PAD, rect.y()),
             14.0,
-            rgba(0.85, 0.85, 0.88, 1.0).into(),
+            rgba(0.85, 0.85, 0.88, 1.0),
             TextAlignment::Left,
         );
 
@@ -420,7 +420,7 @@ impl<'a> List<'a> {
                 "No items",
                 list_rect.xy(),
                 12.0,
-                GREY.into(),
+                srgba(0.5, 0.5, 0.5, 1.0),
                 TextAlignment::Center,
             );
             return;

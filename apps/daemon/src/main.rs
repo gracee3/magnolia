@@ -834,7 +834,7 @@ fn draw_fullscreen_overlay(draw: &Draw, win_rect: Rect, title: &str) {
         title,
         win_rect.xy(),
         32.0,
-        CYAN.into(),
+        srgba(0.0, 1.0, 1.0, 1.0),
         TextAlignment::Center,
     );
 
@@ -845,7 +845,7 @@ fn draw_fullscreen_overlay(draw: &Draw, win_rect: Rect, title: &str) {
         "[ESC] Close",
         pt2(win_rect.x(), win_rect.y() - 40.0),
         12.0,
-        GRAY.into(),
+        srgba(0.5, 0.5, 0.5, 1.0),
         TextAlignment::Center,
     );
 }
@@ -889,7 +889,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                             "+",
                             rect.xy(),
                             24.0,
-                            stroke_color.into(),
+                            srgba(stroke_color.red as f32 / 255.0, stroke_color.green as f32 / 255.0, stroke_color.blue as f32 / 255.0, 1.0),
                             TextAlignment::Center,
                         );
                     }
@@ -1015,7 +1015,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .color(rgba(0.0, 0.0, 0.1, 0.4));
 
         draw_text(
-            draw,
+            &draw,
             FontId::PlexMonoRegular,
             "Zzz",
             pt2(
@@ -1023,7 +1023,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 app.window_rect().bottom() + 30.0,
             ),
             24.0,
-            rgba(0.5, 0.5, 1.0, 0.5),
+            srgba(0.5, 0.5, 1.0, 0.5),
             TextAlignment::Right,
         );
     }
@@ -1053,7 +1053,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             mode_text,
             pt2(win_rect.left() + 50.0, win_rect.bottom() + 20.0),
             14.0,
-            mode_color.into(),
+            srgba(mode_color.red, mode_color.green, mode_color.blue, mode_color.alpha),
             TextAlignment::Left,
         );
 
@@ -1074,7 +1074,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             hints,
             pt2(win_rect.left() + 250.0, win_rect.bottom() + 20.0),
             10.0,
-            rgba(0.4, 0.4, 0.4, 0.8).into(),
+            srgba(0.4, 0.4, 0.4, 0.8),
             TextAlignment::Left,
         );
     }

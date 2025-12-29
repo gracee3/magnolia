@@ -2,6 +2,7 @@
 //!
 //! Centralized visual styling for the dark/cyan reactive aesthetic.
 
+#[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
 
 // =============================================================================
@@ -9,23 +10,23 @@ use nannou::prelude::*;
 // =============================================================================
 
 /// Primary reactive cyan color (selection, focus)
-pub fn reactive_cyan() -> Srgb<u8> {
-    Srgb::new(0, 255, 255)
+pub fn reactive_cyan() -> (u8, u8, u8) {
+    (0, 255, 255)
 }
 
 /// Dark background color
-pub fn dark_bg() -> Srgb<u8> {
-    Srgb::new(10, 10, 15)
+pub fn dark_bg() -> (u8, u8, u8) {
+    (10, 10, 15)
 }
 
 /// Muted stroke color for unselected elements
-pub fn muted_stroke() -> Srgb<u8> {
-    Srgb::new(60, 60, 70)
+pub fn muted_stroke() -> (u8, u8, u8) {
+    (60, 60, 70)
 }
 
 /// Warning/alert color
-pub fn warning_red() -> Srgb<u8> {
-    Srgb::new(255, 80, 80)
+pub fn warning_red() -> (u8, u8, u8) {
+    (255, 80, 80)
 }
 
 // =============================================================================
@@ -46,11 +47,13 @@ pub const NORMAL_STROKE: f32 = 1.0;
 // =============================================================================
 
 /// Get selection border color with optional alpha
+#[cfg(feature = "tile-rendering")]
 pub fn selection_color(alpha: f32) -> LinSrgba {
     LinSrgba::new(0.0, 1.0, 1.0, alpha)
 }
 
 /// Get muted color with optional alpha  
+#[cfg(feature = "tile-rendering")]
 pub fn muted_color(alpha: f32) -> LinSrgba {
     LinSrgba::new(0.25, 0.25, 0.28, alpha)
 }
@@ -67,6 +70,7 @@ pub fn stroke_for_state(is_selected: bool, is_hovered: bool) -> f32 {
 }
 
 /// Get the appropriate border color for an element based on selection state
+#[cfg(feature = "tile-rendering")]
 pub fn border_for_state(is_selected: bool, is_hovered: bool) -> LinSrgba {
     if is_selected {
         selection_color(0.9)

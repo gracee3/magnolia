@@ -15,6 +15,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 talisman_core = { path = "../../core" }
 talisman_signals = { path = "../talisman-signals" }
+talisman-ui = { path = "../talisman-ui", features = ["tile-rendering"] }
 nannou = { version = "0.19", optional = true }
 # nannou_egui = "0.19.0"
 serde_json = "1.0"
