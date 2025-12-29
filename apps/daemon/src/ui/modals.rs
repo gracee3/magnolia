@@ -34,13 +34,35 @@ impl Default for PatchBayModalState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalSettingsState {
+    pub focus: FocusModel,
+    // Add settings fields here or link to actual settings later
+    pub audio_buffer_size: usize,
+    pub sample_rate: usize,
+    pub show_debug_stats: bool,
+    pub theme_hue: f32,
+}
+
+impl Default for GlobalSettingsState {
+    fn default() -> Self {
+        Self {
+            focus: FocusModel::default(),
+            audio_buffer_size: 512,
+            sample_rate: 48000,
+            show_debug_stats: false,
+            theme_hue: 0.5,
+        }
+    }
+}
+
 /// Modal types for the unified modal stack
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModalState {
     /// Patch Bay modal
     PatchBay(PatchBayModalState),
     /// Global settings modal
-    GlobalSettings,
+    GlobalSettings(GlobalSettingsState),
     /// Layout manager modal
     LayoutManager,
     /// Tile maximized/control view (tile_id)
@@ -106,7 +128,27 @@ impl ModalStack {
 
     /// Check if global settings is open
     pub fn is_global_settings_open(&self) -> bool {
-        self.stack.iter().any(|m| matches!(m, ModalState::GlobalSettings))
+        self.stack.iter().any(|m| matches!(m, ModalState::GlobalSettings(_)))
+    }
+
+    /// Get mutable reference to active global settings state
+    pub fn get_global_settings_state_mut(&mut self) -> Option<&mut GlobalSettingsState> {
+        for modal in self.stack.iter_mut().rev() {
+            if let ModalState::GlobalSettings(state) = modal {
+                return Some(state);
+            }
+        }
+        None
+    }
+
+    /// Get immutable reference to active global settings state
+    pub fn get_global_settings_state(&self) -> Option<&GlobalSettingsState> {
+        for modal in self.stack.iter().rev() {
+            if let ModalState::GlobalSettings(state) = modal {
+                return Some(state);
+            }
+        }
+        None
     }
 
     /// Check if layout manager is open

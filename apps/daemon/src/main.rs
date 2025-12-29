@@ -606,6 +606,10 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
             ui::patch_bay::handle_key(key, &mut state, &mut model.patch_bay);
             return;
         }
+        if let Some(mut state) = model.modal_stack.get_global_settings_state_mut() {
+            ui::settings::handle_key(key, &mut state);
+            return;
+        }
         // Pop any other modal from stack
         if model.modal_stack.pop().is_some() {
             return;
@@ -708,7 +712,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 }
             },
             AppAction::OpenGlobalSettings => {
-                model.modal_stack.push(ModalState::GlobalSettings);
+                model.modal_stack.push(ModalState::GlobalSettings(ui::modals::GlobalSettingsState::default()));
             },
 
             AppAction::OpenAddTilePicker { col, row } => {
@@ -968,10 +972,13 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
 
 
-    // Fullscreen Modals (Nannou Overlays)
+
+    // Fullscreen Modals
     let win_rect = app.window_rect();
-    if model.modal_stack.is_global_settings_open() {
-        draw_fullscreen_overlay(&draw, win_rect, "GLOBAL SETTINGS");
+    if let Some(state) = model.modal_stack.get_global_settings_state() {
+        // Create anim state if needed or use existing
+        let anim = model.modal_anims.get(&ModalAnimKey::GlobalSettings).cloned().unwrap_or(ModalAnim::new());
+        ui::settings::render(&draw, win_rect, state, &anim);
     } else if let Some(state) = model.modal_stack.get_patch_bay_state() {
          let anim = ModalAnim { factor: 1.0, closing: false }; // TODO: Integrated animation state
          ui::patch_bay::render(&draw, win_rect, state, &anim, &model.patch_bay);

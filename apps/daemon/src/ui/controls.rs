@@ -199,13 +199,13 @@ pub struct UiResponse {
 // === FORM BUILDER ===
 
 pub struct Form<'a> {
-    pub focus: &'a mut FocusModel,
+    pub focus: &'a FocusModel,
     pub row_count: usize,
     pub rect: Rect,
 }
 
 impl<'a> Form<'a> {
-    pub fn begin(focus: &'a mut FocusModel, rect: Rect) -> Self {
+    pub fn begin(focus: &'a FocusModel, rect: Rect) -> Self {
         Self {
             focus,
             row_count: 0,
@@ -213,24 +213,7 @@ impl<'a> Form<'a> {
         }
     }
     
-    /// Handle standard form navigation (Up/Down)
-    pub fn nav(&mut self, input: &UiInput) {
-        if self.focus.editing {
-            return; // Don't change rows while editing
-        }
-        
-        if let Some(nav) = &input.nav {
-            match nav {
-                UiNav::Up => {
-                    self.focus.focused = self.focus.focused.saturating_sub(1);
-                }
-                UiNav::Down => {
-                    self.focus.focused = self.focus.focused + 1; // Clamped by caller or clamp() later
-                }
-                _ => {}
-            }
-        }
-    }
+    // nav() removed - handle focus mutation in handle_key
     
     fn next_row_rect(&mut self) -> (usize, Rect) {
         let i = self.row_count;
@@ -241,106 +224,44 @@ impl<'a> Form<'a> {
         (i, r)
     }
     
-    // --- Interactive Widgets ---
+    // --- Interactive Widgets (Render Only) ---
 
     pub fn toggle_row(
         &mut self,
         draw: &Draw,
         label: &str,
-        value: &mut bool,
-        input: &UiInput,
-    ) -> UiResponse {
+        value: bool,
+    ) {
         let (idx, rect) = self.next_row_rect();
         let focused = self.focus.focused == idx;
-        let mut resp = UiResponse { changed: false, activated: false };
         
         // Render
-        draw_toggle_row(draw, rect, label, *value, focused, UiStyle::default());
-        
-        // Input
-        if focused {
-            if let Some(UiNav::Enter) | Some(UiNav::Left) | Some(UiNav::Right) = input.nav {
-                *value = !*value;
-                resp.changed = true;
-                resp.activated = true;
-            }
-        }
-        
-        resp
+        draw_toggle_row(draw, rect, label, value, focused, UiStyle::default());
     }
 
-    pub fn stepper_row<T: ToString + PartialEq>(
+    pub fn stepper_row(
         &mut self,
         draw: &Draw,
         label: &str,
-        value: &mut T,
-        input: &UiInput,
-        prev_fn: impl FnOnce(&mut T),
-        next_fn: impl FnOnce(&mut T),
-    ) -> UiResponse {
+        value_text: &str,
+    ) {
         let (idx, rect) = self.next_row_rect();
         let focused = self.focus.focused == idx;
-        let mut resp = UiResponse { changed: false, activated: false };
-        let old_str = value.to_string();
 
         // Render
-        draw_stepper_row(draw, rect, label, &old_str, focused, UiStyle::default());
-        
-        // Input
-        if focused {
-            if let Some(nav) = &input.nav {
-                match nav {
-                    UiNav::Left => {
-                        prev_fn(value);
-                        if value.to_string() != old_str { resp.changed = true; }
-                    },
-                    UiNav::Right => {
-                        next_fn(value);
-                        if value.to_string() != old_str { resp.changed = true; }
-                    },
-                    _ => {}
-                }
-            }
-        }
-        
-        resp
+        draw_stepper_row(draw, rect, label, value_text, focused, UiStyle::default());
     }
     
     pub fn slider_row(
         &mut self,
         draw: &Draw,
         label: &str,
-        value: &mut f32,
+        value: f32,
         min: f32,
         max: f32,
-        input: &UiInput,
-    ) -> UiResponse {
+    ) {
         let (idx, rect) = self.next_row_rect();
         let focused = self.focus.focused == idx;
-        let mut resp = UiResponse { changed: false, activated: false };
-        
-        // Logic: Left/Right defaults to 10% step (coarse).
-        // If Shift is held (fine), 1% step? Or just use fixed steps?
-        // User requested: Left/Right adjusts.
-        
-        if focused {
-            let range = max - min;
-            let step = if input.shift { range * 0.01 } else { range * 0.1 };
-            
-            if let Some(nav) = &input.nav {
-                match nav {
-                    UiNav::Left => {
-                        *value = (*value - step).max(min);
-                        resp.changed = true;
-                    }
-                    UiNav::Right => {
-                        *value = (*value + step).min(max);
-                        resp.changed = true;
-                    }
-                    _ => {}
-                }
-            }
-        }
         
         // Render manually since we don't have draw_slider_row yet
         row_bg(draw, rect, focused, UiStyle::default());
@@ -355,7 +276,7 @@ impl<'a> Form<'a> {
         let bar_w = rect.w() * 0.4;
         let bar_h = 4.0;
         let bar_x = rect.right() - VALUE_X_PAD - bar_w / 2.0;
-        let norm = (*value - min) / (max - min);
+        let norm = (value - min) / (max - min);
         
         // Track
         draw.rect()
@@ -377,8 +298,6 @@ impl<'a> Form<'a> {
                 .radius(4.0)
                 .color(WHITE);
         }
-        
-        resp
     }
 }
 

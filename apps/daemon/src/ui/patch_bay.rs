@@ -13,13 +13,22 @@ pub fn render(
 ) {
     // 1. Draw Modal Container
     let content_rect = draw_modal_header(draw, rect, "PATCH BAY", anim);
-    // alpha unused
+    
+    // Background Fill (Opaque)
+    draw.rect()
+        .xy(content_rect.xy())
+        .wh(content_rect.wh())
+        .color(rgba(0.05, 0.05, 0.08, 0.98));
 
     // 2. Layout Columns (Modules | Ports | Connections)
     let col_w = content_rect.w() / 3.0;
     let modules_rect = Rect::from_x_y_w_h(content_rect.left() + col_w/2.0, content_rect.y(), col_w - 10.0, content_rect.h());
     let ports_rect = Rect::from_x_y_w_h(content_rect.x(), content_rect.y(), col_w - 10.0, content_rect.h());
     let patches_rect = Rect::from_x_y_w_h(content_rect.right() - col_w/2.0, content_rect.y(), col_w - 10.0, content_rect.h());
+
+    // State for Line Drawing
+    let mut staged_src_pos = None;
+    let mut target_port_pos = None;
 
     // 3. Render Modules List
     // Filter active modules
@@ -40,7 +49,13 @@ pub fn render(
         let color = if selected { CYAN } else { GREY };
         let name = &module.name;
         
-        // Removed unused row_draw assignment
+        // Capture position if this is the staged source module
+        if let Some((src_mod_id, _)) = &state.staged_source {
+            if &module.id == src_mod_id {
+                staged_src_pos = Some(rect.mid_right());
+            }
+        }
+        
         if selected {
              draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.0, 0.2, 0.2, 0.2))
                  .stroke(CYAN).stroke_weight(1.0);
@@ -79,22 +94,27 @@ pub fn render(
         let dir_str = if is_input { "IN" } else { "OUT" };
         let color = if selected { CYAN } else { GREY };
         
-        if selected {
-             draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.0, 0.2, 0.2, 0.2));
+        // Capture position if this is the target port (focused in Ports pane)
+        if selected && ports_focused {
+            target_port_pos = Some(rect.mid_left());
         }
-
+        
+        // Also check if this port is the staged source (loopback scenario)
         if let Some(module) = modules.get(selected_mod_idx) {
              if let Some((src_mod_id, src_port_id)) = &state.staged_source {
                  if &module.id == src_mod_id && &port.id == src_port_id {
+                     // Using port position as source is better if visible
+                     staged_src_pos = Some(rect.mid_right());
+                     
                      draw.rect().xy(rect.xy()).wh(rect.wh()).no_fill().stroke(MAGENTA).stroke_weight(2.0);
-                     draw.text("SOURCE")
-                        .x_y(rect.right() - 30.0, rect.y())
-                        .color(MAGENTA)
-                        .font_size(10);
                  }
              }
         }
         
+        if selected {
+             draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.0, 0.2, 0.2, 0.2));
+        }
+
         draw.text(dir_str)
             .x_y(rect.left() + 20.0, rect.y())
             .color(if is_input { GREEN } else { ORANGE })
@@ -132,6 +152,33 @@ pub fn render(
              .color(color)
              .font_size(12);
     });
+    
+    // Draw Staged Connection Line
+    if state.staged_source.is_some() {
+        if let Some(start) = staged_src_pos {
+            // We have a start point on screen
+            let end = target_port_pos.unwrap_or_else(|| ports_rect.xy()); // Fallback to center of ports pane if not found
+            
+            crate::patch_visualizer::draw_cable(draw, start, end, MAGENTA.into(), 2.0);
+                
+            // Indicator text at start
+            draw.text("SOURCE")
+                .xy(start + pt2(0.0, 15.0))
+                .color(MAGENTA)
+                .font_size(10);
+        } else {
+             // Source not visible (scrolled out or module not selected).
+             // Draw line entering from left side of Ports pane
+             if let Some(end) = target_port_pos {
+                 let start = pt2(ports_rect.left() - 20.0, end.y);
+                 draw.line()
+                    .start(start)
+                    .end(end)
+                    .color(MAGENTA)
+                    .weight(2.0);
+             }
+        }
+    }
     
     // 4. Helper Text
     let hint = match state.focus_pane {
