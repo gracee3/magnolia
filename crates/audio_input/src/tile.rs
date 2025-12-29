@@ -181,7 +181,7 @@ impl AudioVisTile {
             vis_type: VisualizationType::default(),
             color_scheme: ColorScheme::default(),
             sensitivity: 1.0,
-            is_muted: false,
+            is_muted: true,
             is_frozen: false,
             ring_rx: None,
             channels: 2,

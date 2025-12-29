@@ -246,7 +246,8 @@ impl Sink for AudioOutputSink {
     }
 
     async fn consume(&self, signal: Signal) -> anyhow::Result<Option<Signal>> {
-        if !self.enabled {
+        if !self.enabled || self.settings.is_muted() {
+            self.state.level_milli.store(0, Ordering::Relaxed);
             return Ok(None);
         }
 

@@ -21,6 +21,7 @@ pub struct AudioDspState {
     gain: AtomicU32,
     lowpass_hz: AtomicU32,
     lowpass_enabled: AtomicBool,
+    is_muted: AtomicBool,
 }
 
 impl AudioDspState {
@@ -28,6 +29,7 @@ impl AudioDspState {
         let state = Arc::new(Self::default());
         store_f32(&state.gain, 1.0);
         store_f32(&state.lowpass_hz, 2000.0);
+        state.is_muted.store(true, Ordering::Relaxed);
         state
     }
 
@@ -53,6 +55,14 @@ impl AudioDspState {
 
     pub fn set_lowpass_enabled(&self, enabled: bool) {
         self.lowpass_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.is_muted.load(Ordering::Relaxed)
+    }
+
+    pub fn set_muted(&self, muted: bool) {
+        self.is_muted.store(muted, Ordering::Relaxed);
     }
 }
 
@@ -126,6 +136,18 @@ impl Processor for AudioDspProcessor {
         let gain = self.state.gain();
         let lowpass_enabled = self.state.lowpass_enabled();
         let lowpass_hz = self.state.lowpass_hz().max(10.0);
+
+        if self.state.is_muted() {
+            for sample in data.iter_mut() {
+                *sample = 0.0;
+            }
+            return Ok(Some(Signal::Audio {
+                sample_rate,
+                channels,
+                timestamp_us,
+                data,
+            }));
+        }
 
         if self.last_samples.len() != channels as usize {
             self.last_samples = vec![0.0; channels as usize];

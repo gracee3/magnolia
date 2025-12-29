@@ -11,6 +11,7 @@ pub struct AudioInputTile {
     settings: Arc<AudioInputSettings>,
     selected: Mutex<String>,
     focus: Mutex<usize>,
+    is_muted: Mutex<bool>,
 }
 
 impl AudioInputTile {
@@ -21,6 +22,7 @@ impl AudioInputTile {
             settings,
             selected: Mutex::new(selected),
             focus: Mutex::new(0),
+            is_muted: Mutex::new(true),
         }
     }
 }
@@ -66,6 +68,18 @@ impl TileRenderer for AudioInputTile {
             srgba(0.5, 0.7, 0.9, 1.0),
             TextAlignment::Center,
         );
+
+        if self.is_muted.lock().map(|v| *v).unwrap_or(true) {
+            draw_text(
+                draw,
+                FontId::PlexSansBold,
+                "MUTE",
+                pt2(rect.right() - 25.0, rect.top() - 18.0),
+                10.0,
+                srgba(1.0, 0.2, 0.2, 1.0),
+                TextAlignment::Right,
+            );
+        }
     }
 
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
@@ -130,6 +144,11 @@ impl TileRenderer for AudioInputTile {
             srgba(0.6, 0.7, 0.9, 1.0),
             TextAlignment::Left,
         );
+
+        let muted = self.is_muted.lock().map(|v| *v).unwrap_or(true);
+        let mute_color = if muted { srgba(1.0, 0.3, 0.3, 1.0) } else { srgba(0.5, 0.5, 0.5, 1.0) };
+        draw_text(draw, FontId::PlexSansBold, "MUTE [M]", pt2(rect.right() - 100.0, rect.top() - 90.0), 14.0, mute_color, TextAlignment::Right);
+        draw_text(draw, FontId::PlexSansBold, if muted { "MUTED" } else { "ACTIVE" }, pt2(rect.right() - 100.0, rect.top() - 110.0), 14.0, mute_color, TextAlignment::Right);
 
         if let Some(err) = self.settings.last_error() {
             draw_text(
@@ -226,6 +245,12 @@ impl TileRenderer for AudioInputTile {
                 let cur = self.settings.selected();
                 self.settings.set_selected(cur);
             }
+            Key::M => {
+                let mut muted = self.is_muted.lock().unwrap();
+                *muted = !*muted;
+                self.settings.set_muted(*muted);
+                return true;
+            }
             _ => return false,
         }
 
@@ -249,6 +274,10 @@ impl TileRenderer for AudioInputTile {
                     "type": "string",
                     "default": "Default",
                     "title": "Input Device"
+                },
+                "is_muted": {
+                    "type": "boolean",
+                    "default": true
                 }
             }
         }))
@@ -261,6 +290,12 @@ impl TileRenderer for AudioInputTile {
             }
             self.settings.set_selected(device.to_string());
         }
+        if let Some(muted) = settings.get("is_muted").and_then(|v| v.as_bool()) {
+            if let Ok(mut current) = self.is_muted.lock() {
+                *current = muted;
+            }
+            self.settings.set_muted(muted);
+        }
     }
 
     fn get_settings(&self) -> serde_json::Value {
@@ -269,10 +304,23 @@ impl TileRenderer for AudioInputTile {
             .lock()
             .map(|s| s.clone())
             .unwrap_or_else(|_| "Default".to_string());
-        serde_json::json!({ "device": device })
+        let is_muted = self.is_muted.lock().map(|v| *v).unwrap_or(true);
+        serde_json::json!({ "device": device, "is_muted": is_muted })
     }
 
     fn bindable_actions(&self) -> Vec<BindableAction> {
-        vec![]
+        vec![BindableAction::new("mute", "Toggle Mute", true)]
+    }
+
+    fn execute_action(&mut self, action: &str) -> bool {
+        match action {
+            "mute" => {
+                let mut muted = self.is_muted.lock().unwrap();
+                *muted = !*muted;
+                self.settings.set_muted(*muted);
+                true
+            }
+            _ => false,
+        }
     }
 }

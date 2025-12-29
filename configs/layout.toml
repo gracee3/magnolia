@@ -16,7 +16,7 @@ is_sleeping = false
 id = "audio_viz"
 col = 0
 row = 0
-colspan = 1
+colspan = 2
 rowspan = 1
 module = "audio_viz"
 enabled = true
@@ -27,8 +27,8 @@ sensitivity = 1.0
 vis_type = "SpectrumBars"
 
 [tiles.settings.keybinds]
-next_vis = "n"
 freeze = "f"
+next_vis = "n"
 mute = "m"
 
 [[tiles]]
@@ -43,6 +43,7 @@ enabled = true
 [tiles.settings.config]
 
 [tiles.settings.keybinds]
+mute = "m"
 
 [[tiles]]
 id = "audio_input"
@@ -57,6 +58,7 @@ enabled = true
 device = "Default"
 
 [tiles.settings.keybinds]
+mute = "m"
 
 [[tiles]]
 id = "audio_dsp"
@@ -73,6 +75,7 @@ lowpass_enabled = false
 lowpass_hz = 2000.0
 
 [tiles.settings.keybinds]
+mute = "m"
 
 [[tiles]]
 id = "clock"
@@ -89,8 +92,8 @@ show_date = false
 show_seconds = true
 
 [tiles.settings.keybinds]
-toggle_seconds = "s"
 toggle_format = "t"
+toggle_seconds = "s"
 
 [[patches]]
 id = "p1"

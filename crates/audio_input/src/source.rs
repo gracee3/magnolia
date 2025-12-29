@@ -141,7 +141,9 @@ impl Source for AudioInputSource {
             let _ = self.initialize();
         }
 
-        if !self.enabled {
+        if !self.enabled || self.settings.is_muted() {
+            // Drain receiver to avoid buildup
+            while self.receiver.try_recv().is_some() {}
             tokio::time::sleep(Duration::from_millis(10)).await;
             return Some(Signal::Pulse);
         }

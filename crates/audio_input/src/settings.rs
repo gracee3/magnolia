@@ -10,6 +10,7 @@ pub struct AudioInputSettings {
     active_device: Mutex<Option<String>>,
     sample_rate: AtomicU32,
     channels: AtomicU32,
+    is_muted: AtomicBool,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +29,7 @@ impl AudioInputSettings {
             active_device: Mutex::new(None),
             sample_rate: AtomicU32::new(0),
             channels: AtomicU32::new(0),
+            is_muted: AtomicBool::new(true),
         })
     }
 
@@ -89,5 +91,13 @@ impl AudioInputSettings {
         } else {
             Some((sr, ch))
         }
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.is_muted.load(Ordering::Relaxed)
+    }
+
+    pub fn set_muted(&self, muted: bool) {
+        self.is_muted.store(muted, Ordering::Relaxed);
     }
 }
