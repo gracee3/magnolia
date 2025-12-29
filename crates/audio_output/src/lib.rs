@@ -1,3 +1,4 @@
+#[cfg(feature = "tile-rendering")]
 pub mod tile;
 mod settings;
 

@@ -5,6 +5,7 @@ use async_trait::async_trait;
 
 use talisman_core::{Processor, ModuleSchema, Port, PortDirection, DataType, Signal};
 
+#[cfg(feature = "tile-rendering")]
 pub mod tile;
 
 fn load_f32(atom: &AtomicU32) -> f32 {
