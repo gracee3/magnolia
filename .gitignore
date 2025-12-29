@@ -25,3 +25,12 @@ Thumbs.db
 
 # Talisman Configs (Keep secrets out)
 # configs/*.toml
+
+# Built plugin artifacts
+plugins/*.so
+plugins/*.dylib
+plugins/*.dll
+*.so
+*.dylib
+*.dll
+
