@@ -34,3 +34,4 @@ plugins/*.dll
 *.dylib
 *.dll
 
+configs/layout.toml
