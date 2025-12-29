@@ -10,8 +10,10 @@ use talisman_core::{TileRenderer, RenderContext, BindableAction};
 use std::collections::HashMap;
 
 use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation, LayerPositions};
-use crate::layout::{load_wheel_definition_from_json, WheelAssembler};
-use crate::rendering::{ChartSpecGenerator, ChartSpec};
+// use crate::layout::{load_wheel_definition_from_json, WheelAssembler}; // Deprecated
+// use crate::rendering::{ChartSpecGenerator, ChartSpec}; // Deprecated
+use crate::chart::{RadixChart, TransitChart, ChartSettings, ChartData};
+use crate::rendering::glyphs::Glyph;
 use crate::rendering::primitives::{Shape, Color as PrimColor, Point as PrimPoint};
 
 const DEFAULT_WHEEL_JSON: &str = r#"
@@ -135,176 +137,12 @@ impl AstroTile {
         signs[index].to_string()
     }
     
-    fn build_spec(&self, w: f32, h: f32) -> Option<ChartSpec> {
-        let positions = self.last_positions.as_ref()?;
-        
-        let wheel_def = match load_wheel_definition_from_json(DEFAULT_WHEEL_JSON) {
-            Ok(def) => def,
-            Err(_) => return None,
-        };
-        
-        let mut positions_by_layer = HashMap::new();
-        positions_by_layer.insert("now".to_string(), positions.clone());
-        
-        let empty_aspects: HashMap<String, crate::aspects::types::AspectSet> = HashMap::new();
-        
-        let wheel = WheelAssembler::build_wheel(
-            &wheel_def.wheel,
-            &positions_by_layer,
-            &empty_aspects,
-            Some(&self.eph_settings.include_objects),
-        );
-        
-        let gen = ChartSpecGenerator::new();
-        Some(gen.generate(&wheel, &empty_aspects, w, h))
-    }
+    // fn build_spec removed
 }
 
 impl Default for AstroTile {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// === Nannou Drawing Bridge ===
-
-/// Convert aphrodite Color to nannou Srgba
-fn to_srgba(c: PrimColor) -> Srgba {
-    srgba(
-        c.r as f32 / 255.0,
-        c.g as f32 / 255.0,
-        c.b as f32 / 255.0,
-        c.a as f32 / 255.0,
-    )
-}
-
-/// Map ChartSpec point to nannou Rect coordinates
-/// ChartSpec uses top-left origin with y-down; nannou uses center origin with y-up
-fn map_point(spec: &ChartSpec, rect: Rect, p: PrimPoint) -> Point2 {
-    // Convert from spec's coordinate system (0,0 = top-left, y-down) to nannou (center-origin, y-up)
-    let x_offset = p.x - spec.width / 2.0;
-    let y_offset = (spec.height / 2.0) - p.y; // Flip y-axis
-    pt2(rect.x() + x_offset, rect.y() + y_offset)
-}
-
-/// Generate polygon points for a ring segment (arc-based)
-fn ring_segment_points(
-    center: Point2,
-    r_in: f32,
-    r_out: f32,
-    start_deg: f32,
-    end_deg: f32,
-    steps: usize,
-) -> Vec<Point2> {
-    let a0 = start_deg;
-    let mut a1 = end_deg;
-    if a1 < a0 {
-        a1 += 360.0;
-    }
-    
-    let steps = steps.max(6);
-    let mut outer = Vec::with_capacity(steps + 1);
-    let mut inner = Vec::with_capacity(steps + 1);
-    
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let a_deg = a0 + (a1 - a0) * t;
-        // ChartSpec uses 0° = top, clockwise; convert to math angle (0° = right, CCW)
-        let a_rad = (90.0 - a_deg).to_radians();
-        
-        outer.push(pt2(center.x + r_out * a_rad.cos(), center.y + r_out * a_rad.sin()));
-        inner.push(pt2(center.x + r_in * a_rad.cos(), center.y + r_in * a_rad.sin()));
-    }
-    
-    // Close the polygon: outer arc -> inner arc (reversed)
-    inner.reverse();
-    outer.extend(inner);
-    outer
-}
-
-/// Draw a ChartSpec to nannou Draw
-fn draw_spec(draw: &Draw, rect: Rect, spec: &ChartSpec) {
-    // Background
-    draw.rect()
-        .xy(rect.xy())
-        .wh(rect.wh())
-        .color(to_srgba(spec.background_color));
-    
-    for shape in &spec.shapes {
-        match shape {
-            Shape::Circle { center, radius, fill, stroke: _ } => {
-                let c = map_point(spec, rect, *center);
-                if let Some(f) = fill {
-                    draw.ellipse()
-                        .xy(c)
-                        .radius(*radius)
-                        .color(to_srgba(*f));
-                }
-            }
-            Shape::Line { from, to, stroke } => {
-                draw.line()
-                    .points(map_point(spec, rect, *from), map_point(spec, rect, *to))
-                    .weight(stroke.width)
-                    .color(to_srgba(stroke.color));
-            }
-            Shape::Text { position, content, size, color, .. } => {
-                draw.text(content)
-                    .xy(map_point(spec, rect, *position))
-                    .font_size((*size).max(8.0) as u32)
-                    .color(to_srgba(*color));
-            }
-            Shape::SignSegment {
-                center,
-                start_angle,
-                end_angle,
-                radius_inner,
-                radius_outer,
-                fill,
-                ..
-            } => {
-                let c = map_point(spec, rect, *center);
-                let pts = ring_segment_points(c, *radius_inner, *radius_outer, *start_angle, *end_angle, 48);
-                if !pts.is_empty() {
-                    draw.polygon()
-                        .points(pts)
-                        .color(to_srgba(*fill));
-                }
-            }
-            Shape::PlanetGlyph {
-                center,
-                planet_id,
-                size,
-                color,
-                retrograde: _,
-            } => {
-                let c = map_point(spec, rect, *center);
-                // Planet glyph mapping
-                let glyph = match planet_id.as_str() {
-                    "sun" => "☉",
-                    "moon" => "☽",
-                    "mercury" => "☿",
-                    "venus" => "♀",
-                    "mars" => "♂",
-                    "jupiter" => "♃",
-                    "saturn" => "♄",
-                    "uranus" => "♅",
-                    "neptune" => "♆",
-                    "pluto" => "♇",
-                    "asc" => "ASC",
-                    "mc" => "MC",
-                    "ic" => "IC",
-                    "dc" => "DC",
-                    _ => planet_id,
-                };
-                draw.text(glyph)
-                    .xy(c)
-                    .font_size((*size).max(10.0) as u32)
-                    .color(to_srgba(*color));
-            }
-            _ => {
-                // Other shapes (Arc, Path, HouseSegment, AspectLine) can be added later
-            }
-        }
     }
 }
 
@@ -368,19 +206,36 @@ impl TileRenderer for AstroTile {
     
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Draw the full astrological chart in maximized mode
-        if let Some(spec) = self.build_spec(rect.w(), rect.h()) {
-            draw_spec(draw, rect, &spec);
-        } else {
-            // Fallback if chart generation fails
-            draw.rect()
-                .xy(rect.xy())
-                .wh(rect.wh())
-                .color(BLACK);
-            draw.text("No ephemeris data available")
-                .xy(rect.xy())
-                .color(WHITE)
-                .font_size(16);
-        }
+        let Some(positions) = &self.last_positions else {
+            draw.rect().xy(rect.xy()).wh(rect.wh()).color(BLACK);
+            draw.text("No data").xy(rect.xy()).color(WHITE);
+            return false;
+        };
+
+        // Convert data
+        let data: ChartData = positions.into();
+        
+        // Setup Chart
+        // TODO: Load settings from tile configuration or user prefs
+        let settings = ChartSettings::default();
+        
+        let min_dim = rect.w().min(rect.h());
+        let radius = min_dim / 2.0 - settings.margin; // Margin
+        
+        // Create Radix Chart
+        let radix = RadixChart::new(rect.x(), rect.y(), radius, &data, &settings);
+        
+        // Draw Layers
+        radix.draw_bg(draw);
+        radix.draw_universe(draw);
+        radix.draw_cusps(draw);
+        radix.draw_axis(draw);
+        radix.draw_points(draw);
+        
+        // TODO: Draw transit if available
+        // let transit = TransitChart::new(...);
+        // transit.draw_points(draw);
+        // transit.draw_cusps(draw);
         
         false
     }

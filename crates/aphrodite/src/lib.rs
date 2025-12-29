@@ -9,6 +9,8 @@ pub mod vedic;
 pub mod western;
 pub mod layout;
 pub mod rendering;
+pub mod chart;
+
 
 #[cfg(feature = "tile-rendering")]
 pub mod tile;
