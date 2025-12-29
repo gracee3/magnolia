@@ -3,6 +3,7 @@ use crate::ui::controls::{List, UiInput, UiNav};
 use crate::ui::modals::{PatchBayModalState, PatchBayPane};
 use crate::ui::fullscreen_modal::{ModalAnim, draw_modal_header, draw_modal_background, calculate_modal_rect};
 use talisman_core::{PatchBay, PortDirection};
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 pub fn render(
     draw: &Draw,
@@ -78,10 +79,15 @@ pub fn render(
                 .color(CYAN);
         }
 
-        draw.text(name)
-            .xy(rect.xy())
-            .color(color)
-            .font_size(14);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            name,
+            rect.xy(),
+            14.0,
+            color.into(),
+            TextAlignment::Center,
+        );
     });
     
     // -- Ports Pane --
@@ -121,20 +127,35 @@ pub fn render(
              draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.0, 0.2, 0.2, 0.2));
         }
 
-        draw.text(dir_str)
-            .x_y(rect.left() + 20.0, rect.y())
-            .color(if is_input { GREEN } else { ORANGE })
-            .font_size(10);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            dir_str,
+            pt2(rect.left() + 20.0, rect.y()),
+            10.0,
+            if is_input { GREEN } else { ORANGE },
+            TextAlignment::Left,
+        );
             
-        draw.text(&port.label)
-             .x_y(rect.x(), rect.y())
-             .color(color)
-             .font_size(14);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            &port.label,
+            pt2(rect.x(), rect.y()),
+            14.0,
+            color,
+            TextAlignment::Center,
+        );
              
-        draw.text(&format!("{:?}", port.data_type))
-            .x_y(rect.right() - 40.0, rect.y())
-            .color(rgba(0.5, 0.5, 0.5, 0.8))
-            .font_size(10);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("{:?}", port.data_type),
+            pt2(rect.right() - 40.0, rect.y()),
+            10.0,
+            rgba(0.5, 0.5, 0.5, 0.8),
+            TextAlignment::Right,
+        );
     });
 
     // -- Patches Pane --
@@ -153,10 +174,15 @@ pub fn render(
              patch.source_module, patch.source_port,
              patch.sink_module, patch.sink_port);
              
-         draw.text(&label)
-             .xy(rect.xy())
-             .color(color)
-             .font_size(12);
+         draw_text(
+             draw,
+             FontId::PlexMonoRegular,
+             &label,
+             rect.xy(),
+             12.0,
+             color,
+             TextAlignment::Center,
+         );
     });
     
     // Draw Staged Connection Line
@@ -168,10 +194,15 @@ pub fn render(
             crate::patch_visualizer::draw_cable(draw, start, end, MAGENTA.into(), 2.0);
                 
             // Indicator text at start
-            draw.text("SOURCE")
-                .xy(start + pt2(0.0, 15.0))
-                .color(MAGENTA)
-                .font_size(10);
+            draw_text(
+                draw,
+                FontId::PlexSansBold,
+                "SOURCE",
+                start + pt2(0.0, 15.0),
+                10.0,
+                MAGENTA,
+                TextAlignment::Center,
+            );
         } else {
              // Source not visible (scrolled out or module not selected).
              // Draw line entering from left side of Ports pane
@@ -197,10 +228,15 @@ pub fn render(
         PatchBayPane::Patches => "[Enter] to Disconnect, [Del] Delete",
     };
     
-    draw.text(hint)
-        .xy(pt2(rect.x(), rect.bottom() + 30.0))
-        .color(CYAN)
-        .font_size(14);
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        hint,
+        pt2(rect.x(), rect.bottom() + 30.0),
+        14.0,
+        CYAN,
+        TextAlignment::Center,
+    );
 }
 
 /// Handle key input. Returns true if the key event was consumed by the modal.

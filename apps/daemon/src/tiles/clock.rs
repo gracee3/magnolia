@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{TileRenderer, RenderContext, BindableAction};
 use crate::ui::controls;
 use std::sync::Mutex;
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeFormat {
@@ -75,7 +76,7 @@ impl TileRenderer for ClockTile {
         self.current_time = self.format_time();
     }
     
-    fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
+    fn render_monitor(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) {
         // Background
         draw.rect()
             .xy(rect.xy())
@@ -83,17 +84,32 @@ impl TileRenderer for ClockTile {
             .color(srgba(0.05, 0.05, 0.1, 0.9));
         
         // Time display
-        let font_size = (rect.h() * 0.3).min(72.0) as u32;
-        draw.text(&self.current_time)
-            .xy(rect.xy())
-            .color(srgb(0.0, 1.0, 1.0))
-            .font_size(font_size);
+        let font_size = (rect.h() * 0.3).min(72.0);
+        
+        // Subtle pulse animation
+        let pulse = (ctx.time.elapsed().as_secs_f32() * 1.5).sin() * 0.05 + 0.95;
+        let color = srgba(0.0, 1.0, 1.0, pulse);
+
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &self.current_time,
+            rect.xy(),
+            font_size,
+            color,
+            TextAlignment::Center,
+        );
         
         // Label
-        draw.text("CLOCK")
-            .xy(pt2(rect.x(), rect.top() - 20.0))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            "CLOCK",
+            pt2(rect.x(), rect.top() - 20.0),
+            12.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
+            TextAlignment::Center,
+        );
     }
     
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
@@ -120,11 +136,16 @@ impl TileRenderer for ClockTile {
             rect.h() * 0.3,
         );
         
-        let font_size = (preview_rect.h() * 0.6).min(120.0) as u32;
-        draw.text(&self.current_time)
-            .xy(preview_rect.xy())
-            .color(srgb(0.0, 1.0, 1.0))
-            .font_size(font_size);
+        let font_size = (preview_rect.h() * 0.6).min(120.0);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &self.current_time,
+            preview_rect.xy(),
+            font_size,
+            srgb(0.0, 1.0, 1.0).into(),
+            TextAlignment::Center,
+        );
         
         // Controls list (keyboard-only)
         let list_rect = Rect::from_x_y_w_h(

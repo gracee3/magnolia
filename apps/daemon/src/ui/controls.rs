@@ -6,6 +6,7 @@
 #![allow(dead_code)] // Used progressively across tiles/modals; keep available without warning spam.
 
 use nannou::prelude::*;
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 /// Spacing constants tuned for fullscreen "control mode" UIs.
 pub const ROW_H: f32 = 34.0;
@@ -25,25 +26,39 @@ impl Default for UiStyle {
 }
 
 pub fn draw_heading(draw: &Draw, pos: Point2, text: &str, style: UiStyle) {
-    draw.text(text)
-        .xy(pos)
-        .color(rgba(0.0, 1.0, 1.0, style.alpha))
-        .font_size(18);
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        text,
+        pos,
+        18.0,
+        rgba(0.0, 1.0, 1.0, style.alpha).into(),
+        TextAlignment::Center,
+    );
 }
 
 pub fn draw_subtitle(draw: &Draw, pos: Point2, text: &str, style: UiStyle) {
-    draw.text(text)
-        .xy(pos)
-        .color(rgba(0.55, 0.55, 0.6, style.alpha))
-        .font_size(12);
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        text,
+        pos,
+        12.0,
+        rgba(0.55, 0.55, 0.6, style.alpha).into(),
+        TextAlignment::Center,
+    );
 }
 
 pub fn draw_section(draw: &Draw, pos: Point2, text: &str, style: UiStyle) {
-    draw.text(text)
-        .xy(pos)
-        .color(rgba(0.4, 0.5, 0.55, style.alpha))
-        .font_size(11)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        text,
+        pos,
+        11.0,
+        rgba(0.4, 0.5, 0.55, style.alpha).into(),
+        TextAlignment::Left,
+    );
 }
 
 fn row_bg(draw: &Draw, rect: Rect, focused: bool, style: UiStyle) {
@@ -66,11 +81,15 @@ fn row_bg(draw: &Draw, rect: Rect, focused: bool, style: UiStyle) {
 pub fn draw_toggle_row(draw: &Draw, rect: Rect, label: &str, value: bool, focused: bool, style: UiStyle) {
     row_bg(draw, rect, focused, style);
 
-    draw.text(label)
-        .xy(pt2(rect.left() + LABEL_X_PAD, rect.y()))
-        .color(rgba(0.85, 0.85, 0.88, style.alpha))
-        .font_size(14)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        label,
+        pt2(rect.left() + LABEL_X_PAD, rect.y()),
+        14.0,
+        rgba(0.85, 0.85, 0.88, style.alpha).into(),
+        TextAlignment::Left,
+    );
 
     let pill = if value { "ON" } else { "OFF" };
     let pill_color = if value {
@@ -79,11 +98,15 @@ pub fn draw_toggle_row(draw: &Draw, rect: Rect, label: &str, value: bool, focuse
         rgba(0.5, 0.5, 0.55, style.alpha)
     };
 
-    draw.text(pill)
-        .xy(pt2(rect.right() - VALUE_X_PAD, rect.y()))
-        .color(pill_color)
-        .font_size(14)
-        .right_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        pill,
+        pt2(rect.right() - VALUE_X_PAD, rect.y()),
+        14.0,
+        pill_color.into(),
+        TextAlignment::Right,
+    );
 }
 
 pub fn draw_stepper_row(
@@ -96,17 +119,25 @@ pub fn draw_stepper_row(
 ) {
     row_bg(draw, rect, focused, style);
 
-    draw.text(label)
-        .xy(pt2(rect.left() + LABEL_X_PAD, rect.y()))
-        .color(rgba(0.85, 0.85, 0.88, style.alpha))
-        .font_size(14)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        label,
+        pt2(rect.left() + LABEL_X_PAD, rect.y()),
+        14.0,
+        rgba(0.85, 0.85, 0.88, style.alpha).into(),
+        TextAlignment::Left,
+    );
 
-    draw.text(&format!("< {} >", value_text))
-        .xy(pt2(rect.right() - VALUE_X_PAD, rect.y()))
-        .color(rgba(0.0, 1.0, 1.0, style.alpha))
-        .font_size(14)
-        .right_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        &format!("< {} >", value_text),
+        pt2(rect.right() - VALUE_X_PAD, rect.y()),
+        14.0,
+        rgba(0.0, 1.0, 1.0, style.alpha).into(),
+        TextAlignment::Right,
+    );
 }
 
 /// Helper: compute a vertical stack of row rects inside a container.
@@ -266,11 +297,15 @@ impl<'a> Form<'a> {
         // Render manually since we don't have draw_slider_row yet
         row_bg(draw, rect, focused, UiStyle::default());
         
-        draw.text(label)
-            .xy(pt2(rect.left() + LABEL_X_PAD, rect.y()))
-            .color(rgba(0.85, 0.85, 0.88, 1.0))
-            .font_size(14)
-            .left_justify();
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            label,
+            pt2(rect.left() + LABEL_X_PAD, rect.y()),
+            14.0,
+            rgba(0.85, 0.85, 0.88, 1.0).into(),
+            TextAlignment::Left,
+        );
             
         // Bar
         let bar_w = rect.w() * 0.4;
@@ -365,10 +400,15 @@ impl<'a> List<'a> {
             .stroke_weight(1.0);
             
         if self.len == 0 {
-            draw.text("No items")
-                .xy(list_rect.xy())
-                .color(GREY)
-                .font_size(12);
+            draw_text(
+                draw,
+                FontId::PlexSansRegular,
+                "No items",
+                list_rect.xy(),
+                12.0,
+                GREY.into(),
+                TextAlignment::Center,
+            );
             return;
         }
 

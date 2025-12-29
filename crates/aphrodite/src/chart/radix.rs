@@ -83,7 +83,7 @@ impl<'a> RadixChart<'a> {
             let c_glyph = parse_hex_color(&self.settings.color_signs);
             let glyph_color = rgba(c_glyph.red, c_glyph.green, c_glyph.blue, 1.0);
             
-            draw_glyph(draw, *sign, pos, self.settings.symbol_scale * 20.0, glyph_color, 1.0);
+            draw_glyph(draw, *sign, pos, self.settings.symbol_scale * 20.0, glyph_color);
         }
     }
 

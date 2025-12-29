@@ -7,6 +7,7 @@ use nannou::prelude::*;
 // use nannou_egui::egui removed
 use std::sync::{Arc, Mutex};
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 pub struct TextInputTile {
     text_buffer: Arc<Mutex<String>>,
@@ -61,32 +62,51 @@ impl TileRenderer for TextInputTile {
             text.replace('\n', " ").replace('\r', "")
         };
         
-        draw.text(&preview)
-            .xy(rect.xy())
-            .w(rect.w() - 20.0)
-            .color(srgba(0.6, 0.6, 0.6, 1.0))
-            .font_size(14);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            &preview,
+            rect.xy(),
+            14.0,
+            srgba(0.6, 0.6, 0.6, 1.0),
+            TextAlignment::Center,
+        );
         
         // Word count indicator
         let word_count = self.text_buffer.lock()
             .map(|t| t.split_whitespace().count())
             .unwrap_or(0);
-        draw.text(&format!("{} words", word_count))
-            .xy(pt2(rect.right() - 50.0, rect.bottom() + 15.0))
-            .color(srgba(0.4, 0.4, 0.4, 0.8))
-            .font_size(10);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("{} words", word_count),
+            pt2(rect.right() - 50.0, rect.bottom() + 15.0),
+            10.0,
+            srgba(0.4, 0.4, 0.4, 0.8),
+            TextAlignment::Right,
+        );
         
         // Label
-        draw.text("TEXT INPUT")
-            .xy(pt2(rect.x(), rect.top() - 15.0))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(11);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "TEXT INPUT",
+            pt2(rect.x(), rect.top() - 15.0),
+            11.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
+            TextAlignment::Center,
+        );
         
         // Edit mode hint
-        draw.text("⏎ to edit")
-            .xy(pt2(rect.left() + 40.0, rect.bottom() + 15.0))
-            .color(srgba(0.0, 0.6, 0.6, 0.6))
-            .font_size(10);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            "⏎ to edit",
+            pt2(rect.left() + 40.0, rect.bottom() + 15.0),
+            10.0,
+            srgba(0.0, 0.6, 0.6, 0.6),
+            TextAlignment::Left,
+        );
     }
     
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
@@ -97,10 +117,15 @@ impl TileRenderer for TextInputTile {
             .color(srgba(0.02, 0.02, 0.05, 0.98));
         
         // Title
-        draw.text("TEXT EDITOR")
-            .xy(pt2(rect.x(), rect.top() - 30.0))
-            .color(CYAN)
-            .font_size(18);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "TEXT EDITOR",
+            pt2(rect.x(), rect.top() - 30.0),
+            18.0,
+            CYAN,
+            TextAlignment::Center,
+        );
         
         // Word count
         let word_count = self.text_buffer.lock()
@@ -110,10 +135,15 @@ impl TileRenderer for TextInputTile {
             .map(|t| t.len())
             .unwrap_or(0);
         
-        draw.text(&format!("{} words | {} chars", word_count, char_count))
-            .xy(pt2(rect.x(), rect.top() - 55.0))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("{} words | {} chars", word_count, char_count),
+            pt2(rect.x(), rect.top() - 55.0),
+            12.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
+            TextAlignment::Center,
+        );
         
         false
     }

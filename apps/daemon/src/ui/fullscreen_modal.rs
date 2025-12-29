@@ -6,6 +6,7 @@
 #![allow(dead_code)] // Framework functions used progressively during migration
 
 use nannou::prelude::*;
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 /// Animation speed for modal open/close (per frame)
 pub const ANIM_SPEED: f32 = 0.12;
@@ -134,17 +135,26 @@ pub fn draw_modal_header(draw: &Draw, rect: Rect, title: &str, anim: &ModalAnim)
         .stroke_weight(1.0);
     
     // Title text
-    draw.text(title)
-        .xy(pt2(rect.left() + CONTENT_PADDING + 100.0, rect.top() - HEADER_HEIGHT / 2.0))
-        .color(rgba(0.0, 1.0, 1.0, alpha))
-        .font_size(20)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        title,
+        pt2(rect.left() + CONTENT_PADDING + 100.0, rect.top() - HEADER_HEIGHT / 2.0),
+        20.0,
+        rgba(0.0, 1.0, 1.0, alpha).into(),
+        TextAlignment::Left,
+    );
     
     // ESC hint
-    draw.text("[ESC] Close")
-        .xy(pt2(rect.right() - 60.0, rect.top() - HEADER_HEIGHT / 2.0))
-        .color(rgba(0.4, 0.4, 0.4, alpha))
-        .font_size(12);
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        "[ESC] Close",
+        pt2(rect.right() - 60.0, rect.top() - HEADER_HEIGHT / 2.0),
+        12.0,
+        rgba(0.4, 0.4, 0.4, alpha).into(),
+        TextAlignment::Right,
+    );
     
     // Return content rect (below header)
     Rect::from_corners(
@@ -155,53 +165,77 @@ pub fn draw_modal_header(draw: &Draw, rect: Rect, title: &str, anim: &ModalAnim)
 
 /// Draw a section header within the modal content
 pub fn draw_section_header(draw: &Draw, y: f32, left: f32, text: &str, alpha: f32) {
-    draw.text(text)
-        .xy(pt2(left + 5.0, y))
-        .color(rgba(0.4, 0.4, 0.5, alpha))
-        .font_size(11)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        text,
+        pt2(left + 5.0, y),
+        11.0,
+        rgba(0.4, 0.4, 0.5, alpha),
+        TextAlignment::Left,
+    );
 }
 
 /// Draw a text label
 pub fn draw_label(draw: &Draw, x: f32, y: f32, text: &str, alpha: f32) {
-    draw.text(text)
-        .xy(pt2(x, y))
-        .color(rgba(0.8, 0.8, 0.8, alpha))
-        .font_size(14)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        text,
+        pt2(x, y),
+        14.0,
+        rgba(0.8, 0.8, 0.8, alpha),
+        TextAlignment::Left,
+    );
 }
 
 /// Draw a highlighted/selected label
 pub fn draw_label_highlight(draw: &Draw, x: f32, y: f32, text: &str, alpha: f32) {
-    draw.text(text)
-        .xy(pt2(x, y))
-        .color(rgba(0.0, 1.0, 1.0, alpha))
-        .font_size(14)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        text,
+        pt2(x, y),
+        14.0,
+        rgba(0.0, 1.0, 1.0, alpha),
+        TextAlignment::Left,
+    );
 }
 
 /// Draw a muted/secondary label
 pub fn draw_label_muted(draw: &Draw, x: f32, y: f32, text: &str, alpha: f32) {
-    draw.text(text)
-        .xy(pt2(x, y))
-        .color(rgba(0.5, 0.5, 0.5, alpha))
-        .font_size(12)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        text,
+        pt2(x, y),
+        12.0,
+        rgba(0.5, 0.5, 0.5, alpha),
+        TextAlignment::Left,
+    );
 }
 
 /// Draw a value display (e.g., for stats)
 pub fn draw_value(draw: &Draw, x: f32, y: f32, label: &str, value: &str, alpha: f32) {
-    draw.text(label)
-        .xy(pt2(x, y))
-        .color(rgba(0.6, 0.6, 0.6, alpha))
-        .font_size(13)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        label,
+        pt2(x, y),
+        13.0,
+        rgba(0.6, 0.6, 0.6, alpha),
+        TextAlignment::Left,
+    );
     
-    draw.text(value)
-        .xy(pt2(x + 120.0, y))
-        .color(rgba(0.0, 1.0, 1.0, alpha))
-        .font_size(13)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexMonoRegular,
+        value,
+        pt2(x + 120.0, y),
+        13.0,
+        rgba(0.0, 1.0, 1.0, alpha),
+        TextAlignment::Left,
+    );
 }
 
 /// Draw a button-like region (returns true if it would be "hovered" at given position)
@@ -242,10 +276,15 @@ pub fn draw_button(
         .stroke(border_color)
         .stroke_weight(1.5);
     
-    draw.text(text)
-        .xy(rect.xy())
-        .color(text_color)
-        .font_size(14);
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        text,
+        rect.xy(),
+        14.0,
+        text_color,
+        TextAlignment::Center,
+    );
 }
 
 /// Draw a danger/warning button
@@ -280,10 +319,15 @@ pub fn draw_button_danger(draw: &Draw, rect: Rect, text: &str, selected: bool, a
         .stroke(border_color)
         .stroke_weight(1.5);
     
-    draw.text(text)
-        .xy(rect.xy())
-        .color(text_color)
-        .font_size(14);
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        text,
+        rect.xy(),
+        14.0,
+        text_color,
+        TextAlignment::Center,
+    );
 }
 
 /// Draw a list item (selectable)
@@ -313,11 +357,15 @@ pub fn draw_list_item(
         rgba(0.7, 0.7, 0.7, alpha)
     };
     
-    draw.text(text)
-        .xy(pt2(rect.left() + 15.0, rect.y()))
-        .color(text_color)
-        .font_size(14)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        text,
+        pt2(rect.left() + 15.0, rect.y()),
+        14.0,
+        text_color,
+        TextAlignment::Left,
+    );
 }
 
 /// Draw a horizontal separator line
@@ -344,9 +392,13 @@ pub fn draw_status(draw: &Draw, x: f32, y: f32, status: &str, is_active: bool, a
         .color(color);
     
     // Status text
-    draw.text(status)
-        .xy(pt2(x + 15.0, y))
-        .color(color)
-        .font_size(13)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        status,
+        pt2(x + 15.0, y),
+        13.0,
+        color,
+        TextAlignment::Left,
+    );
 }

@@ -3,6 +3,7 @@ use nannou::prelude::*;
 use serde_json::Value;
 use tokio::sync::mpsc::Sender;
 use std::sync::Mutex;
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 pub struct SchemaTile {
     id: String,
@@ -43,10 +44,15 @@ impl TileRenderer for SchemaTile {
             .stroke_weight(1.0);
             
         // Name
-        draw.text(&self.name)
-            .xy(rect.xy())
-            .color(WHITESMOKE)
-            .font_size(14);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            &self.name,
+            rect.xy(),
+            14.0,
+            WHITESMOKE.into(),
+            TextAlignment::Center,
+        );
             
         // Status indicator (green dot for "Connected" since we have a sender)
         draw.ellipse()
@@ -62,15 +68,25 @@ impl TileRenderer for SchemaTile {
             .wh(rect.wh())
             .color(rgba(0.0, 0.0, 0.0, 0.9));
             
-        draw.text(&format!("{} - SETTINGS", self.name.to_uppercase()))
-            .xy(rect.xy())
-            .color(CYAN)
-            .font_size(32);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            &format!("{} - SETTINGS", self.name.to_uppercase()),
+            rect.xy(),
+            32.0,
+            CYAN.into(),
+            TextAlignment::Center,
+        );
             
-        draw.text("Custom Nannou controls coming soon...")
-            .xy(pt2(rect.x(), rect.y() - 40.0))
-            .color(GRAY)
-            .font_size(14);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            "Custom Nannou controls coming soon...",
+            pt2(rect.x(), rect.y() - 40.0),
+            14.0,
+            GRAY.into(),
+            TextAlignment::Center,
+        );
             
         false
     }

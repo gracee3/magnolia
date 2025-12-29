@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
 use talisman_core::{TileRenderer, RenderContext};
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 use crate::{AudioOutputState, AudioOutputSettings};
 
@@ -38,30 +39,50 @@ impl TileRenderer for AudioOutputTile {
         let latency_ms = self.state.latency_us() as f32 / 1000.0;
         let level = self.state.level_milli() as f32 / 1000.0;
 
-        draw.text("AUDIO OUT")
-            .xy(pt2(rect.x(), rect.top() - 18.0))
-            .color(srgba(0.6, 0.8, 0.9, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "AUDIO OUT",
+            pt2(rect.x(), rect.top() - 18.0),
+            12.0,
+            srgba(0.6, 0.8, 0.9, 1.0),
+            TextAlignment::Center,
+        );
 
-        draw.text(&format!("Latency: {:.1} ms", latency_ms))
-            .xy(pt2(rect.x(), rect.y() + 10.0))
-            .color(srgba(0.5, 0.7, 0.9, 1.0))
-            .font_size(11);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("Latency: {:.1} ms", latency_ms),
+            pt2(rect.x(), rect.y() + 10.0),
+            11.0,
+            srgba(0.5, 0.7, 0.9, 1.0),
+            TextAlignment::Center,
+        );
 
         let selected = self
             .selected
             .lock()
             .map(|s| s.clone())
             .unwrap_or_else(|_| "Default".to_string());
-        draw.text(&format!("Device: {}", selected))
-            .xy(pt2(rect.x(), rect.y() - 6.0))
-            .color(srgba(0.5, 0.7, 0.9, 1.0))
-            .font_size(11);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            &format!("Device: {}", selected),
+            pt2(rect.x(), rect.y() - 6.0),
+            11.0,
+            srgba(0.5, 0.7, 0.9, 1.0),
+            TextAlignment::Center,
+        );
 
-        draw.text(&format!("Level: {:.2}", level))
-            .xy(pt2(rect.x(), rect.y() - 12.0))
-            .color(srgba(0.7, 0.9, 0.6, 1.0))
-            .font_size(11);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("Level: {:.2}", level),
+            pt2(rect.x(), rect.y() - 22.0),
+            11.0,
+            srgba(0.7, 0.9, 0.6, 1.0),
+            TextAlignment::Center,
+        );
     }
 
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
