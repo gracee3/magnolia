@@ -131,21 +131,18 @@ pub fn glyph_ops_bounds(glyph: Glyph) -> Option<(&'static [GlyphOp], GlyphBounds
 }
 
 #[cfg(feature = "tile-rendering")]
-pub fn draw_glyph(draw: &Draw, glyph: Glyph, center: Point2, size: f32, color: Srgba, stroke_width: f32) {
+pub fn draw_glyph(draw: &Draw, glyph: Glyph, center: Point2, size: f32, color: Srgba) {
     let rect = Rect::from_xy_wh(center, vec2(size, size));
     if let Some((ops, bounds)) = glyph_ops_bounds(glyph) {
         let path = build_path_fit(ops, bounds, rect);
         draw.path()
-            .stroke()
-            .weight(stroke_width)
+            .fill()
             .color(color)
             .events(path.iter());
     } else {
         draw.ellipse()
             .xy(center)
             .radius(size / 2.0)
-            .no_fill()
-            .stroke_color(color)
-            .stroke_weight(stroke_width);
+            .color(color);
     }
 }

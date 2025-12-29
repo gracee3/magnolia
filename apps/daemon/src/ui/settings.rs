@@ -2,6 +2,7 @@ use nannou::prelude::*;
 use crate::ui::controls::{Form, UiInput, UiNav};
 use crate::ui::modals::GlobalSettingsState;
 use crate::ui::fullscreen_modal::{ModalAnim, draw_modal_header, draw_modal_background, calculate_modal_rect};
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 pub fn render(
     draw: &Draw,
@@ -27,11 +28,15 @@ pub fn render(
     let mut form = Form::begin(&state.focus, form_rect);
     
     // Audio Settings
-    draw.text("AUDIO ENGINE")
-        .xy(pt2(form_rect.left() + 10.0, form_rect.top() - 20.0))
-        .color(CYAN)
-        .font_size(14)
-        .left_justify();
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        "AUDIO ENGINE",
+        pt2(form_rect.left() + 10.0, form_rect.top() - 20.0),
+        14.0,
+        CYAN.into(),
+        TextAlignment::Left,
+    );
         
     form.stepper_row(
         draw, 

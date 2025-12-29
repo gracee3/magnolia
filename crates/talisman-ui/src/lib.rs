@@ -227,12 +227,63 @@ pub fn build_path_fit(ops: &[GlyphOp], bounds: GlyphBounds, rect: Rect) -> Path 
 }
 
 #[cfg(feature = "tile-rendering")]
-pub fn draw_glyph(draw: &Draw, ops: &[GlyphOp], bounds: GlyphBounds, center: Point2, size: f32, color: Srgba, stroke_width: f32) {
+pub fn draw_glyph(draw: &Draw, ops: &[GlyphOp], bounds: GlyphBounds, center: Point2, size: f32, color: Srgba) {
     let rect = Rect::from_xy_wh(center, vec2(size, size));
     let path = build_path_fit(ops, bounds, rect);
     draw.path()
-        .stroke()
-        .weight(stroke_width)
+        .fill()
         .color(color)
         .events(path.iter());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+#[cfg(feature = "tile-rendering")]
+pub fn text_width(font: FontId, text: &str, size: f32) -> f32 {
+    let mut width = 0.0;
+    for c in text.chars() {
+        if let Some(metrics) = glyph_metrics(font, c) {
+            width += metrics.advance_width * size;
+        } else if c == ' ' {
+            width += 0.3 * size;
+        }
+    }
+    width
+}
+
+#[cfg(feature = "tile-rendering")]
+pub fn draw_text(
+    draw: &Draw,
+    font: FontId,
+    text: &str,
+    pos: Point2,
+    size: f32,
+    color: Srgba,
+    align: TextAlignment,
+) {
+    let total_width = text_width(font, text, size);
+    let mut x_offset = match align {
+        TextAlignment::Left => 0.0,
+        TextAlignment::Center => -total_width / 2.0,
+        TextAlignment::Right => -total_width,
+    };
+
+    for c in text.chars() {
+        if let Some((ops, bounds)) = font_glyph_ops_bounds(font, c) {
+            if let Some(metrics) = glyph_metrics(font, c) {
+                let glyph_center = pt2(pos.x + x_offset + metrics.advance_width * size * 0.5, pos.y);
+                let rect = Rect::from_xy_wh(glyph_center, vec2(size, size));
+                let path = build_path_fit(ops, bounds, rect);
+                draw.path().fill().color(color).events(path.iter());
+                x_offset += metrics.advance_width * size;
+            }
+        } else if c == ' ' {
+            x_offset += 0.3 * size;
+        }
+    }
 }

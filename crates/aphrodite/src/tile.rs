@@ -4,6 +4,7 @@
 //! Control mode: Full astrological wheel chart with planets, houses, and signs
 
 use nannou::prelude::*;
+use talisman_ui::{FontId, draw_text, TextAlignment};
 use chrono::{Utc, TimeZone, FixedOffset};
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
 
@@ -196,10 +197,15 @@ impl TileRenderer for AstroTile {
         } else {
             format!("☉ Sun in {}", self.sun_sign)
         };
-        draw.text(&sun_text)
-            .xy(pt2(rect.x(), rect.y() + line_height * 0.5))
-            .color(srgb(1.0, 0.8, 0.2))
-            .font_size(font_size);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            &sun_text,
+            pt2(rect.x(), rect.y() + line_height * 0.5),
+            font_size as f32,
+            srgb(1.0, 0.8, 0.2),
+            TextAlignment::Center,
+        );
         
         // Moon line
         if self.show_moon {
@@ -208,24 +214,42 @@ impl TileRenderer for AstroTile {
             } else {
                 format!("☽ Moon in {}", self.moon_sign)
             };
-            draw.text(&moon_text)
-                .xy(pt2(rect.x(), rect.y() - line_height * 0.5))
-                .color(srgb(0.8, 0.8, 1.0))
-                .font_size(font_size);
+            draw_text(
+                draw,
+                FontId::PlexSansBold,
+                &moon_text,
+                pt2(rect.x(), rect.y() - line_height * 0.5),
+                font_size as f32,
+                srgb(0.8, 0.8, 1.0),
+                TextAlignment::Center,
+            );
         }
         
         // Label
-        draw.text("ASTRO")
-            .xy(pt2(rect.x(), rect.top() - 20.0))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "ASTRO",
+            pt2(rect.x(), rect.top() - 20.0),
+            12.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
+            TextAlignment::Center,
+        );
     }
     
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Draw the full astrological chart in maximized mode
         let Some(positions) = &self.radix_positions else {
             draw.rect().xy(rect.xy()).wh(rect.wh()).color(BLACK);
-            draw.text("No data").xy(rect.xy()).color(WHITE);
+            draw_text(
+                draw,
+                FontId::PlexSansBold,
+                "No data",
+                rect.xy(),
+                14.0,
+                WHITE,
+                TextAlignment::Center,
+            );
             return false;
         };
 

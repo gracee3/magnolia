@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 use crate::AudioInputSettings;
 
@@ -39,15 +40,25 @@ impl TileRenderer for AudioInputTile {
             .map(|s| s.clone())
             .unwrap_or_else(|_| "Default".to_string());
 
-        draw.text("AUDIO INPUT")
-            .xy(pt2(rect.x(), rect.top() - 18.0))
-            .color(srgba(0.6, 0.8, 0.9, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "AUDIO INPUT",
+            pt2(rect.x(), rect.top() - 18.0),
+            12.0,
+            srgba(0.6, 0.8, 0.9, 1.0),
+            TextAlignment::Center,
+        );
 
-        draw.text(&format!("Device: {}", selected))
-            .xy(pt2(rect.x(), rect.y() - 4.0))
-            .color(srgba(0.5, 0.7, 0.9, 1.0))
-            .font_size(11);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("Device: {}", selected),
+            pt2(rect.x(), rect.y() - 4.0),
+            11.0,
+            srgba(0.5, 0.7, 0.9, 1.0),
+            TextAlignment::Center,
+        );
     }
 
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {

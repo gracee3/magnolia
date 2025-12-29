@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
 use talisman_core::{TileRenderer, RenderContext};
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 use crate::AudioDspState;
 
@@ -40,21 +41,36 @@ impl TileRenderer for AudioDspTile {
         let lowpass = self.lowpass_enabled.lock().map(|v| *v).unwrap_or(false);
         let cutoff = self.lowpass_hz.lock().map(|v| *v).unwrap_or(2000.0);
 
-        draw.text("AUDIO DSP")
-            .xy(pt2(rect.x(), rect.top() - 18.0))
-            .color(srgba(0.6, 0.8, 0.9, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "AUDIO DSP",
+            pt2(rect.x(), rect.top() - 18.0),
+            12.0,
+            srgba(0.6, 0.8, 0.9, 1.0),
+            TextAlignment::Center,
+        );
 
-        draw.text(&format!("Gain: {:.2}", gain))
-            .xy(pt2(rect.x(), rect.y() + 8.0))
-            .color(srgba(0.5, 0.7, 0.9, 1.0))
-            .font_size(11);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("Gain: {:.2}", gain),
+            pt2(rect.x(), rect.y() + 8.0),
+            11.0,
+            srgba(0.5, 0.7, 0.9, 1.0),
+            TextAlignment::Center,
+        );
 
         let lp_label = if lowpass { "On" } else { "Off" };
-        draw.text(&format!("Lowpass: {} @ {:.0} Hz", lp_label, cutoff))
-            .xy(pt2(rect.x(), rect.y() - 12.0))
-            .color(srgba(0.5, 0.7, 0.9, 1.0))
-            .font_size(11);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("Lowpass: {} @ {:.0} Hz", lp_label, cutoff),
+            pt2(rect.x(), rect.y() - 12.0),
+            11.0,
+            srgba(0.5, 0.7, 0.9, 1.0),
+            TextAlignment::Center,
+        );
     }
 
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {

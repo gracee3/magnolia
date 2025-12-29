@@ -15,6 +15,7 @@ use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use talisman_core::{TileRenderer, RenderContext, BindableAction, TileError};
 use talisman_signals::ring_buffer::RingBufferReceiver;
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 /// Available visualization types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -480,33 +481,53 @@ impl TileRenderer for AudioVisTile {
         
         // Status indicators
         let status_y = rect.top() - 12.0;
-        draw.text(self.vis_type.label())
-            .xy(pt2(rect.x(), status_y))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(10);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            self.vis_type.label(),
+            pt2(rect.x(), status_y),
+            10.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
+            TextAlignment::Center,
+        );
         
         let mut indicator_x = rect.right() - 35.0;
         if self.is_muted {
-            draw.text("MUTE")
-                .xy(pt2(indicator_x, status_y))
-                .color(srgba(1.0, 0.3, 0.3, 0.8))
-                .font_size(9);
+            draw_text(
+                draw,
+                FontId::PlexSansBold,
+                "MUTE",
+                pt2(indicator_x, status_y),
+                9.0,
+                srgba(1.0, 0.3, 0.3, 0.8),
+                TextAlignment::Center,
+            );
             indicator_x -= 35.0;
         }
         if self.is_frozen {
-            draw.text("FREEZE")
-                .xy(pt2(indicator_x, status_y))
-                .color(srgba(0.3, 0.5, 1.0, 0.8))
-                .font_size(9);
+            draw_text(
+                draw,
+                FontId::PlexSansBold,
+                "FREEZE",
+                pt2(indicator_x, status_y),
+                9.0,
+                srgba(0.3, 0.5, 1.0, 0.8),
+                TextAlignment::Center,
+            );
         }
 
         if let Some(latency) = &self.latency_us {
             let latency_ms = latency.load(Ordering::Relaxed) as f32 / 1000.0;
             let text = format!("{:.1}ms", latency_ms);
-            draw.text(&text)
-                .xy(pt2(rect.left() + 32.0, status_y))
-                .color(srgba(0.6, 0.7, 0.9, 0.9))
-                .font_size(9);
+            draw_text(
+                draw,
+                FontId::PlexMonoRegular,
+                &text,
+                pt2(rect.left() + 32.0, status_y),
+                9.0,
+                srgba(0.6, 0.7, 0.9, 0.9),
+                TextAlignment::Center,
+            );
         }
     }
     
@@ -516,24 +537,39 @@ impl TileRenderer for AudioVisTile {
             .wh(rect.wh())
             .color(srgba(0.02, 0.02, 0.05, 0.98));
         
-        draw.text("AUDIO VISUALIZER")
-            .xy(pt2(rect.x(), rect.top() - 30.0))
-            .color(CYAN)
-            .font_size(18);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "AUDIO VISUALIZER",
+            pt2(rect.x(), rect.top() - 30.0),
+            18.0,
+            CYAN.into(),
+            TextAlignment::Center,
+        );
         
         let subtitle = format!("{} | {}", self.vis_type.label(), self.color_scheme.label());
-        draw.text(&subtitle)
-            .xy(pt2(rect.x(), rect.top() - 50.0))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            &subtitle,
+            pt2(rect.x(), rect.top() - 50.0),
+            12.0,
+            srgba(0.5, 0.5, 0.5, 1.0).into(),
+            TextAlignment::Center,
+        );
 
         if let Some(latency) = &self.latency_us {
             let latency_ms = latency.load(Ordering::Relaxed) as f32 / 1000.0;
             let text = format!("Latency: {:.1} ms", latency_ms);
-            draw.text(&text)
-                .xy(pt2(rect.x(), rect.top() - 70.0))
-                .color(srgba(0.4, 0.6, 0.9, 1.0))
-                .font_size(11);
+            draw_text(
+                draw,
+                FontId::PlexMonoRegular,
+                &text,
+                pt2(rect.x(), rect.top() - 70.0),
+                11.0,
+                srgba(0.4, 0.6, 0.9, 1.0),
+                TextAlignment::Center,
+            );
         }
         
         let preview_rect = Rect::from_x_y_w_h(
@@ -550,10 +586,15 @@ impl TileRenderer for AudioVisTile {
             .stroke(srgba(0.2, 0.3, 0.3, 1.0))
             .stroke_weight(1.0);
         
-        draw.text("LIVE PREVIEW")
-            .xy(pt2(preview_rect.x(), preview_rect.top() + 15.0))
-            .color(srgba(0.3, 0.3, 0.3, 1.0))
-            .font_size(10);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "LIVE PREVIEW",
+            pt2(preview_rect.x(), preview_rect.top() + 15.0),
+            10.0,
+            srgba(0.3, 0.3, 0.3, 1.0),
+            TextAlignment::Center,
+        );
         
         self.render_monitor(draw, preview_rect.pad(2.0), ctx);
         false

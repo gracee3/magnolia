@@ -60,7 +60,7 @@ impl<'a> TransitChart<'a> {
                 .weight(self.settings.stroke_cusps * transit_scale);
                 
             // Draw Glyph (using transit scale for differentiation)
-            draw_glyph(draw, *glyph, pos, transit_scale * 12.0, color, self.settings.stroke_points);
+            draw_glyph(draw, *glyph, pos, transit_scale * 12.0, color);
         }
     }
     
@@ -96,7 +96,7 @@ impl<'a> TransitChart<'a> {
             let mid_angle = *angle + diff / 2.0;
             
             let num_pos = get_point_position(self.cx, self.cy, num_r, mid_angle, self.shift);
-            draw_glyph(draw, Glyph::House((i + 1) as u8), num_pos, self.settings.symbol_scale * 10.0, color, 1.0);
+            draw_glyph(draw, Glyph::House((i + 1) as u8), num_pos, self.settings.symbol_scale * 10.0, color);
         }
     }
 }

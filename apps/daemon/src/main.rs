@@ -22,7 +22,7 @@ mod input;
 mod ui;
 mod theme;
 
-
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 use layout::Layout;
 use tiles::{TileRegistry, RenderContext};
@@ -784,16 +784,26 @@ fn draw_fullscreen_overlay(draw: &Draw, win_rect: Rect, title: &str) {
         .color(rgba(0.0, 0.0, 0.0, 0.95));
 
     // Title centered
-    draw.text(title)
-        .xy(win_rect.xy())
-        .color(CYAN)
-        .font_size(32);
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        title,
+        win_rect.xy(),
+        32.0,
+        CYAN.into(),
+        TextAlignment::Center,
+    );
         
     // Close hint
-    draw.text("[ESC] Close")
-        .xy(pt2(win_rect.x(), win_rect.y() - 40.0))
-        .color(GRAY)
-        .font_size(12);
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        "[ESC] Close",
+        pt2(win_rect.x(), win_rect.y() - 40.0),
+        12.0,
+        GRAY.into(),
+        TextAlignment::Center,
+    );
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
@@ -818,10 +828,15 @@ fn view(app: &App, model: &Model, frame: Frame) {
                      };
                      if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
                          draw.rect().xy(rect.xy()).wh(rect.wh()).color(rgba(0.05, 0.05, 0.05, 0.5)).stroke(stroke_color).stroke_weight(1.0);
-                         draw.text("+")
-                             .xy(rect.xy())
-                             .color(stroke_color)
-                             .font_size(24);
+                         draw_text(
+                             &draw,
+                             FontId::PlexSansRegular,
+                             "+",
+                             rect.xy(),
+                             24.0,
+                             stroke_color.into(),
+                             TextAlignment::Center,
+                         );
                      }
                  }
             }
@@ -937,10 +952,15 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .wh(app.window_rect().wh())
             .color(rgba(0.0, 0.0, 0.1, 0.4));
             
-        draw.text("Zzz")
-             .xy(pt2(app.window_rect().right() - 30.0, app.window_rect().bottom() + 30.0))
-             .color(rgba(0.5, 0.5, 1.0, 0.5))
-             .font_size(24);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            "Zzz",
+            pt2(app.window_rect().right() - 30.0, app.window_rect().bottom() + 30.0),
+            24.0,
+            rgba(0.5, 0.5, 1.0, 0.5),
+            TextAlignment::Right,
+        );
     }
 
     // Mode indicator (bottom-left corner)
@@ -962,10 +982,15 @@ fn view(app: &App, model: &Model, frame: Frame) {
         };
         
         let win_rect = app.window_rect();
-        draw.text(mode_text)
-            .xy(pt2(win_rect.left() + 50.0, win_rect.bottom() + 20.0))
-            .color(mode_color)
-            .font_size(14);
+        draw_text(
+            &draw,
+            FontId::PlexSansBold,
+            mode_text,
+            pt2(win_rect.left() + 50.0, win_rect.bottom() + 20.0),
+            14.0,
+            mode_color.into(),
+            TextAlignment::Left,
+        );
         
         // Show keybind hints
         let hints = match model.keyboard_nav.mode {
@@ -974,10 +999,15 @@ fn view(app: &App, model: &Model, frame: Frame) {
             input::InputMode::Patch => "[Arrows]Select [Enter]Patch [ESC]Exit",
         };
         
-        draw.text(hints)
-            .xy(pt2(win_rect.left() + 250.0, win_rect.bottom() + 20.0))
-            .color(rgba(0.4, 0.4, 0.4, 0.8))
-            .font_size(10);
+        draw_text(
+            &draw,
+            FontId::PlexSansRegular,
+            hints,
+            pt2(win_rect.left() + 250.0, win_rect.bottom() + 20.0),
+            10.0,
+            rgba(0.4, 0.4, 0.4, 0.8).into(),
+            TextAlignment::Left,
+        );
     }
     
     // Render patch cables (always visible if not maximized)

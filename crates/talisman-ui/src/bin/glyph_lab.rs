@@ -1,4 +1,4 @@
-use talisman_ui::{self, FontId, GlyphOp, theme};
+use talisman_ui::{self, FontId, GlyphOp, theme, draw_text, TextAlignment};
 use talisman_ui::tweaks::GlyphTweaks;
 use nannou::lyon::math::point as lpoint;
 use nannou::lyon::path::Path;
@@ -309,7 +309,15 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     }
 
                     let name_color = if is_selected { CYAN } else { WHITE };
-                    draw.text(name).xy(center + vec2(0.0, -model.cell_size * 0.4)).color(name_color).font_size(10);
+                    draw_text(
+                        draw,
+                        FontId::PlexMonoRegular,
+                        name,
+                        center + vec2(0.0, -model.cell_size * 0.4),
+                        10.0,
+                        name_color,
+                        TextAlignment::Center,
+                    );
                     
                     let DisplayGlyph::Font(font, c) = item;
                     if let Some((ops, bounds)) = talisman_ui::font_glyph_ops_bounds(*font, *c) {
@@ -350,10 +358,15 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 }
             }
             
-            draw.text(name)
-                .xy(detail_rect.bottom_left() + vec2(50.0, 50.0))
-                .color(CYAN)
-                .font_size(32);
+            draw_text(
+                draw,
+                FontId::PlexSansBold,
+                name,
+                detail_rect.bottom_left() + vec2(50.0, 50.0),
+                32.0,
+                CYAN,
+                TextAlignment::Left,
+            );
         }
     }
     
@@ -368,10 +381,15 @@ fn view(app: &App, model: &Model, frame: Frame) {
         sel_name, sel_tweak.dx, sel_tweak.dy, sel_tweak.sx, sel_tweak.sy, sel_tweak.rot_deg
     );
     
-    draw.text(&hud_text)
-        .xy(win.top_left() + vec2(400.0, -40.0))
-        .color(YELLOW)
-        .font_size(16);
+    draw_text(
+        draw,
+        FontId::PlexMonoRegular,
+        &hud_text,
+        win.top_left() + vec2(400.0, -40.0),
+        16.0,
+        YELLOW,
+        TextAlignment::Left,
+    );
 
     draw.to_frame(app, &frame).unwrap();
 }

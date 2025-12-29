@@ -11,6 +11,7 @@ use sha2::{Sha256, Digest};
 use crate::generator::{generate_path, SigilConfig};
 use std::sync::{Arc, Mutex};
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
+use talisman_ui::{FontId, draw_text, TextAlignment};
 
 pub struct KameaTile {
     current_text: Arc<Mutex<String>>,
@@ -180,16 +181,26 @@ impl TileRenderer for KameaTile {
         self.render_sigil(draw, rect);
         
         // Label
-        draw.text("KAMEA")
-            .xy(pt2(rect.x(), rect.top() - 20.0))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(12);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "KAMEA",
+            pt2(rect.x(), rect.top() - 20.0),
+            12.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
+            TextAlignment::Center,
+        );
         
         // Grid size indicator
-        draw.text(&format!("{}×{}", self.config.grid_cols, self.config.grid_rows))
-            .xy(pt2(rect.right() - 20.0, rect.top() - 20.0))
-            .color(srgba(0.3, 0.3, 0.3, 0.8))
-            .font_size(10);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("{}×{}", self.config.grid_cols, self.config.grid_rows),
+            pt2(rect.right() - 20.0, rect.top() - 20.0),
+            10.0,
+            srgba(0.3, 0.3, 0.3, 0.8),
+            TextAlignment::Right,
+        );
     }
     
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
@@ -200,19 +211,30 @@ impl TileRenderer for KameaTile {
             .color(srgba(0.02, 0.02, 0.05, 0.98));
         
         // Title
-        draw.text("KAMEA SIGIL SETTINGS")
-            .xy(pt2(rect.x(), rect.top() - 30.0))
-            .color(CYAN)
-            .font_size(18);
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "KAMEA SIGIL SETTINGS",
+            pt2(rect.x(), rect.top() - 30.0),
+            18.0,
+            CYAN,
+            TextAlignment::Center,
+        );
         
         // Current intent preview
         let text = self.current_text.lock()
             .map(|t| if t.len() > 40 { format!("{}...", &t[..40]) } else { t.clone() })
             .unwrap_or_else(|_| "[No text]".to_string());
-        draw.text(&format!("Intent: {}", text))
-            .xy(pt2(rect.x(), rect.top() - 55.0))
-            .color(srgba(0.5, 0.5, 0.5, 1.0))
-            .font_size(12);
+        
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("Intent: {}", text),
+            pt2(rect.x(), rect.top() - 55.0),
+            12.0,
+            srgba(0.5, 0.5, 0.5, 1.0),
+            TextAlignment::Center,
+        );
         
         // Large sigil preview
         let preview_rect = Rect::from_x_y_w_h(

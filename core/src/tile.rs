@@ -19,6 +19,7 @@
 //! - **Error Handling**: Tiles can report errors displayed in monitor view
 
 use nannou::prelude::*;
+use talisman_ui::{FontId, draw_text, TextAlignment};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -367,10 +368,15 @@ pub fn render_error_overlay(draw: &Draw, rect: Rect, error: &TileError) {
         .wh(banner_rect.wh())
         .color(bg_color);
     
-    draw.text(icon)
-        .xy(pt2(banner_rect.left() + 12.0, banner_rect.y()))
-        .color(fg_color)
-        .font_size(14);
+    draw_text(
+        draw,
+        FontId::PlexSansBold,
+        icon,
+        pt2(banner_rect.left() + 12.0, banner_rect.y()),
+        14.0,
+        fg_color,
+        TextAlignment::Left,
+    );
     
     let msg = if error.message.len() > 40 {
         format!("{}...", &error.message[..40])
@@ -378,8 +384,13 @@ pub fn render_error_overlay(draw: &Draw, rect: Rect, error: &TileError) {
         error.message.clone()
     };
     
-    draw.text(&msg)
-        .xy(pt2(banner_rect.x() + 10.0, banner_rect.y()))
-        .color(fg_color)
-        .font_size(11);
+    draw_text(
+        draw,
+        FontId::PlexSansRegular,
+        &msg,
+        pt2(banner_rect.x() + 10.0, banner_rect.y()),
+        11.0,
+        fg_color,
+        TextAlignment::Center,
+    );
 }
