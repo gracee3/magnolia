@@ -4,7 +4,6 @@
 //! Control mode: Settings for format (12/24hr), show seconds, etc.
 
 use nannou::prelude::*;
-use nannou_egui::egui;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use super::{TileRenderer, RenderContext, BindableAction};

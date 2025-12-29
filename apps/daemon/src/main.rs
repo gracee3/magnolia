@@ -28,6 +28,7 @@ use layout::Layout;
 use tiles::{TileRegistry, RenderContext};
 use input::{KeyboardNav, AppAction};
 use ui::modals::{ModalStack, ModalState};
+use ui::fullscreen_modal::ModalAnim;
 
 
 
@@ -71,6 +72,18 @@ struct Model {
     // Keyboard Navigation (keyboard-first UI)
     keyboard_nav: KeyboardNav,
     
+    // Modal animation states (for fullscreen modals)
+    modal_anims: std::collections::HashMap<ModalAnimKey, ModalAnim>,
+}
+
+/// Key for modal animation tracking
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ModalAnimKey {
+    GlobalSettings,
+    PatchBay,
+    LayoutManager,
+    TileSettings,
+    AddTilePicker,
 }
 
 fn make_unique_tile_id(layout: &talisman_core::LayoutConfig, base: &str) -> String {
@@ -330,6 +343,7 @@ fn model(app: &App) -> Model {
         start_time: std::time::Instant::now(),
         frame_count: 0,
         keyboard_nav: KeyboardNav::new(),
+        modal_anims: std::collections::HashMap::new(),
     };
     
     // Apply saved tile settings from layout config
@@ -383,6 +397,39 @@ fn save_tile_settings(registry: &tiles::TileRegistry, layout: &mut Layout, tile_
     }
 }
 
+/// Update animation state for fullscreen modals
+fn update_modal_anims(model: &mut Model) {
+    use ui::fullscreen_modal::ModalAnim;
+    
+    // Helper to sync animation state with modal presence
+    let sync_anim = |anims: &mut std::collections::HashMap<ModalAnimKey, ModalAnim>, key: ModalAnimKey, is_open: bool| {
+        if is_open {
+            let anim = anims.entry(key).or_insert_with(ModalAnim::new);
+            anim.update();
+        } else if let Some(anim) = anims.get_mut(&key) {
+            if anim.factor > 0.0 {
+                anim.closing = true;
+                if anim.update() {
+                    // Animation complete, remove
+                    anims.remove(&key);
+                }
+            }
+        }
+    };
+    
+    // Check each modal type
+    let is_global_settings = model.modal_stack.is_global_settings_open();
+    let is_patch_bay = model.modal_stack.is_patch_bay_open();
+    let is_layout_manager = model.modal_stack.is_layout_manager_open();
+    let is_tile_settings = model.modal_stack.get_tile_settings().is_some();
+    let is_add_tile_picker = model.modal_stack.get_add_tile_picker().is_some();
+    
+    sync_anim(&mut model.modal_anims, ModalAnimKey::GlobalSettings, is_global_settings);
+    sync_anim(&mut model.modal_anims, ModalAnimKey::PatchBay, is_patch_bay);
+    sync_anim(&mut model.modal_anims, ModalAnimKey::LayoutManager, is_layout_manager);
+    sync_anim(&mut model.modal_anims, ModalAnimKey::TileSettings, is_tile_settings);
+    sync_anim(&mut model.modal_anims, ModalAnimKey::AddTilePicker, is_add_tile_picker);
+}
 
 
 fn update(app: &App, model: &mut Model, update: Update) {
@@ -405,6 +452,9 @@ fn update(app: &App, model: &mut Model, update: Update) {
     } else if maximized_tile.is_some() && model.anim_factor < 1.0 {
         model.anim_factor = (model.anim_factor + 0.1).min(1.0);
     }
+    
+    // Update modal animations for fullscreen modals
+    update_modal_anims(model);
     
     // Update tile registry (extends to new tiles with render_monitor/render_controls)
     model.tile_registry.update_all();
@@ -506,506 +556,753 @@ fn update(app: &App, model: &mut Model, update: Update) {
     // (Legacy kamea buttons removed - KameaTile handles its own controls)
     // (Context menu removed - keyboard-first navigation)
 
-    // Patch Bay Modal
+    // Patch Bay Modal (Fullscreen Style)
     if model.modal_stack.is_patch_bay_open() {
+        let anim = model.modal_anims.get(&ModalAnimKey::PatchBay);
+        let alpha = anim.map(|a| a.eased()).unwrap_or(1.0);
+        let scale = 0.9 + 0.1 * alpha;
+        
         let screen_rect = ctx.screen_rect();
-        let width = 600.0;
-        let height = 450.0;
-        let x = screen_rect.center().x - width / 2.0;
-        let y = screen_rect.center().y - height / 2.0;
-
-        egui::Window::new("PATCH BAY")
-            .fixed_pos(egui::pos2(x, y))
-            .fixed_size(egui::vec2(width, height))
-            .collapsible(false)
-            .resizable(true)
-            .frame(egui::Frame {
-                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
-                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)),
-                inner_margin: egui::Margin::same(15.0),
-                ..Default::default()
-            })
+        let margin = 40.0 * (1.0 + (1.0 - alpha));
+        let modal_width = (screen_rect.width() - margin * 2.0) * scale;
+        let modal_height = (screen_rect.height() - margin * 2.0) * scale;
+        let modal_x = screen_rect.center().x - modal_width / 2.0;
+        let modal_y = screen_rect.center().y - modal_height / 2.0;
+        
+        // Fullscreen dark backdrop
+        egui::Area::new(egui::Id::new("patch_bay_backdrop"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
             .show(&ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("MODULE PATCH BAY")
-                        .heading()
-                        .color(egui::Color32::from_rgb(0, 255, 255)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("✕").clicked() {
-                            model.modal_stack.close(&ModalState::PatchBay);
-                        }
+                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::click());
+                ui.painter().rect_filled(rect, 0.0, 
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, (220.0 * alpha) as u8));
+            });
+        
+        egui::Area::new(egui::Id::new("patch_bay_modal"))
+            .fixed_pos(egui::pos2(modal_x, modal_y))
+            .show(&ctx, |ui| {
+                let frame = egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_unmultiplied(8, 8, 12, (250.0 * alpha) as u8))
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 255, 255, (200.0 * alpha) as u8)))
+                    .inner_margin(egui::Margin::same(20.0));
+                
+                frame.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(modal_width, modal_height));
+                    
+                    // Header
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("PATCH BAY")
+                            .heading()
+                            .size(24.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new("[ESC] Close")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                        });
                     });
-                });
-                
-                ui.add(egui::Separator::default().spacing(10.0));
-                
-                // Module List
-                ui.label(egui::RichText::new("REGISTERED MODULES")
-                    .small()
-                    .color(egui::Color32::GRAY));
-                
-                egui::ScrollArea::vertical()
-                    .max_height(280.0)
-                    .show(ui, |ui| {
-                        let modules: Vec<_> = model.patch_bay.get_modules()
-                            .iter()
-                            .map(|m| (*m).clone())
-                            .collect();
-                        
-                        for module in modules {
-                            ui.group(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&module.name)
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(0, 255, 255)));
-                                    ui.label(egui::RichText::new(format!("({})", module.id))
-                                        .small()
-                                        .color(egui::Color32::GRAY));
-                                });
-                                
-                                ui.label(egui::RichText::new(&module.description)
-                                    .small()
-                                    .color(egui::Color32::from_rgb(150, 150, 150)));
-                                
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("PORTS:").small().color(egui::Color32::GRAY));
-                                    for port in &module.ports {
-                                        let (prefix, color) = match port.direction {
-                                            talisman_core::PortDirection::Input => ("IN", egui::Color32::from_rgb(100, 200, 100)),
-                                            talisman_core::PortDirection::Output => ("OUT", egui::Color32::from_rgb(200, 100, 100)),
-                                        };
-                                        ui.label(egui::RichText::new(format!("{} {} ({:?})", prefix, port.label, port.data_type))
+                    
+                    ui.add_space(10.0);
+                    ui.add(egui::Separator::default().spacing(10.0));
+                    ui.add_space(10.0);
+                    
+                    // Module List
+                    ui.label(egui::RichText::new("REGISTERED MODULES")
+                        .small()
+                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                    
+                    egui::ScrollArea::vertical()
+                        .max_height(modal_height - 200.0)
+                        .show(ui, |ui| {
+                            let modules: Vec<_> = model.patch_bay.get_modules()
+                                .iter()
+                                .map(|m| (*m).clone())
+                                .collect();
+                            
+                            for module in modules {
+                                ui.add_space(8.0);
+                                egui::Frame::none()
+                                    .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 25, (200.0 * alpha) as u8))
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(50, 50, 60, (150.0 * alpha) as u8)))
+                                    .inner_margin(egui::Margin::same(12.0))
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new(&module.name)
+                                                .strong()
+                                                .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
+                                            ui.label(egui::RichText::new(format!("({})", module.id))
+                                                .small()
+                                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                                        });
+                                        
+                                        ui.label(egui::RichText::new(&module.description)
                                             .small()
-                                            .color(color));
-                                    }
-                                });
-                            });
-                            ui.add_space(5.0);
+                                            .color(egui::Color32::from_rgba_unmultiplied(150, 150, 150, (200.0 * alpha) as u8)));
+                                        
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new("PORTS:").small().color(egui::Color32::from_rgba_unmultiplied(80, 80, 80, (200.0 * alpha) as u8)));
+                                            for port in &module.ports {
+                                                let (prefix, r, g, b) = match port.direction {
+                                                    talisman_core::PortDirection::Input => ("IN", 100, 200, 100),
+                                                    talisman_core::PortDirection::Output => ("OUT", 200, 100, 100),
+                                                };
+                                                ui.label(egui::RichText::new(format!("{} {} ({:?})", prefix, port.label, port.data_type))
+                                                    .small()
+                                                    .color(egui::Color32::from_rgba_unmultiplied(r, g, b, (200.0 * alpha) as u8)));
+                                            }
+                                        });
+                                    });
+                            }
+                        });
+                    
+                    ui.add_space(10.0);
+                    ui.add(egui::Separator::default().spacing(10.0));
+                    ui.add_space(5.0);
+                    
+                    // Connections
+                    let patches = model.patch_bay.get_patches();
+                    if patches.is_empty() {
+                        ui.label(egui::RichText::new("No active patches")
+                            .small()
+                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                    } else {
+                        ui.label(egui::RichText::new(format!("ACTIVE PATCHES: {}", patches.len()))
+                            .small()
+                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                        for patch in patches {
+                            ui.label(egui::RichText::new(format!(
+                                "  {}:{} → {}:{}",
+                                patch.source_module, patch.source_port,
+                                patch.sink_module, patch.sink_port
+                            )).small().color(egui::Color32::from_rgba_unmultiplied(255, 200, 50, (200.0 * alpha) as u8)));
                         }
-                    });
-                
-                ui.add(egui::Separator::default().spacing(10.0));
-                
-                // Connections
-                let patches = model.patch_bay.get_patches();
-                if patches.is_empty() {
-                    ui.label(egui::RichText::new("No active patches")
-                        .small()
-                        .color(egui::Color32::GRAY));
-                } else {
-                    ui.label(egui::RichText::new(format!("ACTIVE PATCHES: {}", patches.len()))
-                        .small()
-                        .color(egui::Color32::GRAY));
-                    for patch in patches {
-                        ui.label(egui::RichText::new(format!(
-                            "  {}:{} -> {}:{}",
-                            patch.source_module, patch.source_port,
-                            patch.sink_module, patch.sink_port
-                        )).small().color(egui::Color32::YELLOW));
                     }
-                }
+                });
             });
     }
 
-    // Global Settings Modal
+    // Global Settings Modal (Fullscreen Style)
     if model.modal_stack.is_global_settings_open() {
+        let anim = model.modal_anims.get(&ModalAnimKey::GlobalSettings);
+        let alpha = anim.map(|a| a.eased()).unwrap_or(1.0);
+        let scale = 0.9 + 0.1 * alpha;
+        
         let screen_rect = ctx.screen_rect();
-        let width = 400.0;
-        let height = 300.0;
-        let x = screen_rect.center().x - width / 2.0;
-        let y = screen_rect.center().y - height / 2.0;
-
-        egui::Window::new("GLOBAL SETTINGS")
-            .fixed_pos(egui::pos2(x, y))
-            .fixed_size(egui::vec2(width, height))
-            .collapsible(false)
-            .resizable(true)
-            .frame(egui::Frame {
-                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
-                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)),
-                inner_margin: egui::Margin::same(15.0),
-                ..Default::default()
-            })
+        let margin = 60.0 * (1.0 + (1.0 - alpha));
+        let modal_width = (screen_rect.width() - margin * 2.0).min(600.0) * scale;
+        let modal_height = (screen_rect.height() - margin * 2.0).min(500.0) * scale;
+        let modal_x = screen_rect.center().x - modal_width / 2.0;
+        let modal_y = screen_rect.center().y - modal_height / 2.0;
+        
+        // Fullscreen dark backdrop
+        egui::Area::new(egui::Id::new("global_settings_backdrop"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
             .show(&ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("TALISMAN CONFIGURATION")
-                        .heading()
-                        .color(egui::Color32::from_rgb(0, 255, 255)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("✕").clicked() {
-                            model.modal_stack.close(&ModalState::GlobalSettings);
-                        }
+                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::click());
+                ui.painter().rect_filled(rect, 0.0, 
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, (220.0 * alpha) as u8));
+            });
+        
+        egui::Area::new(egui::Id::new("global_settings_modal"))
+            .fixed_pos(egui::pos2(modal_x, modal_y))
+            .show(&ctx, |ui| {
+                let frame = egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_unmultiplied(8, 8, 12, (250.0 * alpha) as u8))
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 255, 255, (200.0 * alpha) as u8)))
+                    .inner_margin(egui::Margin::same(25.0));
+                
+                frame.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(modal_width, modal_height));
+                    
+                    // Header
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("GLOBAL SETTINGS")
+                            .heading()
+                            .size(24.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new("[ESC] Close")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                        });
                     });
-                });
-                
-                ui.add(egui::Separator::default().spacing(10.0));
-                
-                // SYSTEM
-                ui.label(egui::RichText::new("SYSTEM").small().color(egui::Color32::GRAY));
-                if ui.button(egui::RichText::new("QUIT TALISMAN Application").color(egui::Color32::from_rgb(255, 100, 100))).clicked() {
-                    // Send QuitApp action? Or loop request?
-                    // We can't access loop control directly here easily unless we signal it via model channel or standard intent.
-                    // For now, we rely on KeyboardNav handling Ctrl+Q, but we can't trigger that easily from here.
-                    // We can use std::process::exit(0) but that's harsh.
-                    // nannou App typically doesn't have a "quit()" method exposed to update loop easily?
-                    // Actually app.quit() exists.
-                    // But we are in a closure. We have `ctx`, not `app`.
-                    // We can match on this in `update` if we had a flag.
-                    // Let's set `model.is_closing = true`.
-                    model.is_closing = true;
-                }
-                
-                ui.add_space(10.0);
-                
-                // ENGINE
-                ui.label(egui::RichText::new("ENGINE").small().color(egui::Color32::GRAY));
-                let status = if model.is_sleeping { "SLEEPING" } else { "ACTIVE" };
-                let status_color = if model.is_sleeping { 
-                    egui::Color32::from_rgb(255, 100, 100) 
-                } else { 
-                    egui::Color32::from_rgb(100, 255, 100) 
-                };
-                ui.horizontal(|ui| {
-                    ui.label("Status:");
-                    ui.label(egui::RichText::new(status).color(status_color));
-                });
-                
-                ui.horizontal(|ui| {
-                     if ui.button(if model.is_sleeping { "WAKE ENGINE" } else { "SLEEP ENGINE" }).clicked() {
+                    
+                    ui.add_space(15.0);
+                    ui.add(egui::Separator::default().spacing(10.0));
+                    ui.add_space(15.0);
+                    
+                    // SYSTEM Section
+                    ui.label(egui::RichText::new("SYSTEM")
+                        .small()
+                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                    ui.add_space(8.0);
+                    
+                    if ui.add(egui::Button::new(
+                        egui::RichText::new("⏻  QUIT TALISMAN")
+                            .color(egui::Color32::from_rgba_unmultiplied(255, 100, 100, (255.0 * alpha) as u8)))
+                        .fill(egui::Color32::from_rgba_unmultiplied(40, 15, 15, (200.0 * alpha) as u8))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(100, 40, 40, (200.0 * alpha) as u8)))
+                    ).clicked() {
+                        std::process::exit(0);
+                    }
+                    
+                    ui.add_space(20.0);
+                    
+                    // ENGINE Section
+                    ui.label(egui::RichText::new("ENGINE")
+                        .small()
+                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                    ui.add_space(8.0);
+                    
+                    let status = if model.is_sleeping { "SLEEPING" } else { "ACTIVE" };
+                    let (sr, sg, sb) = if model.is_sleeping { (255, 100, 100) } else { (100, 255, 100) };
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Status:")
+                            .color(egui::Color32::from_rgba_unmultiplied(180, 180, 180, (200.0 * alpha) as u8)));
+                        ui.label(egui::RichText::new(status)
+                            .strong()
+                            .color(egui::Color32::from_rgba_unmultiplied(sr, sg, sb, (255.0 * alpha) as u8)));
+                    });
+                    
+                    ui.add_space(5.0);
+                    let btn_text = if model.is_sleeping { "▶  WAKE ENGINE" } else { "⏸  SLEEP ENGINE" };
+                    if ui.add(egui::Button::new(
+                        egui::RichText::new(btn_text)
+                            .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, (255.0 * alpha) as u8)))
+                        .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 35, (200.0 * alpha) as u8))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(60, 60, 70, (200.0 * alpha) as u8)))
+                    ).clicked() {
                         model.is_sleeping = !model.is_sleeping;
                         model.layout.config.is_sleeping = model.is_sleeping;
                         model.layout.save();
                     }
+                    
+                    ui.add_space(20.0);
+                    
+                    // LAYOUT Section
+                    ui.label(egui::RichText::new("LAYOUT")
+                        .small()
+                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                    ui.add_space(8.0);
+                    
+                    if ui.add(egui::Button::new(
+                        egui::RichText::new("⚙  OPEN LAYOUT MANAGER")
+                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)))
+                        .fill(egui::Color32::from_rgba_unmultiplied(0, 40, 40, (200.0 * alpha) as u8))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(0, 100, 100, (200.0 * alpha) as u8)))
+                    ).clicked() {
+                        model.modal_stack.push(ModalState::LayoutManager);
+                        model.modal_stack.close(&ModalState::GlobalSettings);
+                    }
+                    
+                    ui.add_space(20.0);
+                    
+                    // STATS Section
+                    ui.label(egui::RichText::new("STATS")
+                        .small()
+                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                    ui.add_space(8.0);
+                    
+                    egui::Frame::none()
+                        .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 20, (200.0 * alpha) as u8))
+                        .inner_margin(egui::Margin::same(12.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Modules:")
+                                    .color(egui::Color32::from_rgba_unmultiplied(150, 150, 150, (200.0 * alpha) as u8)));
+                                ui.label(egui::RichText::new(format!("{}", model.patch_bay.get_modules().len()))
+                                    .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
+                                ui.add_space(20.0);
+                                ui.label(egui::RichText::new("Patches:")
+                                    .color(egui::Color32::from_rgba_unmultiplied(150, 150, 150, (200.0 * alpha) as u8)));
+                                ui.label(egui::RichText::new(format!("{}", model.patch_bay.get_patches().len()))
+                                    .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
+                                ui.add_space(20.0);
+                                ui.label(egui::RichText::new("FPS:")
+                                    .color(egui::Color32::from_rgba_unmultiplied(150, 150, 150, (200.0 * alpha) as u8)));
+                                ui.label(egui::RichText::new(format!("{:.0}", ctx.input(|i| i.predicted_dt).recip()))
+                                    .color(egui::Color32::from_rgba_unmultiplied(100, 255, 100, (255.0 * alpha) as u8)));
+                            });
+                        });
                 });
-
-                ui.add_space(10.0);
-                
-                // LAYOUT
-                ui.label(egui::RichText::new("LAYOUT").small().color(egui::Color32::GRAY));
-                if ui.button("OPEN LAYOUT MANAGER").clicked() {
-                    model.modal_stack.push(ModalState::LayoutManager);
-                    model.modal_stack.close(&ModalState::GlobalSettings);
-                }
-                
-                ui.add_space(10.0);
-                
-                // STATS
-                ui.label(egui::RichText::new("STATS").small().color(egui::Color32::GRAY));
-                ui.label(format!("Modules: {}", model.patch_bay.get_modules().len()));
-                ui.label(format!("Patches: {}", model.patch_bay.get_patches().len()));
-                ui.label(format!("FPS: {:.1}", ctx.input(|i| i.predicted_dt).recip()));
             });
     }
 
-    // Tile Settings Modal
+    // Tile Settings Modal (Fullscreen Style)
     if let Some(tile_id) = model.modal_stack.get_tile_settings().map(|s| s.to_string()) {
+        let anim = model.modal_anims.get(&ModalAnimKey::TileSettings);
+        let alpha = anim.map(|a| a.eased()).unwrap_or(1.0);
+        let scale = 0.9 + 0.1 * alpha;
+        
         let module_id = tile_to_module(&tile_id);
         let module_info = model.patch_bay.get_module(&module_id).cloned();
         let screen_rect = ctx.screen_rect();
-        let width = 400.0;
-        let height = 350.0;
-        let x = screen_rect.center().x - width / 2.0;
-        let y = screen_rect.center().y - height / 2.0;
-
-        egui::Window::new(format!("Settings: {}", tile_id))
-            .fixed_pos(egui::pos2(x, y))
-            .fixed_size(egui::vec2(width, height))
-            .collapsible(false)
-            .resizable(true)
-            .frame(egui::Frame {
-                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
-                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)),
-                inner_margin: egui::Margin::same(15.0),
-                ..Default::default()
-            })
+        let margin = 50.0 * (1.0 + (1.0 - alpha));
+        let modal_width = (screen_rect.width() - margin * 2.0).min(600.0) * scale;
+        let modal_height = (screen_rect.height() - margin * 2.0) * scale;
+        let modal_x = screen_rect.center().x - modal_width / 2.0;
+        let modal_y = screen_rect.center().y - modal_height / 2.0;
+        
+        // Fullscreen dark backdrop
+        egui::Area::new(egui::Id::new("tile_settings_backdrop"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
             .show(&ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("TILE: {}", tile_id.to_uppercase()))
-                        .heading()
-                        .color(egui::Color32::from_rgb(0, 255, 255)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("✕").clicked() {
-                            model.modal_stack.close(&ModalState::TileSettings { tile_id: tile_id.clone() });
-                        }
-                    });
-                });
-                
-                ui.add(egui::Separator::default().spacing(10.0));
-                
-                // Module info
-                if let Some(module) = module_info {
-                    ui.label(egui::RichText::new("MODULE INFO").small().color(egui::Color32::GRAY));
-                    ui.label(format!("Name: {}", module.name));
-                    ui.label(format!("ID: {}", module.id));
-                    ui.label(&module.description);
-                    
-                    ui.add_space(10.0);
-                    
-                    // Ports
-                    ui.label(egui::RichText::new("PORTS").small().color(egui::Color32::GRAY));
-                    for port in &module.ports {
-                        let (icon, color) = match port.direction {
-                            talisman_core::PortDirection::Input => ("◀ IN", egui::Color32::from_rgb(100, 200, 100)),
-                            talisman_core::PortDirection::Output => ("▶ OUT", egui::Color32::from_rgb(200, 100, 100)),
-                        };
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(icon).color(color));
-                            ui.label(&port.label);
-                            ui.label(egui::RichText::new(format!("({:?})", port.data_type)).small().color(egui::Color32::GRAY));
-                        });
-                    }
-                    
-                    ui.add_space(10.0);
-                    
-                    // Connections
-                    ui.label(egui::RichText::new("CONNECTIONS").small().color(egui::Color32::GRAY));
-                    let incoming = model.patch_bay.get_incoming_patches(&module.id);
-                    let outgoing = model.patch_bay.get_outgoing_patches(&module.id);
-                    
-                    if incoming.is_empty() && outgoing.is_empty() {
-                        ui.label("No connections");
-                    } else {
-                        for patch in incoming {
-                            ui.label(egui::RichText::new(format!("← FROM: {}:{}", patch.source_module, patch.source_port))
-                                .small()
-                                .color(egui::Color32::from_rgb(100, 200, 100)));
-                        }
-                        for patch in outgoing {
-                            ui.label(egui::RichText::new(format!("→ TO: {}:{}", patch.sink_module, patch.sink_port))
-                                .small()
-                                .color(egui::Color32::from_rgb(200, 100, 100)));
-                        }
-                    }
-                } else {
-                    ui.label(egui::RichText::new("Module not found in Patch Bay")
-                        .color(egui::Color32::from_rgb(255, 100, 100)));
-                }
-                
-                ui.add_space(10.0);
-                
-                // Enabled state
-                ui.label(egui::RichText::new("STATE").small().color(egui::Color32::GRAY));
-                // Find tile config to check enabled state
-                let tile_config = model.layout.config.tiles.iter().find(|t| t.id == tile_id);
-                let is_disabled = tile_config.map(|t| !t.enabled).unwrap_or(false);
-                let state_text = if is_disabled { "DISABLED" } else { "ENABLED" };
-                let state_color = if is_disabled { 
-                    egui::Color32::from_rgb(255, 100, 100) 
-                } else { 
-                    egui::Color32::from_rgb(100, 255, 100) 
-                };
-                ui.label(egui::RichText::new(state_text).color(state_color));
-                
-                ui.add_space(10.0);
-
-                // Settings (Schema Driven)
-                ui.label(egui::RichText::new("SETTINGS").small().color(egui::Color32::GRAY));
-                
-                // We need mutable access to tiles for settings, so we use a separate scope or iter_mut
-                // Note: tile_id is an owned String here, so no conflict with model borrow
-                if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
-                     let module_id = tile.module.clone(); // Clone ID to avoid borrow conflict with registry
-                     if let Some(entry) = model.tile_registry.get(&module_id) {
-                        if let Ok(renderer) = entry.read() {
-                             if let Some(schema) = renderer.settings_schema() {
-                                 ui.add_space(5.0);
-                                 // Render the schema UI
-                                 ui::schema::render_schema_ui(ui, &mut tile.settings.config, &schema);
-                                 
-                                 ui.add_space(5.0);
-                                 if ui.button("Save Layout").clicked() {
-                                     // We can trigger save here, but we are inside a mutable borrow of tiles.
-                                     // model.layout.save() borrows config immutable? 
-                                     // save() calls self.config...
-                                     // model.layout.save() takes &self.
-                                     // We hold mutable borrow of model.layout.config via tile.
-                                     // So we cannot call model.layout.save() here!
-                                     // We must flag for save.
-                                     // For now, just rely on Ctrl+S or closing modal?
-                                     // Or we can't save inside this borrow scope.
-                                 }
-                             } else {
-                                 ui.label(egui::RichText::new("No configurable settings").italics().weak());
-                             }
-                        }
-                     }
-                }
+                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::click());
+                ui.painter().rect_filled(rect, 0.0, 
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, (220.0 * alpha) as u8));
             });
-    }
-
-    // Layout Manager Modal
-    if model.modal_stack.is_layout_manager_open() {
-        let screen_rect = ctx.screen_rect();
-        egui::Window::new("LAYOUT MANAGER")
-            .fixed_pos(egui::pos2(screen_rect.center().x - 250.0, screen_rect.center().y - 300.0))
-            .fixed_size(egui::vec2(500.0, 600.0))
-            .resizable(true)
+        
+        egui::Area::new(egui::Id::new("tile_settings_modal"))
+            .fixed_pos(egui::pos2(modal_x, modal_y))
             .show(&ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("GRID MANAGER");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("CLOSE & SAVE").clicked() {
-                            // Sync patches from PatchBay to Layout Config
-                            model.layout.config.patches = model.patch_bay.get_patches().to_vec();
-                            // Sync global state
-                            model.layout.config.is_sleeping = model.is_sleeping;
-						if let Err(e) = model.layout.config.resolve_conflicts(None) {
-							log::warn!("Unable to resolve layout conflicts before saving layout manager changes: {}", e);
-						}
-                            model.layout.save();
-                            model.modal_stack.close(&ModalState::LayoutManager);
-                        }
+                let frame = egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_unmultiplied(8, 8, 12, (250.0 * alpha) as u8))
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 255, 255, (200.0 * alpha) as u8)))
+                    .inner_margin(egui::Margin::same(20.0));
+                
+                frame.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(modal_width, modal_height));
+                    
+                    // Header
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("TILE: {}", tile_id.to_uppercase()))
+                            .heading()
+                            .size(24.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new("[ESC] Close")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                        });
                     });
-                });
-                
-                ui.separator();
-                
-                // 1. Grid Definition (Rows/Cols)
-                ui.collapsing("Grid Dimensions", |ui| {
-                    ui.label("Columns:");
-                    let mut cols_to_remove = None;
-                    for (i, col) in model.layout.config.columns.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("Col {}:", i));
-                            ui.text_edit_singleline(col);
-                            if ui.button("x").clicked() { cols_to_remove = Some(i); }
-                        });
-                    }
-                    if let Some(i) = cols_to_remove { model.layout.config.columns.remove(i); }
-                    if ui.button("+ Add Column").clicked() { model.layout.config.columns.push("1fr".to_string()); }
-
-                    ui.label("Rows:");
-                    let mut rows_to_remove = None;
-                    for (i, row) in model.layout.config.rows.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("Row {}:", i));
-                            ui.text_edit_singleline(row);
-                            if ui.button("x").clicked() { rows_to_remove = Some(i); }
-                        });
-                    }
-                    if let Some(i) = rows_to_remove { model.layout.config.rows.remove(i); }
-                    if ui.button("+ Add Row").clicked() { model.layout.config.rows.push("1fr".to_string()); }
-                });
-
-                ui.separator();
-                
-                // 2. Active Tiles
-                ui.label("Active Tiles:");
-                egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| {
-                    let mut tile_to_remove = None;
-                    for (i, tile) in model.layout.config.tiles.iter_mut().enumerate() {
-                        ui.group(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.colored_label(egui::Color32::from_rgb(0, 255, 255), &tile.id);
-                                ui.label(format!("({})", tile.module));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button("DELETE").clicked() { tile_to_remove = Some(i); }
+                    
+                    ui.add_space(10.0);
+                    ui.add(egui::Separator::default().spacing(10.0));
+                    ui.add_space(10.0);
+                    
+                    egui::ScrollArea::vertical().max_height(modal_height - 100.0).show(ui, |ui| {
+                        // Module info
+                        if let Some(module) = module_info {
+                            ui.label(egui::RichText::new("MODULE INFO")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                            ui.add_space(5.0);
+                            
+                            egui::Frame::none()
+                                .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 20, (200.0 * alpha) as u8))
+                                .inner_margin(egui::Margin::same(10.0))
+                                .show(ui, |ui| {
+                                    ui.label(egui::RichText::new(format!("Name: {}", module.name))
+                                        .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, (255.0 * alpha) as u8)));
+                                    ui.label(egui::RichText::new(format!("ID: {}", module.id))
+                                        .small()
+                                        .color(egui::Color32::from_rgba_unmultiplied(120, 120, 120, (200.0 * alpha) as u8)));
+                                    ui.label(egui::RichText::new(&module.description)
+                                        .small()
+                                        .color(egui::Color32::from_rgba_unmultiplied(150, 150, 150, (200.0 * alpha) as u8)));
                                 });
-                            });
                             
-                            ui.horizontal(|ui| {
-                                ui.label("Pos:");
-                                ui.add(egui::DragValue::new(&mut tile.col).prefix("Col:"));
-                                ui.add(egui::DragValue::new(&mut tile.row).prefix("Row:"));
-                            });
+                            ui.add_space(15.0);
                             
-                            ui.horizontal(|ui| {
-                                ui.label("Span:");
-                                let mut cs = tile.colspan.unwrap_or(1);
-                                let mut rs = tile.rowspan.unwrap_or(1);
-                                ui.add(egui::DragValue::new(&mut cs).prefix("Col:"));
-                                ui.add(egui::DragValue::new(&mut rs).prefix("Row:"));
-                                tile.colspan = Some(cs);
-                                tile.rowspan = Some(rs);
-                            });
+                            // Ports
+                            ui.label(egui::RichText::new("PORTS")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                            ui.add_space(5.0);
                             
-                            ui.checkbox(&mut tile.enabled, "Enabled");
-                        });
-                    }
-                    if let Some(i) = tile_to_remove { model.layout.config.tiles.remove(i); }
-                });
-
-                ui.separator();
-
-                // 3. Add New Tile
-                ui.menu_button("ADD NEW TILE...", |ui| {
-                   // Clone module list to avoid borrow checker issues with patch_bay
-                   let modules: Vec<_> = model.patch_bay.get_modules().iter().map(|m| (*m).clone()).collect();
-                   for module in modules {
-                       if ui.button(&module.name).clicked() {
-                           // Add to layout
-                           model.layout.config.tiles.push(TileConfig {
-                                id: format!("{}_new", module.id),
-                                col: 0,
-                                row: 0,
-                                colspan: Some(1),
-                                rowspan: Some(1),
-                                module: module.id.clone(),
-                                enabled: true,
-                                settings: Default::default(),
-                            });
-                            ui.close_menu();
-                       }
-                   }
+                            for port in &module.ports {
+                                let (icon, r, g, b) = match port.direction {
+                                    talisman_core::PortDirection::Input => ("◀ IN", 100, 200, 100),
+                                    talisman_core::PortDirection::Output => ("▶ OUT", 200, 100, 100),
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(icon)
+                                        .color(egui::Color32::from_rgba_unmultiplied(r, g, b, (255.0 * alpha) as u8)));
+                                    ui.label(egui::RichText::new(&port.label)
+                                        .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, (255.0 * alpha) as u8)));
+                                    ui.label(egui::RichText::new(format!("({:?})", port.data_type))
+                                        .small()
+                                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                                });
+                            }
+                            
+                            ui.add_space(15.0);
+                            
+                            // Connections
+                            ui.label(egui::RichText::new("CONNECTIONS")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                            ui.add_space(5.0);
+                            
+                            let incoming = model.patch_bay.get_incoming_patches(&module.id);
+                            let outgoing = model.patch_bay.get_outgoing_patches(&module.id);
+                            
+                            if incoming.is_empty() && outgoing.is_empty() {
+                                ui.label(egui::RichText::new("No connections")
+                                    .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                            } else {
+                                for patch in incoming {
+                                    ui.label(egui::RichText::new(format!("← FROM: {}:{}", patch.source_module, patch.source_port))
+                                        .small()
+                                        .color(egui::Color32::from_rgba_unmultiplied(100, 200, 100, (200.0 * alpha) as u8)));
+                                }
+                                for patch in outgoing {
+                                    ui.label(egui::RichText::new(format!("→ TO: {}:{}", patch.sink_module, patch.sink_port))
+                                        .small()
+                                        .color(egui::Color32::from_rgba_unmultiplied(200, 100, 100, (200.0 * alpha) as u8)));
+                                }
+                            }
+                        } else {
+                            ui.label(egui::RichText::new("Module not found in Patch Bay")
+                                .color(egui::Color32::from_rgba_unmultiplied(255, 100, 100, (255.0 * alpha) as u8)));
+                        }
+                        
+                        ui.add_space(15.0);
+                        
+                        // Enabled state
+                        ui.label(egui::RichText::new("STATE")
+                            .small()
+                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                        ui.add_space(5.0);
+                        
+                        let tile_config = model.layout.config.tiles.iter().find(|t| t.id == tile_id);
+                        let is_disabled = tile_config.map(|t| !t.enabled).unwrap_or(false);
+                        let (state_text, sr, sg, sb) = if is_disabled { 
+                            ("DISABLED", 255, 100, 100) 
+                        } else { 
+                            ("ENABLED", 100, 255, 100) 
+                        };
+                        ui.label(egui::RichText::new(state_text)
+                            .strong()
+                            .color(egui::Color32::from_rgba_unmultiplied(sr, sg, sb, (255.0 * alpha) as u8)));
+                        
+                        ui.add_space(15.0);
+                        
+                        // Settings (Schema Driven)
+                        ui.label(egui::RichText::new("SETTINGS")
+                            .small()
+                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                        ui.add_space(5.0);
+                        
+                        if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
+                            let module_id = tile.module.clone();
+                            if let Some(entry) = model.tile_registry.get(&module_id) {
+                                if let Ok(renderer) = entry.read() {
+                                    if let Some(schema) = renderer.settings_schema() {
+                                        egui::Frame::none()
+                                            .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 20, (200.0 * alpha) as u8))
+                                            .inner_margin(egui::Margin::same(10.0))
+                                            .show(ui, |ui| {
+                                                ui::schema::render_schema_ui(ui, &mut tile.settings.config, &schema);
+                                            });
+                                    } else {
+                                        ui.label(egui::RichText::new("No configurable settings")
+                                            .italics()
+                                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                                    }
+                                }
+                            }
+                        }
+                    });
                 });
             });
     }
 
-    // Add Tile Picker Modal (keyboard-driven)
-    if let Some((col, row, selected_idx)) = model.modal_stack.get_add_tile_picker() {
+    // Layout Manager Modal (Fullscreen Style)
+    if model.modal_stack.is_layout_manager_open() {
+        let anim = model.modal_anims.get(&ModalAnimKey::LayoutManager);
+        let alpha = anim.map(|a| a.eased()).unwrap_or(1.0);
+        let scale = 0.9 + 0.1 * alpha;
+        
         let screen_rect = ctx.screen_rect();
-        let width = 420.0;
-        let height = 380.0;
-        let x = screen_rect.center().x - width / 2.0;
-        let y = screen_rect.center().y - height / 2.0;
+        let margin = 40.0 * (1.0 + (1.0 - alpha));
+        let modal_width = (screen_rect.width() - margin * 2.0) * scale;
+        let modal_height = (screen_rect.height() - margin * 2.0) * scale;
+        let modal_x = screen_rect.center().x - modal_width / 2.0;
+        let modal_y = screen_rect.center().y - modal_height / 2.0;
+        
+        // Fullscreen dark backdrop
+        egui::Area::new(egui::Id::new("layout_manager_backdrop"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(&ctx, |ui| {
+                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::click());
+                ui.painter().rect_filled(rect, 0.0, 
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, (220.0 * alpha) as u8));
+            });
+        
+        egui::Area::new(egui::Id::new("layout_manager_modal"))
+            .fixed_pos(egui::pos2(modal_x, modal_y))
+            .show(&ctx, |ui| {
+                let frame = egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_unmultiplied(8, 8, 12, (250.0 * alpha) as u8))
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 255, 128, (200.0 * alpha) as u8)))
+                    .inner_margin(egui::Margin::same(20.0));
+                
+                frame.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(modal_width, modal_height));
+                    
+                    // Header
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("LAYOUT MANAGER")
+                            .heading()
+                            .size(24.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 128, (255.0 * alpha) as u8)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(
+                                egui::RichText::new("✓  SAVE & CLOSE")
+                                    .color(egui::Color32::from_rgba_unmultiplied(100, 255, 100, (255.0 * alpha) as u8)))
+                                .fill(egui::Color32::from_rgba_unmultiplied(15, 40, 15, (200.0 * alpha) as u8))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(40, 100, 40, (200.0 * alpha) as u8)))
+                            ).clicked() {
+                                model.layout.config.patches = model.patch_bay.get_patches().to_vec();
+                                model.layout.config.is_sleeping = model.is_sleeping;
+                                if let Err(e) = model.layout.config.resolve_conflicts(None) {
+                                    log::warn!("Unable to resolve layout conflicts before saving: {}", e);
+                                }
+                                model.layout.save();
+                                model.modal_stack.close(&ModalState::LayoutManager);
+                            }
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new("[ESC] Cancel")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                        });
+                    });
+                    
+                    ui.add_space(10.0);
+                    ui.add(egui::Separator::default().spacing(10.0));
+                    ui.add_space(10.0);
+                    
+                    egui::ScrollArea::vertical().max_height(modal_height - 100.0).show(ui, |ui| {
+                        // Grid Dimensions
+                        ui.label(egui::RichText::new("GRID DIMENSIONS")
+                            .small()
+                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                        ui.add_space(8.0);
+                        
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 20, (200.0 * alpha) as u8))
+                            .inner_margin(egui::Margin::same(12.0))
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("Columns:")
+                                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 180, (255.0 * alpha) as u8)));
+                                let mut cols_to_remove = None;
+                                for (i, col) in model.layout.config.columns.iter_mut().enumerate() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(format!("Col {}:", i))
+                                            .small()
+                                            .color(egui::Color32::from_rgba_unmultiplied(120, 120, 120, (200.0 * alpha) as u8)));
+                                        ui.text_edit_singleline(col);
+                                        if ui.small_button("✕").clicked() { cols_to_remove = Some(i); }
+                                    });
+                                }
+                                if let Some(i) = cols_to_remove { model.layout.config.columns.remove(i); }
+                                if ui.small_button("+ Add Column").clicked() { 
+                                    model.layout.config.columns.push("1fr".to_string()); 
+                                }
+                                
+                                ui.add_space(10.0);
+                                
+                                ui.label(egui::RichText::new("Rows:")
+                                    .color(egui::Color32::from_rgba_unmultiplied(180, 180, 180, (255.0 * alpha) as u8)));
+                                let mut rows_to_remove = None;
+                                for (i, row) in model.layout.config.rows.iter_mut().enumerate() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(format!("Row {}:", i))
+                                            .small()
+                                            .color(egui::Color32::from_rgba_unmultiplied(120, 120, 120, (200.0 * alpha) as u8)));
+                                        ui.text_edit_singleline(row);
+                                        if ui.small_button("✕").clicked() { rows_to_remove = Some(i); }
+                                    });
+                                }
+                                if let Some(i) = rows_to_remove { model.layout.config.rows.remove(i); }
+                                if ui.small_button("+ Add Row").clicked() { 
+                                    model.layout.config.rows.push("1fr".to_string()); 
+                                }
+                            });
+                        
+                        ui.add_space(15.0);
+                        
+                        // Active Tiles
+                        ui.label(egui::RichText::new("ACTIVE TILES")
+                            .small()
+                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                        ui.add_space(8.0);
+                        
+                        let mut tile_to_remove = None;
+                        for (i, tile) in model.layout.config.tiles.iter_mut().enumerate() {
+                            egui::Frame::none()
+                                .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 25, (200.0 * alpha) as u8))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(50, 50, 60, (150.0 * alpha) as u8)))
+                                .inner_margin(egui::Margin::same(10.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(&tile.id)
+                                            .strong()
+                                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
+                                        ui.label(egui::RichText::new(format!("({})", tile.module))
+                                            .small()
+                                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.add(egui::Button::new(
+                                                egui::RichText::new("DELETE")
+                                                    .small()
+                                                    .color(egui::Color32::from_rgba_unmultiplied(255, 100, 100, (255.0 * alpha) as u8)))
+                                                .fill(egui::Color32::TRANSPARENT)
+                                            ).clicked() { 
+                                                tile_to_remove = Some(i); 
+                                            }
+                                        });
+                                    });
+                                    
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("Pos:")
+                                            .small()
+                                            .color(egui::Color32::from_rgba_unmultiplied(120, 120, 120, (200.0 * alpha) as u8)));
+                                        ui.add(egui::DragValue::new(&mut tile.col).prefix("Col:"));
+                                        ui.add(egui::DragValue::new(&mut tile.row).prefix("Row:"));
+                                        ui.add_space(20.0);
+                                        ui.label(egui::RichText::new("Span:")
+                                            .small()
+                                            .color(egui::Color32::from_rgba_unmultiplied(120, 120, 120, (200.0 * alpha) as u8)));
+                                        let mut cs = tile.colspan.unwrap_or(1);
+                                        let mut rs = tile.rowspan.unwrap_or(1);
+                                        ui.add(egui::DragValue::new(&mut cs).prefix("W:"));
+                                        ui.add(egui::DragValue::new(&mut rs).prefix("H:"));
+                                        tile.colspan = Some(cs);
+                                        tile.rowspan = Some(rs);
+                                    });
+                                    
+                                    ui.checkbox(&mut tile.enabled, "Enabled");
+                                });
+                            ui.add_space(5.0);
+                        }
+                        if let Some(i) = tile_to_remove { model.layout.config.tiles.remove(i); }
+                        
+                        ui.add_space(15.0);
+                        
+                        // Add New Tile
+                        ui.menu_button(
+                            egui::RichText::new("+ ADD NEW TILE")
+                                .color(egui::Color32::from_rgba_unmultiplied(0, 255, 128, (255.0 * alpha) as u8)), 
+                            |ui| {
+                                let modules: Vec<_> = model.patch_bay.get_modules().iter().map(|m| (*m).clone()).collect();
+                                for module in modules {
+                                    if ui.button(&module.name).clicked() {
+                                        model.layout.config.tiles.push(TileConfig {
+                                            id: format!("{}_new", module.id),
+                                            col: 0,
+                                            row: 0,
+                                            colspan: Some(1),
+                                            rowspan: Some(1),
+                                            module: module.id.clone(),
+                                            enabled: true,
+                                            settings: Default::default(),
+                                        });
+                                        ui.close_menu();
+                                    }
+                                }
+                            }
+                        );
+                    });
+                });
+            });
+    }
+
+    // Add Tile Picker Modal (Fullscreen Style, keyboard-driven)
+    if let Some((col, row, selected_idx)) = model.modal_stack.get_add_tile_picker() {
+        let anim = model.modal_anims.get(&ModalAnimKey::AddTilePicker);
+        let alpha = anim.map(|a| a.eased()).unwrap_or(1.0);
+        let scale = 0.9 + 0.1 * alpha;
+        
+        let screen_rect = ctx.screen_rect();
+        let margin = 80.0 * (1.0 + (1.0 - alpha));
+        let modal_width = (screen_rect.width() - margin * 2.0).min(500.0) * scale;
+        let modal_height = (screen_rect.height() - margin * 2.0).min(450.0) * scale;
+        let modal_x = screen_rect.center().x - modal_width / 2.0;
+        let modal_y = screen_rect.center().y - modal_height / 2.0;
 
         let available = model.tile_registry.list_tiles();
-
-        egui::Window::new("ADD TILE")
-            .fixed_pos(egui::pos2(x, y))
-            .fixed_size(egui::vec2(width, height))
-            .collapsible(false)
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: egui::Color32::from_rgba_unmultiplied(10, 10, 10, 250),
-                stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 128)),
-                inner_margin: egui::Margin::same(15.0),
-                ..Default::default()
-            })
+        
+        // Fullscreen dark backdrop
+        egui::Area::new(egui::Id::new("add_tile_picker_backdrop"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
             .show(&ctx, |ui| {
-                ui.label(
-                    egui::RichText::new(format!("PLACE TILE @ ({}, {})", col, row))
-                        .heading()
-                        .color(egui::Color32::from_rgb(0, 255, 128)),
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new("Up/Down: choose   Enter: place   Esc: cancel")
+                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::click());
+                ui.painter().rect_filled(rect, 0.0, 
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, (220.0 * alpha) as u8));
+            });
+        
+        egui::Area::new(egui::Id::new("add_tile_picker_modal"))
+            .fixed_pos(egui::pos2(modal_x, modal_y))
+            .show(&ctx, |ui| {
+                let frame = egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_unmultiplied(8, 8, 12, (250.0 * alpha) as u8))
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 255, 128, (200.0 * alpha) as u8)))
+                    .inner_margin(egui::Margin::same(25.0));
+                
+                frame.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(modal_width, modal_height));
+                    
+                    // Header
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("ADD TILE @ ({}, {})", col, row))
+                            .heading()
+                            .size(24.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 128, (255.0 * alpha) as u8)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new("[ESC] Cancel")
+                                .small()
+                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                        });
+                    });
+                    
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("↑/↓ Navigate   Enter: Place   Esc: Cancel")
                         .small()
-                        .color(egui::Color32::GRAY),
-                );
-                ui.add(egui::Separator::default().spacing(10.0));
+                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
+                    
+                    ui.add_space(10.0);
+                    ui.add(egui::Separator::default().spacing(10.0));
+                    ui.add_space(10.0);
 
-                if available.is_empty() {
-                    ui.label(
-                        egui::RichText::new("No tile modules registered")
-                            .color(egui::Color32::from_rgb(255, 100, 100)),
-                    );
-                    return;
-                }
-
-                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                    for (i, module_id) in available.iter().enumerate() {
-                        let is_selected = i == selected_idx;
-                        let text = if is_selected {
-                            egui::RichText::new(format!("> {}", module_id))
-                                .strong()
-                                .color(egui::Color32::from_rgb(0, 255, 128))
-                        } else {
-                            egui::RichText::new(format!("  {}", module_id))
-                                .color(egui::Color32::from_rgb(160, 160, 160))
-                        };
-                        ui.label(text);
+                    if available.is_empty() {
+                        ui.label(egui::RichText::new("No tile modules registered")
+                            .color(egui::Color32::from_rgba_unmultiplied(255, 100, 100, (255.0 * alpha) as u8)));
+                    } else {
+                        ui.label(egui::RichText::new("SELECT MODULE")
+                            .small()
+                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
+                        ui.add_space(10.0);
+                        
+                        egui::ScrollArea::vertical().max_height(modal_height - 160.0).show(ui, |ui| {
+                            for (i, module_id) in available.iter().enumerate() {
+                                let is_selected = i == selected_idx;
+                                
+                                let (bg_color, text_color) = if is_selected {
+                                    (
+                                        egui::Color32::from_rgba_unmultiplied(0, 60, 40, (200.0 * alpha) as u8),
+                                        egui::Color32::from_rgba_unmultiplied(0, 255, 128, (255.0 * alpha) as u8)
+                                    )
+                                } else {
+                                    (
+                                        egui::Color32::TRANSPARENT,
+                                        egui::Color32::from_rgba_unmultiplied(160, 160, 160, (200.0 * alpha) as u8)
+                                    )
+                                };
+                                
+                                egui::Frame::none()
+                                    .fill(bg_color)
+                                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                                    .show(ui, |ui| {
+                                        let prefix = if is_selected { "▶" } else { " " };
+                                        ui.label(egui::RichText::new(format!("{} {}", prefix, module_id))
+                                            .size(16.0)
+                                            .color(text_color));
+                                    });
+                            }
+                        });
                     }
                 });
             });

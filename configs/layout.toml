@@ -16,8 +16,8 @@ is_sleeping = false
 id = "audio_viz"
 col = 0
 row = 0
-colspan = 3
-rowspan = 2
+colspan = 2
+rowspan = 1
 module = "audio_viz"
 enabled = true
 
@@ -34,8 +34,8 @@ next_vis = "n"
 [[tiles]]
 id = "audio_output"
 col = 2
-row = 0
-colspan = 2
+row = 2
+colspan = 1
 rowspan = 1
 module = "audio_output"
 enabled = true
@@ -48,7 +48,7 @@ enabled = true
 id = "audio_input"
 col = 2
 row = 1
-colspan = 2
+colspan = 1
 rowspan = 1
 module = "audio_input"
 enabled = true
@@ -60,9 +60,9 @@ device = "Default"
 
 [[tiles]]
 id = "audio_dsp"
-col = 0
-row = 2
-colspan = 2
+col = 3
+row = 0
+colspan = 1
 rowspan = 1
 module = "audio_dsp"
 enabled = true
@@ -77,8 +77,8 @@ lowpass_hz = 2000.0
 [[tiles]]
 id = "clock"
 col = 2
-row = 2
-colspan = 2
+row = 0
+colspan = 1
 rowspan = 1
 module = "clock"
 enabled = true
@@ -93,22 +93,8 @@ toggle_seconds = "s"
 toggle_format = "t"
 
 [[patches]]
-id = "patch_audio_1"
-source_module = "audio_input"
-source_port = "audio_out"
-sink_module = "audio_dsp"
-sink_port = "audio_in"
-
-[[patches]]
-id = "patch_audio_2"
+id = "patch_1"
 source_module = "audio_dsp"
 source_port = "audio_out"
 sink_module = "audio_viz"
-sink_port = "audio_in"
-
-[[patches]]
-id = "patch_audio_3"
-source_module = "audio_dsp"
-source_port = "audio_out"
-sink_module = "audio_output"
 sink_port = "audio_in"
