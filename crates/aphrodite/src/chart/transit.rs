@@ -31,16 +31,17 @@ impl<'a> TransitChart<'a> {
         let inner_ratio = self.settings.inner_circle_radius_ratio;
         // Transit points are OUTSIDE the radix radius
         // TS: pointRadius = radius + (radius / inner_ratio + padding * scale)
-        let point_radius = self.radix_radius + (self.radix_radius / inner_ratio + (self.settings.padding * self.settings.symbol_scale));
+        let transit_scale = self.settings.transit_symbol_scale * self.settings.symbol_scale;
+        let point_radius = self.radix_radius + (self.radix_radius / inner_ratio + (self.settings.padding * transit_scale));
         
-        let c_pts = parse_hex_color(&self.settings.color_points);
+        // Use transit-specific color (distinct from natal)
+        let c_pts = parse_hex_color(&self.settings.transit_color_points);
         let color = rgba(c_pts.red, c_pts.green, c_pts.blue, 1.0);
         
-        let c_lines = parse_hex_color(&self.settings.color_axis); // or cusps color
+        let c_lines = parse_hex_color(&self.settings.color_axis);
         let color_lines = rgba(c_lines.red, c_lines.green, c_lines.blue, 1.0);
         
         // Pointer Radius
-        // TS: pointerRadius = radius + (radius / inner_ratio)
         let pointer_radius = self.radix_radius + (self.radix_radius / inner_ratio);
         let ruler_r = (self.radix_radius / inner_ratio) / self.settings.ruler_radius;
 
@@ -49,7 +50,6 @@ impl<'a> TransitChart<'a> {
             let pos = get_point_position(self.cx, self.cy, point_radius, angle, self.shift);
             
             // Pointer Line
-            // TS: start=pointerRadius, end=pointerRadius + rulerRadius/2
             let p_start = get_point_position(self.cx, self.cy, pointer_radius, angle, self.shift);
             let p_end = get_point_position(self.cx, self.cy, pointer_radius + ruler_r/2.0, angle, self.shift);
             
@@ -57,10 +57,10 @@ impl<'a> TransitChart<'a> {
                 .start(p_start)
                 .end(p_end)
                 .color(color_lines)
-                .weight(self.settings.stroke_cusps * self.settings.symbol_scale);
+                .weight(self.settings.stroke_cusps * transit_scale);
                 
-            // Draw Glyph
-            draw_glyph(draw, *glyph, pos, self.settings.symbol_scale * 12.0, color, self.settings.stroke_points);
+            // Draw Glyph (using transit scale for differentiation)
+            draw_glyph(draw, *glyph, pos, transit_scale * 12.0, color, self.settings.stroke_points);
         }
     }
     

@@ -39,6 +39,10 @@ pub struct ChartSettings {
     pub stroke_only: bool,
 
     pub show_dignities: bool,
+    
+    // Transit overlay styling
+    pub transit_color_points: String,
+    pub transit_symbol_scale: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +105,10 @@ impl Default for ChartSettings {
             shift_in_degrees: 180.0, // 0 is West
             stroke_only: false,
             show_dignities: true,
+            
+            // Transit overlay styling (distinct from natal)
+            transit_color_points: "#FF8C00".to_string(), // DarkOrange
+            transit_symbol_scale: 0.85, // Slightly smaller than natal
         }
     }
 }

@@ -4,17 +4,22 @@
 //! Control mode: Full astrological wheel chart with planets, houses, and signs
 
 use nannou::prelude::*;
-// use nannou_egui::egui removed
-use chrono::Utc;
+use chrono::{Utc, TimeZone, FixedOffset};
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
-use std::collections::HashMap;
+
+/// Transit mode for bi-wheel chart
+#[derive(Debug, Clone, Default)]
+pub enum TransitMode {
+    /// No transit overlay (radix only)
+    #[default]
+    None,
+    /// Transit at current time (auto-updates)
+    Now,
+    // Future: Fixed(DateTime<Utc>) for user-specified transit time
+}
 
 use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation, LayerPositions};
-// use crate::layout::{load_wheel_definition_from_json, WheelAssembler}; // Deprecated
-// use crate::rendering::{ChartSpecGenerator, ChartSpec}; // Deprecated
 use crate::chart::{RadixChart, TransitChart, ChartSettings, ChartData};
-use crate::rendering::glyphs::Glyph;
-use crate::rendering::primitives::{Shape, Color as PrimColor, Point as PrimPoint};
 
 const DEFAULT_WHEEL_JSON: &str = r#"
 {
@@ -55,8 +60,15 @@ pub struct AstroTile {
     // Ephemeris state
     adapter: Option<SwissEphemerisAdapter>,
     eph_settings: EphemerisSettings,
-    location: Option<GeoLocation>,
-    last_positions: Option<LayerPositions>,
+    
+    // Natal (radix) chart - hardcoded for now
+    natal_location: GeoLocation,
+    natal_datetime: chrono::DateTime<Utc>,
+    radix_positions: Option<LayerPositions>,
+    
+    // Transit layer (bi-wheel)
+    transit_mode: TransitMode,
+    transit_positions: Option<LayerPositions>,
     
     // Display state
     sun_longitude: f64,
@@ -90,11 +102,22 @@ impl AstroTile {
             ],
         };
         
+        // Hardcoded: Emmy - 11/21/1985 03:09am Columbia SC
+        // Columbia SC: lat 34.0007, lon -81.0348
+        // EST = UTC-5
+        let natal_location = GeoLocation { lat: 34.0007, lon: -81.0348 };
+        let est = FixedOffset::west_opt(5 * 3600).unwrap();
+        let natal_local = est.with_ymd_and_hms(1985, 11, 21, 3, 9, 0).unwrap();
+        let natal_datetime = natal_local.with_timezone(&Utc);
+        
         let mut tile = Self {
             adapter,
             eph_settings,
-            location: Some(GeoLocation { lat: 51.48, lon: 0.0 }), // Greenwich default
-            last_positions: None,
+            natal_location,
+            natal_datetime,
+            radix_positions: None,
+            transit_mode: TransitMode::Now,
+            transit_positions: None,
             sun_longitude: 0.0,
             moon_longitude: 0.0,
             sun_sign: String::new(),
@@ -109,19 +132,36 @@ impl AstroTile {
     }
     
     fn refresh_ephemeris(&mut self) {
-        let now = Utc::now();
         let Some(adapter) = self.adapter.as_mut() else { return; };
         
-        match adapter.calc_positions(now, self.location.clone(), &self.eph_settings) {
+        // Calculate RADIX (natal) positions at birth time
+        match adapter.calc_positions(self.natal_datetime, Some(self.natal_location.clone()), &self.eph_settings) {
             Ok(pos) => {
                 self.sun_longitude = pos.planets.get("sun").map(|p| p.lon).unwrap_or(0.0);
                 self.moon_longitude = pos.planets.get("moon").map(|p| p.lon).unwrap_or(0.0);
                 self.sun_sign = Self::longitude_to_sign(self.sun_longitude);
                 self.moon_sign = Self::longitude_to_sign(self.moon_longitude);
-                self.last_positions = Some(pos);
+                self.radix_positions = Some(pos);
             }
             Err(_) => {
                 // Keep last known positions on error
+            }
+        }
+        
+        // Calculate TRANSIT positions based on mode
+        match &self.transit_mode {
+            TransitMode::None => {
+                self.transit_positions = None;
+            }
+            TransitMode::Now => {
+                let now = Utc::now();
+                // Transit uses same location as natal for house overlay
+                match adapter.calc_positions(now, Some(self.natal_location.clone()), &self.eph_settings) {
+                    Ok(pos) => {
+                        self.transit_positions = Some(pos);
+                    }
+                    Err(_) => {}
+                }
             }
         }
     }
@@ -206,13 +246,13 @@ impl TileRenderer for AstroTile {
     
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Draw the full astrological chart in maximized mode
-        let Some(positions) = &self.last_positions else {
+        let Some(positions) = &self.radix_positions else {
             draw.rect().xy(rect.xy()).wh(rect.wh()).color(BLACK);
             draw.text("No data").xy(rect.xy()).color(WHITE);
             return false;
         };
 
-        // Convert data
+        // Convert radix data
         let data: ChartData = positions.into();
         
         // Setup Chart
@@ -220,7 +260,14 @@ impl TileRenderer for AstroTile {
         let settings = ChartSettings::default();
         
         let min_dim = rect.w().min(rect.h());
-        let radius = min_dim / 2.0 - settings.margin; // Margin
+        let radius = min_dim / 2.0 - settings.margin;
+        
+        // Calculate chart shift (rotation so Asc is at 9 o'clock)
+        let shift = if !data.cusps.is_empty() {
+            180.0 - (data.cusps[0] + settings.shift_in_degrees)
+        } else {
+            0.0
+        };
         
         // Create Radix Chart
         let radix = RadixChart::new(rect.x(), rect.y(), radius, &data, &settings);
@@ -232,10 +279,15 @@ impl TileRenderer for AstroTile {
         radix.draw_axis(draw);
         radix.draw_points(draw);
         
-        // TODO: Draw transit if available
-        // let transit = TransitChart::new(...);
-        // transit.draw_points(draw);
-        // transit.draw_cusps(draw);
+        // Draw transit overlay if available
+        if let Some(t_pos) = &self.transit_positions {
+            let t_data: ChartData = t_pos.into();
+            let transit = TransitChart::new(
+                rect.x(), rect.y(), radius, shift, &t_data, &settings
+            );
+            transit.draw_cusps(draw);
+            transit.draw_points(draw);
+        }
         
         false
     }
