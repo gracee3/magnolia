@@ -1,4 +1,4 @@
-use aphrodite::rendering::glyphs::{self, Glyph, GlyphOp};
+use aphrodite::rendering::glyphs::{self, Glyph, GlyphOp, FontId};
 use aphrodite::rendering::tweaks::GlyphTweaks;
 use nannou::lyon::math::point as lpoint;
 use nannou::lyon::path::Path;
@@ -6,6 +6,12 @@ use nannou::prelude::*;
 
 fn main() {
     nannou::app(model).update(update).run();
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DisplayGlyph {
+    Astro(Glyph),
+    Font(FontId, char),
 }
 
 struct Model {
@@ -20,7 +26,7 @@ struct Model {
     cell_size: f32,
     big_glyph_size: f32,
     small_glyph_size: f32,
-    glyphs: Vec<(Glyph, String)>,
+    glyphs: Vec<(DisplayGlyph, String)>,
     selected_index: usize,
 }
 
@@ -53,28 +59,45 @@ fn model(app: &App) -> Model {
         GlyphTweaks::default()
     });
 
-    let glyphs = vec![
+    let mut glyphs: Vec<(DisplayGlyph, String)> = vec![
         // Signs
-        (Glyph::Aries, "Aries"), (Glyph::Taurus, "Taurus"), (Glyph::Gemini, "Gemini"),
-        (Glyph::Cancer, "Cancer"), (Glyph::Leo, "Leo"), (Glyph::Virgo, "Virgo"),
-        (Glyph::Libra, "Libra"), (Glyph::Scorpio, "Scorpio"), (Glyph::Sagittarius, "Sagittarius"),
-        (Glyph::Capricorn, "Capricorn"), (Glyph::Aquarius, "Aquarius"), (Glyph::Pisces, "Pisces"),
+        (DisplayGlyph::Astro(Glyph::Aries), "Aries".to_string()), (DisplayGlyph::Astro(Glyph::Taurus), "Taurus".to_string()),
+        (DisplayGlyph::Astro(Glyph::Gemini), "Gemini".to_string()), (DisplayGlyph::Astro(Glyph::Cancer), "Cancer".to_string()),
+        (DisplayGlyph::Astro(Glyph::Leo), "Leo".to_string()), (DisplayGlyph::Astro(Glyph::Virgo), "Virgo".to_string()),
+        (DisplayGlyph::Astro(Glyph::Libra), "Libra".to_string()), (DisplayGlyph::Astro(Glyph::Scorpio), "Scorpio".to_string()),
+        (DisplayGlyph::Astro(Glyph::Sagittarius), "Sagittarius".to_string()), (DisplayGlyph::Astro(Glyph::Capricorn), "Capricorn".to_string()),
+        (DisplayGlyph::Astro(Glyph::Aquarius), "Aquarius".to_string()), (DisplayGlyph::Astro(Glyph::Pisces), "Pisces".to_string()),
         // Planets
-        (Glyph::Sun, "Sun"), (Glyph::Moon, "Moon"), (Glyph::Mercury, "Mercury"),
-        (Glyph::Venus, "Venus"), (Glyph::Mars, "Mars"), (Glyph::Jupiter, "Jupiter"),
-        (Glyph::Saturn, "Saturn"), (Glyph::Uranus, "Uranus"), (Glyph::Neptune, "Neptune"),
-        (Glyph::Pluto, "Pluto"),
+        (DisplayGlyph::Astro(Glyph::Sun), "Sun".to_string()), (DisplayGlyph::Astro(Glyph::Moon), "Moon".to_string()),
+        (DisplayGlyph::Astro(Glyph::Mercury), "Mercury".to_string()), (DisplayGlyph::Astro(Glyph::Venus), "Venus".to_string()),
+        (DisplayGlyph::Astro(Glyph::Mars), "Mars".to_string()), (DisplayGlyph::Astro(Glyph::Jupiter), "Jupiter".to_string()),
+        (DisplayGlyph::Astro(Glyph::Saturn), "Saturn".to_string()), (DisplayGlyph::Astro(Glyph::Uranus), "Uranus".to_string()),
+        (DisplayGlyph::Astro(Glyph::Neptune), "Neptune".to_string()), (DisplayGlyph::Astro(Glyph::Pluto), "Pluto".to_string()),
         // Angles
-        (Glyph::Ascendant, "Asc"), (Glyph::Descendant, "Dsc"), (Glyph::MC, "MC"), (Glyph::IC, "IC"),
+        (DisplayGlyph::Astro(Glyph::Ascendant), "Asc".to_string()), (DisplayGlyph::Astro(Glyph::Descendant), "Dsc".to_string()),
+        (DisplayGlyph::Astro(Glyph::MC), "MC".to_string()), (DisplayGlyph::Astro(Glyph::IC), "IC".to_string()),
         // Houses
-        (Glyph::House(1), "H1"), (Glyph::House(2), "H2"), (Glyph::House(3), "H3"),
-        (Glyph::House(4), "H4"), (Glyph::House(5), "H5"), (Glyph::House(6), "H6"),
-        (Glyph::House(7), "H7"), (Glyph::House(8), "H8"), (Glyph::House(9), "H9"),
-        (Glyph::House(10), "H10"), (Glyph::House(11), "H11"), (Glyph::House(12), "H12"),
+        (DisplayGlyph::Astro(Glyph::House(1)), "H1".to_string()), (DisplayGlyph::Astro(Glyph::House(2)), "H2".to_string()),
+        (DisplayGlyph::Astro(Glyph::House(3)), "H3".to_string()), (DisplayGlyph::Astro(Glyph::House(4)), "H4".to_string()),
+        (DisplayGlyph::Astro(Glyph::House(5)), "H5".to_string()), (DisplayGlyph::Astro(Glyph::House(6)), "H6".to_string()),
+        (DisplayGlyph::Astro(Glyph::House(7)), "H7".to_string()), (DisplayGlyph::Astro(Glyph::House(8)), "H8".to_string()),
+        (DisplayGlyph::Astro(Glyph::House(9)), "H9".to_string()), (DisplayGlyph::Astro(Glyph::House(10)), "H10".to_string()),
+        (DisplayGlyph::Astro(Glyph::House(11)), "H11".to_string()), (DisplayGlyph::Astro(Glyph::House(12)), "H12".to_string()),
         // Others
-        (Glyph::NNode, "NNode"), (Glyph::SNode, "SNode"), (Glyph::Lilith, "Lilith"),
-        (Glyph::Chiron, "Chiron"), (Glyph::Fortune, "Fortune"),
-    ].into_iter().map(|(g, s)| (g, s.to_string())).collect();
+        (DisplayGlyph::Astro(Glyph::NNode), "NNode".to_string()), (DisplayGlyph::Astro(Glyph::SNode), "SNode".to_string()),
+        (DisplayGlyph::Astro(Glyph::Lilith), "Lilith".to_string()), (DisplayGlyph::Astro(Glyph::Chiron), "Chiron".to_string()),
+        (DisplayGlyph::Astro(Glyph::Fortune), "Fortune".to_string()),
+    ];
+
+    // Add some Plex Sans samples
+    let sample_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for c in sample_chars.chars() {
+         glyphs.push((DisplayGlyph::Font(FontId::PlexSansRegular, c), format!("SansReg-{}", c)));
+    }
+    // Add some Plex Mono samples (just a few)
+    for c in "AB01".chars() {
+         glyphs.push((DisplayGlyph::Font(FontId::PlexMonoRegular, c), format!("MonoReg-{}", c)));
+    }
 
     Model {
         tweaks,
@@ -173,7 +196,7 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
     }
 }
 
-fn build_path_for_glyph(_glyph: Glyph, ops: &[GlyphOp], bounds: glyphs::GlyphBounds, rect: Rect, tweaks: &GlyphTweaks, glyph_name: &str) -> Path {
+fn build_path_for_glyph(_item: DisplayGlyph, ops: &[GlyphOp], bounds: glyphs::GlyphBounds, rect: Rect, tweaks: &GlyphTweaks, glyph_name: &str) -> Path {
     let width = bounds.max_x - bounds.min_x;
     let height = bounds.max_y - bounds.min_y;
     
@@ -268,7 +291,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let start_x = grid_rect.left() + model.cell_size * 0.5;
     let start_y = grid_rect.top() - model.cell_size * 0.5;
 
-    for (i, (glyph, name)) in model.glyphs.iter().enumerate() {
+    for (i, (item, name)) in model.glyphs.iter().enumerate() {
         let col = i % cols;
         let row = i / cols;
         let x = start_x + col as f32 * model.cell_size;
@@ -292,10 +315,16 @@ fn view(app: &App, model: &Model, frame: Frame) {
         let name_color = if is_selected { CYAN } else { WHITE };
         draw.text(name).xy(center + vec2(0.0, -model.cell_size * 0.4)).color(name_color).font_size(12);
         
+        // Fetch ops and bounds
+        let ops_bounds = match item {
+            DisplayGlyph::Astro(g) => glyphs::glyph_ops_bounds(*g),
+            DisplayGlyph::Font(font, c) => glyphs::font_glyph_ops_bounds(*font, *c),
+        };
+
         // Draw Large Glyph
-        if let Some((ops, bounds)) = glyphs::glyph_ops_bounds(*glyph) {
+        if let Some((ops, bounds)) = ops_bounds {
              let big_rect = Rect::from_xy_wh(center, vec2(model.big_glyph_size, model.big_glyph_size));
-             let path = build_path_for_glyph(*glyph, ops, bounds, big_rect, &model.tweaks, name);
+             let path = build_path_for_glyph(*item, ops, bounds, big_rect, &model.tweaks, name);
              
              if model.fill {
                  draw.path().fill().events(path.iter()).color(WHITE);
@@ -324,7 +353,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
              // Draw Small Glyph
              let small_xy = center + vec2(model.cell_size * 0.35, model.cell_size * 0.35);
              let small_rect = Rect::from_xy_wh(small_xy, vec2(model.small_glyph_size, model.small_glyph_size));
-             let small_path = build_path_for_glyph(*glyph, ops, bounds, small_rect, &model.tweaks, name);
+             let small_path = build_path_for_glyph(*item, ops, bounds, small_rect, &model.tweaks, name);
              
              if model.fill {
                   draw.path().fill().events(small_path.iter()).color(WHITE);

@@ -21,40 +21,6 @@ pub enum TransitMode {
 use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation, LayerPositions};
 use crate::chart::{RadixChart, TransitChart, ChartSettings, ChartData, ChartAnimation};
 
-const DEFAULT_WHEEL_JSON: &str = r#"
-{
-  "name": "Talisman Wheel",
-  "rings": [
-    {
-      "slug": "ring_signs",
-      "type": "signs",
-      "label": "Zodiac Signs",
-      "orderIndex": 0,
-      "radiusInner": 0.78,
-      "radiusOuter": 0.98,
-      "dataSource": { "kind": "static_zodiac" }
-    },
-    {
-      "slug": "ring_houses",
-      "type": "houses",
-      "label": "Houses",
-      "orderIndex": 1,
-      "radiusInner": 0.70,
-      "radiusOuter": 0.78,
-      "dataSource": { "kind": "layer_houses", "layerId": "now" }
-    },
-    {
-      "slug": "ring_planets",
-      "type": "planets",
-      "label": "Planets",
-      "orderIndex": 2,
-      "radiusInner": 0.52,
-      "radiusOuter": 0.70,
-      "dataSource": { "kind": "layer_planets", "layerId": "now" }
-    }
-  ]
-}
-"#;
 
 pub struct AstroTile {
     // Ephemeris state

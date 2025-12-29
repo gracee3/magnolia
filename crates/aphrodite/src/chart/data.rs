@@ -45,9 +45,7 @@ impl From<&LayerPositions> for ChartData {
             }
         }
         
-        // Handle HousePositions
-        let mut cusps = Vec::new();
-        if let Some(houses) = &pos.houses {
+        let cusps = if let Some(houses) = &pos.houses {
              // Add Angles (Asc, Mc, etc) if not already in planets?
              // Usually they are separate.
              for (key, val) in &houses.angles {
@@ -72,11 +70,11 @@ impl From<&LayerPositions> for ChartData {
                      }
                  }
              }
-             cusps = cups_vec;
+             cups_vec
         } else {
             // Default cusps if missing? Or empty.
-            cusps = vec![0.0; 12];
-        }
+            vec![0.0; 12]
+        };
         
         Self {
             planets,
