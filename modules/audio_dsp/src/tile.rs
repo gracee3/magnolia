@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
-use nannou_egui::egui;
 use talisman_core::{TileRenderer, RenderContext};
 
 use crate::AudioDspState;
@@ -60,47 +59,7 @@ impl TileRenderer for AudioDspTile {
 
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
         self.render_monitor(draw, rect, ctx);
-
-        let Some(egui_ctx) = ctx.egui_ctx else { return false; };
-        let mut gain = self.gain.lock().map(|v| *v).unwrap_or(1.0);
-        let mut lowpass_hz = self.lowpass_hz.lock().map(|v| *v).unwrap_or(2000.0);
-        let mut lowpass_enabled = self.lowpass_enabled.lock().map(|v| *v).unwrap_or(false);
-
-        egui::Area::new(egui::Id::new(format!("{}_dsp_controls", self.id)))
-            .fixed_pos(egui::pos2(rect.left() + 20.0, rect.top() - 50.0))
-            .show(egui_ctx, |ui| {
-                ui.set_max_width(280.0);
-                egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 15, 240))
-                    .inner_margin(egui::Margin::same(12.0))
-                    .show(ui, |ui| {
-                        ui.heading("DSP Settings");
-                        ui.add_space(8.0);
-
-                        ui.label("Gain");
-                        ui.add(egui::Slider::new(&mut gain, 0.0..=4.0));
-
-                        ui.add_space(8.0);
-                        ui.checkbox(&mut lowpass_enabled, "Enable Lowpass");
-                        ui.add(egui::Slider::new(&mut lowpass_hz, 80.0..=8000.0).text("Cutoff Hz"));
-                    });
-            });
-
-        if let Ok(mut current) = self.gain.lock() {
-            *current = gain;
-        }
-        if let Ok(mut current) = self.lowpass_hz.lock() {
-            *current = lowpass_hz;
-        }
-        if let Ok(mut current) = self.lowpass_enabled.lock() {
-            *current = lowpass_enabled;
-        }
-
-        self.state.set_gain(gain);
-        self.state.set_lowpass_hz(lowpass_hz);
-        self.state.set_lowpass_enabled(lowpass_enabled);
-
-        true
+        false
     }
 
     fn settings_schema(&self) -> Option<serde_json::Value> {

@@ -155,7 +155,6 @@ dependencies = [
  "criterion",
  "lazy_static",
  "nannou",
- "nannou_egui",
  "regex",
  "serde",
  "serde_json",
@@ -242,7 +241,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "nannou",
- "nannou_egui",
  "serde_json",
  "talisman_core",
  "talisman_signals",
@@ -257,7 +255,6 @@ dependencies = [
  "cpal",
  "log",
  "nannou",
- "nannou_egui",
  "num-traits",
  "rustfft",
  "serde",
@@ -276,7 +273,6 @@ dependencies = [
  "cpal",
  "log",
  "nannou",
- "nannou_egui",
  "serde_json",
  "talisman_core",
  "talisman_signals",
@@ -432,20 +428,6 @@ name = "bytemuck"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
-dependencies = [
- "bytemuck_derive",
-]
-
-[[package]]
-name = "bytemuck_derive"
-version = "1.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.111",
-]
 
 [[package]]
 name = "byteorder"
@@ -931,7 +913,6 @@ dependencies = [
  "env_logger",
  "log",
  "nannou",
- "nannou_egui",
  "serde",
  "serde_json",
  "sha2",
@@ -1103,15 +1084,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
-name = "ecolor"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfdf4e52dbbb615cfd30cf5a5265335c217b5fd8d669593cea74a517d9c605af"
-dependencies = [
- "bytemuck",
-]
-
-[[package]]
 name = "ed25519"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1136,44 +1108,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bd69fed5fcf4fbb8225b24e80ea6193b61e17a625db105ef0c4d71dde6eb8b7"
-dependencies = [
- "ahash",
- "epaint",
- "nohash-hasher",
-]
-
-[[package]]
-name = "egui-wgpu"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62d4c9ab93d9528c184ef1d695c8c99b2e6d50833696ec3f513063efeee0fe77"
-dependencies = [
- "bytemuck",
- "epaint",
- "log",
- "thiserror",
- "type-map",
- "wgpu",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
-
-[[package]]
-name = "emath"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ef2b29de53074e575c18b694167ccbe6e5191f7b25fe65175a0d905a32eeec0"
-dependencies = [
- "bytemuck",
-]
 
 [[package]]
 name = "env_logger"
@@ -1186,21 +1124,6 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
-]
-
-[[package]]
-name = "epaint"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58067b840d009143934d91d8dcb8ded054d8301d7c11a517ace0a99bb1e1595e"
-dependencies = [
- "ab_glyph",
- "ahash",
- "bytemuck",
- "ecolor",
- "emath",
- "nohash-hasher",
- "parking_lot",
 ]
 
 [[package]]
@@ -1908,7 +1831,6 @@ dependencies = [
  "async-trait",
  "log",
  "nannou",
- "nannou_egui",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
@@ -2049,7 +1971,6 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "nannou",
- "nannou_egui",
  "serde",
  "serde_json",
  "talisman-plugin-helper",
@@ -2309,18 +2230,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nannou_egui"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c099ea28367f5372b6d32c61dd7c4e4e6d6d4316146afd74c0318816d9749876"
-dependencies = [
- "egui",
- "egui-wgpu",
- "nannou",
- "winit",
-]
-
-[[package]]
 name = "nannou_mesh"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2420,12 +2329,6 @@ dependencies = [
  "libc",
  "memoffset 0.6.5",
 ]
-
-[[package]]
-name = "nohash-hasher"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "noise"
@@ -3740,7 +3643,6 @@ dependencies = [
  "libloading 0.8.9",
  "log",
  "nannou",
- "nannou_egui",
  "notify",
  "schemars",
  "seccompiler",
@@ -3983,15 +3885,6 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
-
-[[package]]
-name = "type-map"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb30dbbd9036155e74adad6812e9898d03ec374946234fbcebd5dfc7b9187b90"
-dependencies = [
- "rustc-hash 2.1.1",
-]
 
 [[package]]
 name = "typenum"

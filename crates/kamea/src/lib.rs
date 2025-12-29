@@ -85,7 +85,6 @@ impl TalismanPlugin for KameaPlugin {
                 is_selected: false,
                 is_maximized: false,
                 tile_settings: None,
-                egui_ctx: None,
             };
             
             tile.render_monitor(&draw, rect, &ctx);

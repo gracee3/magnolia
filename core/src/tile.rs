@@ -49,7 +49,6 @@ pub struct RenderContext<'a> {
     pub frame_count: u64,
     pub is_selected: bool,
     pub is_maximized: bool,
-    pub egui_ctx: Option<&'a nannou_egui::egui::Context>,
     /// Per-tile settings from config (read-only access during render)
     pub tile_settings: Option<&'a serde_json::Value>,
 }
@@ -61,7 +60,6 @@ impl<'a> RenderContext<'a> {
             frame_count: 0,
             is_selected: false,
             is_maximized: false,
-            egui_ctx: None,
             tile_settings: None,
         }
     }
@@ -154,7 +152,7 @@ pub trait TileRenderer: Send + Sync {
     /// This is shown when the tile is maximized (double-click/Enter).
     /// Should include settings controls and a live preview of the tile.
     /// 
-    /// Returns true if egui was used (for input routing).
+    /// Returns true if input was handled.
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
         // Default: just render monitor view
         self.render_monitor(draw, rect, ctx);
@@ -251,7 +249,7 @@ impl TileRegistry {
     }
     
     /// Render a tile in control mode by module name
-    /// Returns true if egui was used
+    /// Returns true if input was handled.
     pub fn render_controls(&self, module: &str, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
         if let Some(tile) = self.tiles.get(module) {
             if let Ok(t) = tile.read() {

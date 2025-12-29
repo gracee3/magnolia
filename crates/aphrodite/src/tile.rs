@@ -4,7 +4,7 @@
 //! Control mode: Full astrological wheel chart with planets, houses, and signs
 
 use nannou::prelude::*;
-use nannou_egui::egui;
+// use nannou_egui::egui removed
 use chrono::Utc;
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
 use std::collections::HashMap;
@@ -366,7 +366,7 @@ impl TileRenderer for AstroTile {
             .font_size(12);
     }
     
-    fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
+    fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Draw the full astrological chart in maximized mode
         if let Some(spec) = self.build_spec(rect.w(), rect.h()) {
             draw_spec(draw, rect, &spec);
@@ -382,32 +382,7 @@ impl TileRenderer for AstroTile {
                 .font_size(16);
         }
         
-        // Optional egui overlay for settings
-        let mut used_egui = false;
-        if let Some(egui_ctx) = ctx.egui_ctx {
-            used_egui = true;
-            
-            egui::Window::new("Astro Chart")
-                .collapsible(false)
-                .resizable(true)
-                .default_size(egui::vec2(250.0, 200.0))
-                .show(egui_ctx, |ui| {
-                    ui.heading("Current Positions");
-                    ui.separator();
-                    ui.label(format!("☉ Sun: {:.2}° {}", self.sun_longitude, self.sun_sign));
-                    ui.label(format!("☽ Moon: {:.2}° {}", self.moon_longitude, self.moon_sign));
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.label("Settings");
-                    let mut show_deg = self.show_degrees;
-                    let mut show_moon = self.show_moon;
-                    ui.checkbox(&mut show_deg, "Show Degrees");
-                    ui.checkbox(&mut show_moon, "Show Moon");
-                    // Note: Changes would need to be applied via apply_settings in a real implementation
-                });
-        }
-        
-        used_egui
+        false
     }
     
     fn settings_schema(&self) -> Option<serde_json::Value> {

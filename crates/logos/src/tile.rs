@@ -1,10 +1,10 @@
 //! Text Input Tile - Egui TextEdit for text entry
 //!
 //! Monitor mode: Read-only preview of current text
-//! Control mode: Full text editor with egui TextEdit
+//! Control mode: Full text editor (placeholder)
 
 use nannou::prelude::*;
-use nannou_egui::egui;
+// use nannou_egui::egui removed
 use std::sync::{Arc, Mutex};
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
 
@@ -37,7 +37,7 @@ impl TileRenderer for TextInputTile {
     fn name(&self) -> &str { "Text Input" }
     
     fn update(&mut self) {
-        // Text input is updated via egui in render_controls
+        // Text input is updated via Nannou controls (placeholder)
     }
     
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
@@ -115,46 +115,7 @@ impl TileRenderer for TextInputTile {
             .color(srgba(0.5, 0.5, 0.5, 1.0))
             .font_size(12);
         
-        // Egui text editor
-        let mut used_egui = false;
-        if let Some(egui_ctx) = ctx.egui_ctx {
-            used_egui = true;
-            
-            let editor_width = rect.w() - 80.0;
-            let editor_height = rect.h() - 120.0;
-            let panel_x = rect.left() + 40.0 + (rect.w() / 2.0);
-            let panel_y = rect.top() - 80.0 + (rect.h() / 2.0);
-            
-            egui::Area::new(egui::Id::new("text_input_editor"))
-                .fixed_pos(egui::pos2(panel_x, panel_y))
-                .show(egui_ctx, |ui| {
-                    ui.set_max_width(editor_width);
-                    
-                    egui::Frame::none()
-                        .fill(egui::Color32::from_rgba_unmultiplied(5, 5, 10, 250))
-                        .inner_margin(egui::Margin::same(10.0))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 80, 80)))
-                        .show(ui, |ui| {
-                            // Get mutable access to text
-                            if let Ok(mut text) = self.text_buffer.lock() {
-                                let response = ui.add(
-                                    egui::TextEdit::multiline(&mut *text)
-                                        .desired_width(editor_width - 20.0)
-                                        .desired_rows((editor_height / 20.0) as usize)
-                                        .font(egui::TextStyle::Monospace)
-                                        .text_color(egui::Color32::from_rgb(0, 255, 255))
-                                );
-                                
-                                // Auto-focus on open
-                                if !response.has_focus() {
-                                    response.request_focus();
-                                }
-                            }
-                        });
-                });
-        }
-        
-        used_egui
+        false
     }
     
     fn bindable_actions(&self) -> Vec<BindableAction> {

@@ -7,7 +7,7 @@ license = "AGPL-3.0-or-later"
 
 [features]
 default = []
-tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:nannou_egui"]
+tile-rendering = ["talisman_core/tile-rendering", "dep:nannou"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -31,7 +31,7 @@ regex = "1"
 
 # Optional rendering dependencies
 nannou = { version = "0.19", optional = true }
-nannou_egui = { version = "0.19", optional = true }
+# nannou_egui removed
 
 [dev-dependencies]
 criterion = "0.5"

@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
-use nannou_egui::egui;
 use talisman_core::{TileRenderer, RenderContext};
 
 use crate::{AudioOutputState, AudioOutputSettings};
@@ -67,45 +66,7 @@ impl TileRenderer for AudioOutputTile {
 
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
         self.render_monitor(draw, rect, ctx);
-
-        let Some(egui_ctx) = ctx.egui_ctx else { return false; };
-        let devices = self.settings.devices();
-        let mut selected = self
-            .selected
-            .lock()
-            .map(|s| s.clone())
-            .unwrap_or_else(|_| "Default".to_string());
-
-        egui::Area::new(egui::Id::new(format!("{}_audio_out_controls", self.id)))
-            .fixed_pos(egui::pos2(rect.left() + 20.0, rect.top() - 50.0))
-            .show(egui_ctx, |ui| {
-                ui.set_max_width(280.0);
-                egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 15, 240))
-                    .inner_margin(egui::Margin::same(12.0))
-                    .show(ui, |ui| {
-                        ui.heading("Output Device");
-                        ui.add_space(8.0);
-                        egui::ComboBox::from_id_source("audio_output_device")
-                            .selected_text(&selected)
-                            .width(240.0)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut selected, "Default".to_string(), "Default");
-                                for dev in devices {
-                                    ui.selectable_value(&mut selected, dev.clone(), dev);
-                                }
-                            });
-                    });
-            });
-
-        if let Ok(mut current) = self.selected.lock() {
-            if *current != selected {
-                *current = selected.clone();
-                self.settings.set_selected(selected);
-            }
-        }
-
-        true
+        false
     }
 
     fn settings_schema(&self) -> Option<serde_json::Value> {

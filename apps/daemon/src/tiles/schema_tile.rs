@@ -55,32 +55,24 @@ impl TileRenderer for SchemaTile {
             .color(GREEN);
     }
 
-    fn render_controls(&self, _draw: &Draw, _rect: Rect, ctx: &RenderContext) -> bool {
-        let mut captured = false;
-        
-        if let Some(egui_ctx) = ctx.egui_ctx {
-             let window_name = format!("{} Settings", self.name);
-             nannou_egui::egui::Window::new(&window_name)
-                .resizable(true)
-                .collapsible(false)
-                .show(egui_ctx, |ui| {
-                    if let Some(schema) = &self.schema {
-                        if let Ok(mut settings) = self.settings.lock() {
-                            // Order: ui, settings, schema
-                            if crate::ui::schema::render_schema_ui(ui, &mut *settings, schema) {
-                                // Settings changed!
-                                self.send_update(settings.clone());
-                            }
-                        }
-                    } else {
-                        ui.label("No settings schema available for this plugin.");
-                    }
-                });
-             
-             captured = egui_ctx.wants_pointer_input() || egui_ctx.wants_keyboard_input();
-        }
-        
-        captured
+    fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
+        // Fullscreen placeholder
+        draw.rect()
+            .xy(rect.xy())
+            .wh(rect.wh())
+            .color(rgba(0.0, 0.0, 0.0, 0.9));
+            
+        draw.text(&format!("{} - SETTINGS", self.name.to_uppercase()))
+            .xy(rect.xy())
+            .color(CYAN)
+            .font_size(32);
+            
+        draw.text("Custom Nannou controls coming soon...")
+            .xy(pt2(rect.x(), rect.y() - 40.0))
+            .color(GRAY)
+            .font_size(14);
+            
+        false
     }
     
     fn settings_schema(&self) -> Option<Value> {

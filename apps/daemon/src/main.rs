@@ -2,7 +2,7 @@ use nannou::prelude::*;
 use talisman_core::{Signal, PatchBay, PluginManager, PluginModuleAdapter, ModuleRuntime, RoutedSignal};
 use talisman_core::{Source, Sink, Processor};
 use talisman_core::adapters::{SourceAdapter, SinkAdapter, ProcessorAdapter};
-use nannou_egui::{self, Egui, egui};
+// use nannou_egui removed
 use tokio::sync::mpsc;
 
 use audio_input::{AudioInputSource, AudioVizSink, AudioInputSettings, AudioInputTile};
@@ -40,7 +40,7 @@ struct Model {
     router_rx: mpsc::Receiver<RoutedSignal>,
     
     // UI State
-    egui: Egui,
+    // egui removed
     
     // Layout and Interaction
     layout: Layout,
@@ -135,7 +135,7 @@ fn model(app: &App) -> Model {
     log::info!("ModuleHost initialized - modules will be loaded dynamically via PluginManager");
     
     // 3. Initialize Window & Egui
-    let window_id = app.new_window()
+    let _window_id = app.new_window()
         .view(view)
         .raw_event(raw_window_event)
         .key_pressed(key_pressed)
@@ -146,8 +146,8 @@ fn model(app: &App) -> Model {
         .build()
         .unwrap();
 
-    let window = app.window(window_id).unwrap();
-    let egui = Egui::from_window(&window);
+    let _window = app.window(_window_id).unwrap();
+    // let egui = Egui::from_window(&window); removed
 
     // 4. Init Clipboard (might fail on some systems)
     let clipboard = match arboard::Clipboard::new() {
@@ -329,7 +329,7 @@ fn model(app: &App) -> Model {
     let model = Model {
         _receiver: rx_ui,
         router_rx: rx_router,
-        egui,
+        // egui removed
         layout,
         selected_tile: None,
         anim_factor: 0.0,
@@ -429,9 +429,9 @@ fn update_modal_anims(model: &mut Model) {
 }
 
 
-fn update(app: &App, model: &mut Model, update: Update) {
+fn update(_app: &App, model: &mut Model, _update: Update) {
     // Update Layout dimensions
-    model.layout.update(app.window_rect());
+    model.layout.update(_app.window_rect());
     
     // Smooth Animation for tile maximize/minimize
     let maximized_tile = model.modal_stack.get_maximized_tile().map(|s| s.to_string());
@@ -545,119 +545,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
         }
     }
 
-    // 1. UPDATE GUI
-    model.egui.set_elapsed_time(update.since_start);
-    let ctx = model.egui.begin_frame();
-    
-    // (Legacy editor window removed - TextInputTile handles text input)
-    // (Legacy kamea buttons removed - KameaTile handles its own controls)
-    // (Context menu removed - keyboard-first navigation)
+    // GUI update removed (egui removed)
 
-
-
-
-
-
-
-
-
-    // Add Tile Picker Modal (Fullscreen Style, keyboard-driven)
-    if let Some((col, row, selected_idx)) = model.modal_stack.get_add_tile_picker() {
-        let anim = model.modal_anims.get(&ModalAnimKey::AddTilePicker);
-        let alpha = anim.map(|a| a.eased()).unwrap_or(1.0);
-        let scale = 0.9 + 0.1 * alpha;
-        
-        let screen_rect = ctx.screen_rect();
-        let margin = 80.0 * (1.0 + (1.0 - alpha));
-        let modal_width = (screen_rect.width() - margin * 2.0).min(500.0) * scale;
-        let modal_height = (screen_rect.height() - margin * 2.0).min(450.0) * scale;
-        let modal_x = screen_rect.center().x - modal_width / 2.0;
-        let modal_y = screen_rect.center().y - modal_height / 2.0;
-
-        let available = model.tile_registry.list_tiles();
-        
-        // Fullscreen dark backdrop
-        egui::Area::new(egui::Id::new("add_tile_picker_backdrop"))
-            .fixed_pos(egui::pos2(0.0, 0.0))
-            .show(&ctx, |ui| {
-                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::click());
-                ui.painter().rect_filled(rect, 0.0, 
-                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, (220.0 * alpha) as u8));
-            });
-        
-        egui::Area::new(egui::Id::new("add_tile_picker_modal"))
-            .fixed_pos(egui::pos2(modal_x, modal_y))
-            .show(&ctx, |ui| {
-                let frame = egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_unmultiplied(8, 8, 12, (250.0 * alpha) as u8))
-                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 255, 128, (200.0 * alpha) as u8)))
-                    .inner_margin(egui::Margin::same(25.0));
-                
-                frame.show(ui, |ui| {
-                    ui.set_min_size(egui::vec2(modal_width, modal_height));
-                    
-                    // Header
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("ADD TILE @ ({}, {})", col, row))
-                            .heading()
-                            .size(24.0)
-                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 128, (255.0 * alpha) as u8)));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new("[ESC] Cancel")
-                                .small()
-                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
-                        });
-                    });
-                    
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("↑/↓ Navigate   Enter: Place   Esc: Cancel")
-                        .small()
-                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
-                    
-                    ui.add_space(10.0);
-                    ui.add(egui::Separator::default().spacing(10.0));
-                    ui.add_space(10.0);
-
-                    if available.is_empty() {
-                        ui.label(egui::RichText::new("No tile modules registered")
-                            .color(egui::Color32::from_rgba_unmultiplied(255, 100, 100, (255.0 * alpha) as u8)));
-                    } else {
-                        ui.label(egui::RichText::new("SELECT MODULE")
-                            .small()
-                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
-                        ui.add_space(10.0);
-                        
-                        egui::ScrollArea::vertical().max_height(modal_height - 160.0).show(ui, |ui| {
-                            for (i, module_id) in available.iter().enumerate() {
-                                let is_selected = i == selected_idx;
-                                
-                                let (bg_color, text_color) = if is_selected {
-                                    (
-                                        egui::Color32::from_rgba_unmultiplied(0, 60, 40, (200.0 * alpha) as u8),
-                                        egui::Color32::from_rgba_unmultiplied(0, 255, 128, (255.0 * alpha) as u8)
-                                    )
-                                } else {
-                                    (
-                                        egui::Color32::TRANSPARENT,
-                                        egui::Color32::from_rgba_unmultiplied(160, 160, 160, (200.0 * alpha) as u8)
-                                    )
-                                };
-                                
-                                egui::Frame::none()
-                                    .fill(bg_color)
-                                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
-                                    .show(ui, |ui| {
-                                        let prefix = if is_selected { "▶" } else { " " };
-                                        ui.label(egui::RichText::new(format!("{} {}", prefix, module_id))
-                                            .size(16.0)
-                                            .color(text_color));
-                                    });
-                            }
-                        });
-                    }
-                });
-            });
-    }
 
     // (Close confirmation dialog removed - ESC is for navigation only, not exit)
 
@@ -682,10 +571,8 @@ fn mouse_moved(_app: &App, _model: &mut Model, _pos: Point2) {
 
 fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     // === INPUT ROUTING GUARD ===
-    // Skip nannou key handling when egui wants keyboard input (e.g., TextEdit is focused)
-    if model.egui.ctx().wants_keyboard_input() {
-        return;
-    }
+    // Egui keyboard guard removed
+
     
     let ctrl = _app.keys.mods.ctrl();
     let shift = _app.keys.mods.shift();
@@ -840,8 +727,8 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
 
 
 
-fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event::WindowEvent) {
-    model.egui.handle_raw_event(event);
+fn raw_window_event(_app: &App, _model: &mut Model, _event: &nannou::winit::event::WindowEvent) {
+    // egui event handling removed
 }
 
 fn draw_fullscreen_overlay(draw: &Draw, win_rect: Rect, title: &str) {
@@ -949,7 +836,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     frame_count: model.frame_count,
                     is_selected,
                     is_maximized: false,
-                    egui_ctx: None,
                     tile_settings: Some(&tile.settings.config),
                 };
                 
@@ -990,7 +876,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     frame_count: model.frame_count,
                     is_selected: true,
                     is_maximized: true,
-                    egui_ctx: None,
                     tile_settings: Some(&tile.settings.config),
                 };
                 
@@ -1073,5 +958,5 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
 
     draw.to_frame(app, &frame).unwrap();
-    model.egui.draw_to_frame(&frame).unwrap();
+    // egui draw removed
 }

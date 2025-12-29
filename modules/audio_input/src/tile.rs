@@ -7,7 +7,6 @@
 //! Uses SPSC ring buffer for minimal latency audio streaming.
 
 use nannou::prelude::*;
-use nannou_egui::egui;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
@@ -189,10 +188,6 @@ impl AudioVisTile {
         }
     }
     
-    /// Connect a ring buffer receiver for real-time audio streaming
-    /// 
-    /// This uses the SPSC ring buffer for minimal latency.
-    /// Expects interleaved samples (L, R, L, R...) if channels > 1.
     pub fn connect_audio_stream(&mut self, receiver: RingBufferReceiver<f32>, channels: u16) {
         self.ring_rx = Some(receiver);
         self.channels = channels;
@@ -200,27 +195,22 @@ impl AudioVisTile {
         log::info!("AudioVisTile {}: connected to audio stream ({} ch)", self.instance_id, channels);
     }
     
-    /// Check if audio stream is connected
     pub fn is_connected(&self) -> bool {
         self.ring_rx.is_some()
     }
     
-    /// Get the legacy shared buffer for fallback audio input
     pub fn get_legacy_buffer(&self) -> Arc<Mutex<Vec<f32>>> {
         self.legacy_buffer.clone()
     }
 
-    /// Attach a latency meter (microseconds)
     pub fn connect_latency_meter(&mut self, latency_us: Arc<AtomicU64>) {
         self.latency_us = Some(latency_us);
     }
     
-    /// Set error state
     pub fn set_error(&mut self, error: TileError) {
         self.error = Some(error);
     }
     
-    /// Get current color based on scheme and amplitude
     fn get_color(&self, amplitude: f32) -> LinSrgba {
         match self.color_scheme {
             ColorScheme::CyanReactive => {
@@ -231,7 +221,6 @@ impl AudioVisTile {
                 LinSrgba::new(0.2, 1.0, 0.3, 1.0)
             },
             ColorScheme::Rainbow => {
-                // Full saturation rainbow
                 let hue = (amplitude.abs() * self.sensitivity).min(1.0);
                 let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
                 LinSrgba::new(r, g, b, 1.0)
@@ -242,7 +231,6 @@ impl AudioVisTile {
         }
     }
     
-    /// Get current buffer (live or frozen)
     fn get_current_buffer(&self) -> &[f32] {
         if self.is_frozen {
             &self.frozen_buffer
@@ -253,23 +241,19 @@ impl AudioVisTile {
         }
     }
     
-    /// Poll audio from ring buffer and update local buffers
     fn poll_audio(&mut self) {
         if let Some(ref rx) = self.ring_rx {
              let mut frames_processed = 0;
-             let max_frames = BUFFER_SIZE; // Limit processing per frame to avoid stall
+             let max_frames = BUFFER_SIZE;
              
-             // Drain ring buffer
              while frames_processed < max_frames {
                  match self.channels {
                      1 => {
                          if let Some(sample) = rx.try_recv() {
-                             // Shift mono buffer
                              self.buffer.rotate_left(1);
                              let len = self.buffer.len();
                              self.buffer[len - 1] = sample;
                              
-                             // Update split buffers (duplicate mono)
                              self.left_buffer.rotate_left(1);
                              let len_l = self.left_buffer.len();
                              self.left_buffer[len_l - 1] = sample;
@@ -284,17 +268,8 @@ impl AudioVisTile {
                          }
                      },
                      2 => {
-                         // Need 2 samples for a frame
-                         // Since rx.try_recv() pops one by one, we need to be careful not to de-sync.
-                         // But for visualization, slight desync is acceptable if we miss a sample.
-                         // Ideally we peek, but ring_buffer might not support peek.
-                         // We'll just try to read 2.
-                         
-                         // Note: SPSC ring buffer is simple. If we get one, we should get the next immediately 
-                         // unless the writer was preempted exactly in between.
                          if let Some(left) = rx.try_recv() {
-                             let right = rx.try_recv().unwrap_or(0.0); // Simple fallback
-                             
+                             let right = rx.try_recv().unwrap_or(0.0);
                              let mono = (left + right) * 0.5;
                              
                              self.buffer.rotate_left(1);
@@ -315,25 +290,18 @@ impl AudioVisTile {
                          }
                      },
                      ch => {
-                         // Multi-channel: read ch samples, average first 2 for stereo, average all for mono
-                         // This is expensive per-sample loop. Just drain ch samples
                          let mut sum = 0.0;
                          let mut got_frame = false;
                          
-                         // Try to read first sample
                          if let Some(s1) = rx.try_recv() {
                              sum += s1;
                              let mut s2 = 0.0;
-                             
-                             // Read rest
                              for i in 1..ch {
                                  let s = rx.try_recv().unwrap_or(0.0);
                                  sum += s;
                                  if i == 1 { s2 = s; }
                              }
-                             
                              let mono = sum / ch as f32;
-                             
                              self.buffer.rotate_left(1);
                              let len = self.buffer.len();
                              self.buffer[len - 1] = mono;
@@ -345,7 +313,6 @@ impl AudioVisTile {
                              self.right_buffer.rotate_left(1);
                              let len_r = self.right_buffer.len();
                              self.right_buffer[len_r - 1] = s2;
-                             
                              got_frame = true;
                          }
                          
@@ -358,7 +325,6 @@ impl AudioVisTile {
                  }
              }
         } else {
-            // Fall back to legacy buffer
             if let Ok(buf) = self.legacy_buffer.lock() {
                 let len = buf.len().min(BUFFER_SIZE);
                 if len > 0 {
@@ -429,7 +395,6 @@ impl TileRenderer for AudioVisTile {
     fn prefers_gpu(&self) -> bool { true }
     
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
-        // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
@@ -439,7 +404,6 @@ impl TileRenderer for AudioVisTile {
         let avg_amp = buffer.iter().map(|s| s.abs()).sum::<f32>() / buffer.len().max(1) as f32;
         let color = self.get_color(avg_amp);
         
-        // Render visualization using GPU renderer if available
         let content_rect = rect.pad(5.0);
         
         match self.vis_type {
@@ -514,14 +478,13 @@ impl TileRenderer for AudioVisTile {
             }
         }
         
-        // Status indicators (monitor mode - read only)
+        // Status indicators
         let status_y = rect.top() - 12.0;
         draw.text(self.vis_type.label())
             .xy(pt2(rect.x(), status_y))
             .color(srgba(0.5, 0.5, 0.5, 1.0))
             .font_size(10);
         
-        // State indicators
         let mut indicator_x = rect.right() - 35.0;
         if self.is_muted {
             draw.text("MUTE")
@@ -548,19 +511,16 @@ impl TileRenderer for AudioVisTile {
     }
     
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
-        // Full background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(srgba(0.02, 0.02, 0.05, 0.98));
         
-        // Title
         draw.text("AUDIO VISUALIZER")
             .xy(pt2(rect.x(), rect.top() - 30.0))
             .color(CYAN)
             .font_size(18);
         
-        // Subtitle with current settings
         let subtitle = format!("{} | {}", self.vis_type.label(), self.color_scheme.label());
         draw.text(&subtitle)
             .xy(pt2(rect.x(), rect.top() - 50.0))
@@ -576,7 +536,6 @@ impl TileRenderer for AudioVisTile {
                 .font_size(11);
         }
         
-        // Preview area (right side)
         let preview_rect = Rect::from_x_y_w_h(
             rect.x() + rect.w() * 0.15,
             rect.y() - 20.0,
@@ -584,7 +543,6 @@ impl TileRenderer for AudioVisTile {
             rect.h() * 0.5,
         );
         
-        // Preview border
         draw.rect()
             .xy(preview_rect.xy())
             .wh(preview_rect.wh())
@@ -597,101 +555,11 @@ impl TileRenderer for AudioVisTile {
             .color(srgba(0.3, 0.3, 0.3, 1.0))
             .font_size(10);
         
-        // Render live preview
         self.render_monitor(draw, preview_rect.pad(2.0), ctx);
-        
-        // Egui controls
-        let mut used_egui = false;
-        if let Some(egui_ctx) = ctx.egui_ctx {
-            used_egui = true;
-            
-            let panel_x = rect.left() + 40.0 + (rect.w() / 2.0);
-            let panel_y = rect.top() - 80.0 + (rect.h() / 2.0);
-            
-            egui::Area::new(egui::Id::new(format!("{}_controls", self.instance_id)))
-                .fixed_pos(egui::pos2(panel_x, panel_y))
-                .show(egui_ctx, |ui| {
-                    ui.set_max_width(280.0);
-                    
-                    egui::Frame::none()
-                        .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 15, 240))
-                        .inner_margin(egui::Margin::same(15.0))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 100, 100)))
-                        .show(ui, |ui| {
-                            ui.heading(egui::RichText::new("Settings").color(egui::Color32::from_rgb(0, 255, 255)));
-                            ui.add_space(10.0);
-                            
-                            // Visualization Type
-                            ui.label(egui::RichText::new("Visualization").color(egui::Color32::GRAY).small());
-                            egui::ComboBox::from_id_source("vis_type_select")
-                                .selected_text(self.vis_type.label())
-                                .width(200.0)
-                                .show_ui(ui, |ui| {
-                                    for vt in VisualizationType::all() {
-                                        let _ = ui.selectable_label(self.vis_type == *vt, vt.label());
-                                    }
-                                });
-                            
-                            ui.add_space(8.0);
-                            
-                            // Color Scheme
-                            ui.label(egui::RichText::new("Color Scheme").color(egui::Color32::GRAY).small());
-                            egui::ComboBox::from_id_source("color_scheme_select")
-                                .selected_text(self.color_scheme.label())
-                                .width(200.0)
-                                .show_ui(ui, |ui| {
-                                    for cs in ColorScheme::all() {
-                                        let _ = ui.selectable_label(self.color_scheme == *cs, cs.label());
-                                    }
-                                });
-                            
-                            ui.add_space(8.0);
-                            
-                            // Sensitivity
-                            ui.label(egui::RichText::new("Sensitivity").color(egui::Color32::GRAY).small());
-                            let mut sens = self.sensitivity;
-                            ui.add(egui::Slider::new(&mut sens, 0.1..=5.0).show_value(true));
-                            
-                            ui.add_space(15.0);
-                            ui.separator();
-                            ui.add_space(10.0);
-                            
-                            // Keybindings section
-                            ui.label(egui::RichText::new("Keybindings").color(egui::Color32::from_rgb(0, 255, 255)));
-                            ui.add_space(5.0);
-                            
-                            for action in self.bindable_actions() {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&action.label).color(egui::Color32::LIGHT_GRAY));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        let mut key = String::from("_");
-                                        ui.add(egui::TextEdit::singleline(&mut key).desired_width(30.0));
-                                    });
-                                });
-                            }
-                            
-                            ui.add_space(15.0);
-                            
-                            // State toggles
-                            ui.horizontal(|ui| {
-                                let mut muted = self.is_muted;
-                                if ui.checkbox(&mut muted, "Mute").changed() {
-                                    // Note: would need interior mutability to actually change
-                                }
-                                let mut frozen = self.is_frozen;
-                                if ui.checkbox(&mut frozen, "Freeze").changed() {
-                                    // Note: would need interior mutability to actually change
-                                }
-                            });
-                        });
-                });
-        }
-        
-        used_egui
+        false
     }
     
     fn update(&mut self) {
-        // Poll audio from ring buffer (or legacy buffer)
         if !self.is_frozen && !self.is_muted {
             self.poll_audio();
         }
@@ -786,7 +654,6 @@ impl TileRenderer for AudioVisTile {
             },
             "freeze" => {
                 if !self.is_frozen {
-                    // Capture current buffer
                     self.frozen_buffer = self.buffer.clone();
                 }
                 self.is_frozen = !self.is_frozen;
@@ -801,22 +668,16 @@ impl TileRenderer for AudioVisTile {
             _ => false,
         }
     }
-    
-    fn get_display_text(&self) -> Option<String> {
-        Some(format!("{} ({})", self.vis_type.label(), self.color_scheme.label()))
-    }
 }
 
-/// Convert HSV to RGB
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-    let h = h * 6.0;
-    let i = h.floor() as i32;
-    let f = h - i as f32;
+    let i = (h * 6.0).floor();
+    let f = h * 6.0 - i;
     let p = v * (1.0 - s);
-    let q = v * (1.0 - s * f);
-    let t = v * (1.0 - s * (1.0 - f));
-    
-    match i % 6 {
+    let q = v * (1.0 - f * s);
+    let t = v * (1.0 - (1.0 - f) * s);
+
+    match (i as i32) % 6 {
         0 => (v, t, p),
         1 => (q, v, p),
         2 => (p, v, t),

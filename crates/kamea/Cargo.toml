@@ -19,4 +19,4 @@ log = "0.4"
 
 # Rendering
 nannou = "0.19"
-nannou_egui = "0.19"
+# nannou_egui removed
