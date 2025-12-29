@@ -27,9 +27,9 @@ sensitivity = 1.0
 vis_type = "Oscilloscope"
 
 [tiles.settings.keybinds]
-next_vis = "n"
 mute = "m"
 freeze = "f"
+next_vis = "n"
 
 [[tiles]]
 id = "audio_output"
@@ -89,8 +89,8 @@ show_date = false
 show_seconds = true
 
 [tiles.settings.keybinds]
-toggle_seconds = "s"
 toggle_format = "t"
+toggle_seconds = "s"
 
 [[tiles]]
 id = "astro"
