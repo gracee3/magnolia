@@ -19,7 +19,7 @@ pub enum TransitMode {
 }
 
 use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation, LayerPositions};
-use crate::chart::{RadixChart, TransitChart, ChartSettings, ChartData};
+use crate::chart::{RadixChart, TransitChart, ChartSettings, ChartData, ChartAnimation};
 
 const DEFAULT_WHEEL_JSON: &str = r#"
 {
@@ -69,6 +69,7 @@ pub struct AstroTile {
     // Transit layer (bi-wheel)
     transit_mode: TransitMode,
     transit_positions: Option<LayerPositions>,
+    transit_animation: ChartAnimation,
     
     // Display state
     sun_longitude: f64,
@@ -118,6 +119,7 @@ impl AstroTile {
             radix_positions: None,
             transit_mode: TransitMode::Now,
             transit_positions: None,
+            transit_animation: ChartAnimation::new(),
             sun_longitude: 0.0,
             moon_longitude: 0.0,
             sun_sign: String::new(),
@@ -196,10 +198,19 @@ impl TileRenderer for AstroTile {
     }
     
     fn update(&mut self) {
-        // Update every 10 seconds
+        // Tick transit animation if active
+        self.transit_animation.update();
+        
+        // Update ephemeris every 10 seconds
         if self.last_update.elapsed().as_secs() >= 10 {
             self.refresh_ephemeris();
             self.last_update = std::time::Instant::now();
+            
+            // Start animation to new transit positions
+            if let Some(t_pos) = &self.transit_positions {
+                let t_data: ChartData = t_pos.into();
+                self.transit_animation.animate_to(&t_data);
+            }
         }
     }
     
@@ -279,9 +290,15 @@ impl TileRenderer for AstroTile {
         radix.draw_axis(draw);
         radix.draw_points(draw);
         
-        // Draw transit overlay if available
+        // Draw transit overlay if available (with animation)
         if let Some(t_pos) = &self.transit_positions {
-            let t_data: ChartData = t_pos.into();
+            let t_data_raw: ChartData = t_pos.into();
+            // Use animated positions for smooth transitions
+            let t_data = if self.transit_animation.is_animating() {
+                self.transit_animation.build_animated_data(&t_data_raw)
+            } else {
+                t_data_raw
+            };
             let transit = TransitChart::new(
                 rect.x(), rect.y(), radius, shift, &t_data, &settings
             );

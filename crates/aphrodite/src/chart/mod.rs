@@ -2,11 +2,13 @@ pub mod radix;
 pub mod transit;
 pub mod settings;
 pub mod data;
+pub mod animation;
 
 pub use radix::RadixChart;
 pub use transit::TransitChart;
 pub use settings::ChartSettings;
 pub use data::ChartData;
+pub use animation::ChartAnimation;
 
 
 use nannou::prelude::*;
