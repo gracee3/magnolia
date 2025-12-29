@@ -3,6 +3,10 @@ name = "audio_dsp"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+tile-rendering = ["talisman_core/tile-rendering", "dep:nannou"]
+
 [lib]
 crate-type = ["rlib"]
 
@@ -10,7 +14,7 @@ crate-type = ["rlib"]
 anyhow = "1.0"
 async-trait = "0.1"
 talisman_core = { path = "../../core" }
-talisman_signals = { path = "../../crates/talisman-signals" }
-nannou = "0.19.0"
+talisman_signals = { path = "../talisman-signals" }
+nannou = { version = "0.19", optional = true }
 # nannou_egui = "0.19.0"
 serde_json = "1.0"
