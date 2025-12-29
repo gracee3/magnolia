@@ -25,7 +25,7 @@ mod theme;
 
 use layout::Layout;
 use tiles::{TileRegistry, RenderContext};
-use input::{KeyboardNav, AppAction};
+use input::{KeyboardNav, AppAction, ModalStack, ModalState};
 
 
 
@@ -42,31 +42,23 @@ struct Model {
     // Layout and Interaction
     layout: Layout,
     selected_tile: Option<String>,
-    maximized_tile: Option<String>,
-    last_click_time: std::time::Instant,
-    // Animation
+    // Animation for tile maximize/minimize
     anim_factor: f32, // 0.0 to 1.0
     is_closing: bool,
     clipboard: Option<arboard::Clipboard>,
-    context_menu: Option<ContextMenuState>,
+    
+    // Unified Modal Stack (keyboard-first navigation)
+    modal_stack: ModalStack,
     
     // Patch Bay State
     patch_bay: PatchBay,
-    show_patch_bay: bool,
     
-    // Settings & Controls
-    show_global_settings: bool,
-    show_tile_settings: Option<String>,  // tile_id if showing settings for that tile
-    show_layout_manager: bool,
+    // Global State
     is_sleeping: bool,
     
     // Runtime State
     module_host: talisman_core::ModuleHost,
     plugin_manager: talisman_core::PluginManager,
-    
-    // Audio State - Managed by plugins
-    // audio_stream_rx: Option<ring_buffer::RingBufferReceiver<talisman_core::AudioFrame>>, // Removed
-
     
     // Tile System (Phase 6: Settings Architecture)
     tile_registry: TileRegistry,
@@ -79,11 +71,6 @@ struct Model {
     
 }
 
-
-struct ContextMenuState {
-    tile_id: String,
-    position: Point2,
-}
 
 // Layout now imported from layout.rs module
 use talisman_core::TileConfig;
@@ -306,19 +293,12 @@ fn model(app: &App) -> Model {
         egui,
         layout,
         selected_tile: None,
-        maximized_tile: None,
-        last_click_time: std::time::Instant::now(),
         anim_factor: 0.0,
         is_closing: false,
         clipboard,
-        context_menu: None,
+        modal_stack: ModalStack::new(),
         patch_bay,
-        show_patch_bay: false,
-        show_global_settings: false,
-        show_tile_settings: None,
-        show_layout_manager: false,
         is_sleeping: initial_sleep_state,
-        // audio_stream_rx, // Removed
 
         module_host,
         plugin_manager,
@@ -386,18 +366,20 @@ fn update(app: &App, model: &mut Model, update: Update) {
     // Update Layout dimensions
     model.layout.update(app.window_rect());
     
-    // Smooth Animation
+    // Smooth Animation for tile maximize/minimize
+    let maximized_tile = model.modal_stack.get_maximized_tile().map(|s| s.to_string());
     if model.is_closing {
         model.anim_factor = (model.anim_factor - 0.1).max(0.0);
         if model.anim_factor <= 0.0 {
             // Save tile settings before clearing (persist any changes made in control mode)
-            if let Some(ref tile_id) = model.maximized_tile {
+            if let Some(ref tile_id) = maximized_tile {
                 save_tile_settings(&model.tile_registry, &mut model.layout, tile_id);
             }
-            model.maximized_tile = None;
+            // Pop the maximized modal from stack
+            model.modal_stack.close(&ModalState::Maximized { tile_id: maximized_tile.unwrap_or_default() });
             model.is_closing = false;
         }
-    } else if model.maximized_tile.is_some() && model.anim_factor < 1.0 {
+    } else if maximized_tile.is_some() && model.anim_factor < 1.0 {
         model.anim_factor = (model.anim_factor + 0.1).min(1.0);
     }
     
@@ -499,170 +481,10 @@ fn update(app: &App, model: &mut Model, update: Update) {
     
     // (Legacy editor window removed - TextInputTile handles text input)
     // (Legacy kamea buttons removed - KameaTile handles its own controls)
-
-    // Context Menu
-    if let Some(menu) = &model.context_menu {
-        let win_w = app.window_rect().w();
-        let win_h = app.window_rect().h();
-        
-        let egui_x = menu.position.x + win_w / 2.0;
-        let egui_y = win_h / 2.0 - menu.position.y;
-        
-        let mut open = true;
-        let tile_id = menu.tile_id.clone();
-        
-        egui::Window::new("context_menu")
-            .fixed_pos(egui::pos2(egui_x, egui_y))
-            .title_bar(false)
-            .resizable(false)
-            .collapsible(false)
-            .min_width(140.0)
-            .default_width(140.0)
-            .frame(egui::Frame {
-                fill: egui::Color32::BLACK,
-                stroke: egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255)),
-                inner_margin: egui::Margin::same(10.0),
-                ..Default::default()
-            })
-            .show(&ctx, |ui| {
-                // Custom Style for Flat/Transparent buttons
-                let mut style = (*ctx.style()).clone();
-                // Normal State
-                style.visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-                style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                style.visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
-                style.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-                style.visuals.widgets.inactive.rounding = egui::Rounding::ZERO;
-                
-                // Hovered State
-                style.visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
-                style.visuals.widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
-                style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
-                style.visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
-                style.visuals.widgets.hovered.rounding = egui::Rounding::ZERO;
-                
-                // Active/Clicked State
-                style.visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
-                style.visuals.widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
-                style.visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 255)); // Thicker stroke for active
-                style.visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
-                style.visuals.widgets.active.rounding = egui::Rounding::ZERO;
-                
-                ui.set_style(style);
-                
-                ui.label(egui::RichText::new(format!("TILE: {}", tile_id)).strong().color(egui::Color32::from_rgb(0, 255, 255)));
-                ui.add(egui::Separator::default().spacing(10.0));
-                
-                let btn_size = egui::vec2(ui.available_width(), 20.0);
-
-                let res = ui.add_sized(btn_size, egui::Button::new("SETTINGS"));
-                if res.clicked() || res.secondary_clicked() {
-                    model.show_tile_settings = Some(tile_id.clone());
-                    log::info!("Opening settings for {}", tile_id);
-                    open = false;
-                }
-                
-                let res = ui.add_sized(btn_size, egui::Button::new("COPY"));
-                if res.clicked() || res.secondary_clicked() {
-                     // Get content from tile registry
-                     let content = model.tile_registry.get_display_text(&tile_id);
-                    
-                    if let Some(text) = content {
-                         if let Some(cb) = &mut model.clipboard {
-                             let _ = cb.set_text(text);
-                             log::info!("Copied via Menu");
-                         }
-                    }
-                    open = false;
-                }
-                
-                let res = ui.add_sized(btn_size, egui::Button::new("PASTE"));
-                if res.clicked() || res.secondary_clicked() {
-                     // Note: Paste functionality removed - tiles handle their own input
-                     open = false;
-                }
-                
-                ui.add(egui::Separator::default().spacing(10.0));
-                
-                // Toggle button text based on disabled state
-                // Toggle button text based on disabled state
-                // Use a block to avoid creating a double borrow if we did this inline, 
-                // but actually we need to find the tile index first.
-                let tile_idx = model.layout.config.tiles.iter().position(|t| t.id == tile_id);
-                
-                if let Some(idx) = tile_idx {
-                    let is_disabled = !model.layout.config.tiles[idx].enabled;
-                    let disable_text = if is_disabled { "ENABLE" } else { "DISABLE" };
-                    
-                    let res = ui.add_sized(btn_size, egui::Button::new(disable_text));
-                    if res.clicked() || res.secondary_clicked() {
-                         let module_id = tile_to_module(&tile_id);
-                         
-                         // Toggle state
-                         let new_state = is_disabled; // if was disabled, new state is enabled (true)
-                         model.layout.config.tiles[idx].enabled = new_state;
-
-                         if new_state {
-                             model.patch_bay.enable_module(&module_id);
-                             log::info!("Enabled Tile/Module: {} / {}", tile_id, module_id);
-                         } else {
-                             model.patch_bay.disable_module(&module_id);
-                             log::info!("Disabled Tile/Module: {} / {}", tile_id, module_id);
-                         }
-                         model.layout.save();
-                         open = false;
-                    }
-                }
-
-                
-                let res = ui.add_sized(btn_size, egui::Button::new("REMOVE"));
-                if res.clicked() || res.secondary_clicked() {
-                    // Remove from layout config
-                    model.layout.config.tiles.retain(|t| t.id != tile_id);
-                    model.layout.save();
-                    open = false;
-                }
-                
-                ui.add(egui::Separator::default().spacing(10.0));
-                let res = ui.add_sized(btn_size, egui::Button::new("PATCH BAY"));
-                if res.clicked() || res.secondary_clicked() {
-                    model.show_patch_bay = true;
-                    log::info!("Opening Patch Bay");
-                    open = false;
-                }
-                let res = ui.add_sized(btn_size, egui::Button::new("GLOBAL SETTINGS"));
-                if res.clicked() || res.secondary_clicked() {
-                    model.show_global_settings = true;
-                    log::info!("Opening Global Settings");
-                    open = false;
-                }
-                
-                // Sleep toggle
-                let sleep_text = if model.is_sleeping { "WAKE" } else { "SLEEP" };
-                let res = ui.add_sized(btn_size, egui::Button::new(sleep_text));
-                if res.clicked() || res.secondary_clicked() {
-                    model.is_sleeping = !model.is_sleeping;
-                    model.layout.config.is_sleeping = model.is_sleeping;
-                    model.layout.save();
-                    log::info!("Engine {}", if model.is_sleeping { "sleeping" } else { "awake" });
-                    open = false;
-                }
-                
-                ui.add(egui::Separator::default().spacing(10.0));
-                
-                let res = ui.add_sized(btn_size, egui::Button::new("EXIT DAEMON"));
-                if res.clicked() || res.secondary_clicked() {
-                    std::process::exit(0);
-                }
-            });
-            
-        if !open {
-            model.context_menu = None;
-        }
-    }
+    // (Context menu removed - keyboard-first navigation)
 
     // Patch Bay Modal
-    if model.show_patch_bay {
+    if model.modal_stack.is_patch_bay_open() {
         let screen_rect = ctx.screen_rect();
         let width = 600.0;
         let height = 450.0;
@@ -687,7 +509,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                         .color(egui::Color32::from_rgb(0, 255, 255)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("✕").clicked() {
-                            model.show_patch_bay = false;
+                            model.modal_stack.close(&ModalState::PatchBay);
                         }
                     });
                 });
@@ -763,7 +585,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 
     // Global Settings Modal
-    if model.show_global_settings {
+    if model.modal_stack.is_global_settings_open() {
         let screen_rect = ctx.screen_rect();
         let width = 400.0;
         let height = 300.0;
@@ -788,7 +610,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                         .color(egui::Color32::from_rgb(0, 255, 255)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("✕").clicked() {
-                            model.show_global_settings = false;
+                            model.modal_stack.close(&ModalState::GlobalSettings);
                         }
                     });
                 });
@@ -821,8 +643,8 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 }
                 
                 if ui.button("OPEN LAYOUT MANAGER").clicked() {
-                    model.show_layout_manager = true;
-                    model.show_global_settings = false;
+                    model.modal_stack.push(ModalState::LayoutManager);
+                    model.modal_stack.close(&ModalState::GlobalSettings);
                 }
                 
                 ui.add_space(10.0);
@@ -836,7 +658,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 
     // Tile Settings Modal
-    if let Some(tile_id) = model.show_tile_settings.clone() {
+    if let Some(tile_id) = model.modal_stack.get_tile_settings().map(|s| s.to_string()) {
         let module_id = tile_to_module(&tile_id);
         let module_info = model.patch_bay.get_module(&module_id).cloned();
         let screen_rect = ctx.screen_rect();
@@ -863,7 +685,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                         .color(egui::Color32::from_rgb(0, 255, 255)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("✕").clicked() {
-                            model.show_tile_settings = None;
+                            model.modal_stack.close(&ModalState::TileSettings { tile_id: tile_id.clone() });
                         }
                     });
                 });
@@ -937,7 +759,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 
     // Layout Manager Modal
-    if model.show_layout_manager {
+    if model.modal_stack.is_layout_manager_open() {
         let screen_rect = ctx.screen_rect();
         egui::Window::new("LAYOUT MANAGER")
             .fixed_pos(egui::pos2(screen_rect.center().x - 250.0, screen_rect.center().y - 300.0))
@@ -953,7 +775,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
                             // Sync global state
                             model.layout.config.is_sleeping = model.is_sleeping;
                             model.layout.save();
-                            model.show_layout_manager = false;
+                            model.modal_stack.close(&ModalState::LayoutManager);
                         }
                     });
                 });
@@ -1058,96 +880,10 @@ fn update(app: &App, model: &mut Model, update: Update) {
     // (Legacy signal_handler::process_signals removed - tiles handle their own state via TileRegistry)
 }
 
-fn mouse_pressed(app: &App, model: &mut Model, button: MouseButton) {
-    // 0. Intercept clicks for Egui
-    if model.egui.ctx().wants_pointer_input() {
-        return;
-    }
-    
-    
-    // Clear context menu if clicking away (and egui didn't want it)
-    model.context_menu = None;
-
-    // Mouse handling for tile selection (keyboard-first navigation)
-
-
-    if button == MouseButton::Left {
-
-        let mouse_pos = app.mouse.position();
-        let now = std::time::Instant::now();
-        let delta = now.duration_since(model.last_click_time);
-        let is_double_click = delta.as_millis() < 300;
-        model.last_click_time = now;
-
-        let mut hit = false;
-        for tile in &model.layout.config.tiles {
-            if let Some(rect) = model.layout.calculate_rect(tile) {
-                if rect.contains(mouse_pos) {
-                    if is_double_click && model.selected_tile.as_ref() == Some(&tile.id) {
-                        // Toggle Maximization
-                        if model.maximized_tile.as_ref() == Some(&tile.id) {
-                            model.is_closing = true;
-                        } else {
-                            model.maximized_tile = Some(tile.id.clone());
-                            model.is_closing = false;
-                            model.anim_factor = 0.0; // Reset animation
-                        }
-                    } else {
-                        model.selected_tile = Some(tile.id.clone());
-                    }
-                    hit = true;
-                    log::debug!("Clicked Tile: {}", tile.id);
-                    break;
-                }
-            }
-        }
-        
-        if !hit {
-            // Check for empty cells to open Layout Manager
-            if model.maximized_tile.is_none() {
-                let cols = model.layout.config.columns.len();
-                let rows = model.layout.config.rows.len();
-                for c in 0..cols {
-                    for r in 0..rows {
-                         if model.layout.get_tile_at(c, r).is_none() {
-                             let temp_tile = TileConfig {
-                                 id: String::new(), col: c, row: r, colspan: Some(1), rowspan: Some(1),
-                                 module: String::new(), enabled: true, settings: Default::default()
-                             };
-                             
-                             if let Some(rect) = model.layout.calculate_rect(&temp_tile) {
-                                  if rect.contains(mouse_pos) {
-                                      model.show_layout_manager = true;
-                                      return;
-                                  }
-                             }
-                         }
-                    }
-                }
-            }
-
-            model.selected_tile = None;
-            if model.maximized_tile.is_some() {
-                 model.is_closing = true;
-            }
-        }
-    } else if button == MouseButton::Right {
-         let mouse_pos = app.mouse.position();
-         
-         for tile in &model.layout.config.tiles {
-            if let Some(rect) = model.layout.calculate_rect(tile) {
-                if rect.contains(mouse_pos) {
-                    model.context_menu = Some(ContextMenuState {
-                        tile_id: tile.id.clone(),
-                        position: mouse_pos,
-                    });
-                     // Also select it
-                    model.selected_tile = Some(tile.id.clone());
-                    break;
-                }
-            }
-         }
-    }
+fn mouse_pressed(_app: &App, _model: &mut Model, _button: MouseButton) {
+    // Keyboard-only navigation: mouse input disabled
+    // All interaction is handled via keyboard in key_pressed()
+    log::trace!("Mouse input disabled - use keyboard for navigation");
 }
 
 
@@ -1162,13 +898,27 @@ fn mouse_moved(_app: &App, _model: &mut Model, _pos: Point2) {
 
 fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     // === INPUT ROUTING GUARD ===
-    // Skip nannou key handling when:
-    // 1. Egui wants keyboard input (e.g., TextEdit is focused)
+    // Skip nannou key handling when egui wants keyboard input (e.g., TextEdit is focused)
     if model.egui.ctx().wants_keyboard_input() {
         return;
     }
     
     let ctrl = _app.keys.mods.ctrl();
+    
+    // === MODAL ESC HANDLING (highest priority) ===
+    // ESC closes the top modal before any other input processing
+    if key == Key::Escape {
+        // Check if a tile is maximized - close it first
+        if model.modal_stack.get_maximized_tile().is_some() {
+            model.is_closing = true;
+            return;
+        }
+        // Pop any other modal from stack
+        if model.modal_stack.pop().is_some() {
+            return;
+        }
+        // Fall through to keyboard_nav ESC handling (deselect, exit mode, etc.)
+    }
     
     // Update grid size for navigation
     let (grid_cols, grid_rows) = model.layout.config.resolve_grid();
@@ -1203,32 +953,28 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 }
             },
             AppAction::OpenGlobalSettings => {
-                model.show_global_settings = true;
-                model.show_layout_manager = false;
+                model.modal_stack.push(ModalState::GlobalSettings);
             },
             AppAction::OpenLayoutManager => {
-                model.show_layout_manager = true;
-                model.show_global_settings = false;
+                model.modal_stack.push(ModalState::LayoutManager);
             },
             AppAction::OpenPatchBay => {
-                if !model.show_patch_bay {
-                    model.show_patch_bay = true;
-                } else {
-                    // Toggle logic could be here if we want P to toggle
-                    // For now, P just opens/ensures it's open if handled by input.rs
+                if !model.modal_stack.is_patch_bay_open() {
+                    model.modal_stack.push(ModalState::PatchBay);
                 }
             },
             AppAction::OpenTileSettings { tile_id } => {
-                model.maximized_tile = Some(tile_id);
+                model.modal_stack.push(ModalState::Maximized { tile_id });
                 model.is_closing = false;
                 model.anim_factor = 0.0;
             },
             AppAction::ToggleMaximize => {
                 if let Some(selected) = &model.selected_tile {
-                    if model.maximized_tile.as_ref() == Some(selected) {
+                    let is_maximized = model.modal_stack.get_maximized_tile() == Some(selected.as_str());
+                    if is_maximized {
                         model.is_closing = true;
                     } else {
-                        model.maximized_tile = Some(selected.clone());
+                        model.modal_stack.push(ModalState::Maximized { tile_id: selected.clone() });
                         model.is_closing = false;
                         model.anim_factor = 0.0;
                     }
@@ -1254,8 +1000,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
     draw.background().color(bg_color);
 
+    // Get maximized tile from modal stack
+    let maximized_tile = model.modal_stack.get_maximized_tile();
+
     // Draw Empty Cell Placeholders
-    if model.maximized_tile.is_none() {
+    if maximized_tile.is_none() {
         let (cols, rows) = model.layout.config.resolve_grid();
         for c in 0..cols {
             for r in 0..rows {
@@ -1279,7 +1028,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     // Iterate over all tiles and render (MONITOR MODE - Read-only feedback)
     for tile in &model.layout.config.tiles {
-        if model.maximized_tile.as_ref() == Some(&tile.id) {
+        if maximized_tile == Some(tile.id.as_str()) {
             continue;
         }
         
@@ -1321,8 +1070,8 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
 
     // Draw Maximized Tile on top (CONTROL MODE - Settings UI)
-    if let Some(max_id) = &model.maximized_tile {
-        if let Some(tile) = model.layout.config.tiles.iter().find(|t| &t.id == max_id) {
+    if let Some(max_id) = maximized_tile {
+        if let Some(tile) = model.layout.config.tiles.iter().find(|t| t.id == max_id) {
             if let Some(source_rect) = model.layout.calculate_rect(tile) {
                 let target_rect = app.window_rect(); // Full Window maximize
                 
@@ -1370,12 +1119,45 @@ fn view(app: &App, model: &Model, frame: Frame) {
              .font_size(24);
     }
 
-    
-    
-    // [Future: Interactive layout editing visualization will go here]
+    // Mode indicator (bottom-left corner)
+    if maximized_tile.is_none() {
+        let mode_text = match model.keyboard_nav.mode {
+            input::InputMode::Normal => "NORMAL",
+            input::InputMode::Layout => match &model.keyboard_nav.layout_state {
+                input::LayoutSubState::Navigation => "LAYOUT",
+                input::LayoutSubState::Resize { .. } => "RESIZE",
+                input::LayoutSubState::Move { .. } => "MOVE",
+            },
+            input::InputMode::Patch => "PATCH",
+        };
+        
+        let mode_color = match model.keyboard_nav.mode {
+            input::InputMode::Normal => rgba(0.5, 0.5, 0.5, 0.8),
+            input::InputMode::Layout => rgba(0.0, 1.0, 0.5, 0.8),
+            input::InputMode::Patch => rgba(1.0, 0.5, 0.0, 0.8),
+        };
+        
+        let win_rect = app.window_rect();
+        draw.text(mode_text)
+            .xy(pt2(win_rect.left() + 50.0, win_rect.bottom() + 20.0))
+            .color(mode_color)
+            .font_size(14);
+        
+        // Show keybind hints
+        let hints = match model.keyboard_nav.mode {
+            input::InputMode::Normal => "[L]ayout [P]atch [G]lobal [Tab]Cycle [Arrows]Nav [E]dit [Enter]Select",
+            input::InputMode::Layout => "[E]dit [A]dd [D]elete [Space]Toggle [Enter]Confirm [ESC]Cancel",
+            input::InputMode::Patch => "[Arrows]Select [Enter]Patch [ESC]Exit",
+        };
+        
+        draw.text(hints)
+            .xy(pt2(win_rect.left() + 250.0, win_rect.bottom() + 20.0))
+            .color(rgba(0.4, 0.4, 0.4, 0.8))
+            .font_size(10);
+    }
     
     // Render patch cables (always visible if not maximized)
-    if model.maximized_tile.is_none() && !model.layout.config.patches.is_empty() {
+    if maximized_tile.is_none() && !model.layout.config.patches.is_empty() {
         let mut tile_rects = Vec::new();
         for tile in &model.layout.config.tiles {
             if let Some(rect) = model.layout.calculate_rect(tile) {

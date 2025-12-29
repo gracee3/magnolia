@@ -303,6 +303,56 @@ impl KeyboardNav {
                 }
             },
 
+            // === G - Global Settings ===
+            Key::G => {
+                if self.mode == InputMode::Normal {
+                    return Some(AppAction::OpenGlobalSettings);
+                }
+            },
+
+            // === L - Layout Mode Toggle ===
+            Key::L => {
+                match self.mode {
+                    InputMode::Normal => {
+                        self.enter_layout_mode();
+                        log::info!("Entered layout mode via L key");
+                    },
+                    InputMode::Layout => {
+                        self.exit_layout_mode();
+                        log::info!("Exited layout mode via L key");
+                    },
+                    InputMode::Patch => {
+                        // L does nothing in patch mode
+                    }
+                }
+            },
+
+            // === D / Delete - Delete selected tile (Layout mode only) ===
+            Key::D | Key::Delete | Key::Back => {
+                if self.mode == InputMode::Layout {
+                    if let Some(tile_id) = self.selected_tile_id().map(|s| s.to_string()) {
+                        // Remove tile from layout
+                        layout.tiles.retain(|t| t.id != tile_id);
+                        self.deselect();
+                        log::info!("Deleted tile: {}", tile_id);
+                        return Some(AppAction::SaveLayout);
+                    }
+                }
+            },
+
+            // === A - Add tile (Layout mode only) ===
+            Key::A => {
+                if self.mode == InputMode::Layout {
+                    // Open layout manager for adding tiles
+                    return Some(AppAction::OpenLayoutManager);
+                }
+            },
+
+            // === Tab - Cycle through tiles ===
+            Key::Tab => {
+                self.cycle_tile_selection(layout, true);
+            },
+
             _ => {}
         }
 
@@ -553,6 +603,49 @@ impl KeyboardNav {
         matches!(self.selection, SelectionState::TileSelected { .. })
     }
 
+    /// Cycle through tiles in row-major order (Tab navigation)
+    pub fn cycle_tile_selection(&mut self, layout: &LayoutConfig, forward: bool) {
+        if layout.tiles.is_empty() {
+            return;
+        }
+
+        // Sort tiles by row then column for consistent ordering
+        let mut sorted_tiles: Vec<&TileConfig> = layout.tiles.iter().collect();
+        sorted_tiles.sort_by(|a, b| {
+            let row_cmp = a.row.cmp(&b.row);
+            if row_cmp == std::cmp::Ordering::Equal {
+                a.col.cmp(&b.col)
+            } else {
+                row_cmp
+            }
+        });
+
+        // Find current index
+        let current_idx = if let Some(current_id) = self.selected_tile_id() {
+            sorted_tiles.iter().position(|t| t.id == current_id)
+        } else {
+            None
+        };
+
+        // Calculate next index
+        let next_idx = match current_idx {
+            Some(idx) => {
+                if forward {
+                    (idx + 1) % sorted_tiles.len()
+                } else {
+                    if idx == 0 { sorted_tiles.len() - 1 } else { idx - 1 }
+                }
+            },
+            None => 0, // Start at first tile if nothing selected
+        };
+
+        // Select the next tile
+        let next_tile = sorted_tiles[next_idx];
+        self.cursor = (next_tile.col, next_tile.row);
+        self.selection = SelectionState::TileSelected { tile_id: next_tile.id.clone() };
+        log::debug!("Tab navigation: selected tile {}", next_tile.id);
+    }
+
     /// Enter layout mode (cursor position persists)
     pub fn enter_layout_mode(&mut self) {
         self.mode = InputMode::Layout;
@@ -736,6 +829,121 @@ pub enum EscapeResult {
     ExitedMode,
     /// ESC at root with no selection - no action taken
     NoAction,
+}
+
+/// Modal types for the unified modal stack
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModalState {
+    /// Patch Bay modal
+    PatchBay,
+    /// Global settings modal
+    GlobalSettings,
+    /// Tile settings modal (tile_id)
+    TileSettings { tile_id: String },
+    /// Layout manager modal
+    LayoutManager,
+    /// Tile maximized/control view (tile_id)
+    Maximized { tile_id: String },
+    /// Add tile picker (in layout mode)
+    AddTilePicker { cursor_col: usize, cursor_row: usize },
+}
+
+/// Modal stack for hierarchical modal management
+/// ESC always pops the top modal, providing consistent navigation
+#[derive(Debug, Default)]
+pub struct ModalStack {
+    stack: Vec<ModalState>,
+}
+
+impl ModalStack {
+    pub fn new() -> Self {
+        Self { stack: Vec::new() }
+    }
+
+    /// Push a modal onto the stack
+    pub fn push(&mut self, modal: ModalState) {
+        // Don't push duplicate modals
+        if self.stack.last() != Some(&modal) {
+            self.stack.push(modal);
+        }
+    }
+
+    /// Pop the top modal, returning it if present
+    pub fn pop(&mut self) -> Option<ModalState> {
+        self.stack.pop()
+    }
+
+    /// Check if a specific modal is active (anywhere in stack)
+    pub fn has(&self, modal: &ModalState) -> bool {
+        self.stack.contains(modal)
+    }
+
+    /// Check if any modal is open
+    pub fn is_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
+    /// Get the top modal without removing it
+    pub fn top(&self) -> Option<&ModalState> {
+        self.stack.last()
+    }
+
+    /// Clear all modals
+    pub fn clear(&mut self) {
+        self.stack.clear();
+    }
+
+    /// Check if patch bay is open
+    pub fn is_patch_bay_open(&self) -> bool {
+        self.stack.iter().any(|m| matches!(m, ModalState::PatchBay))
+    }
+
+    /// Check if global settings is open
+    pub fn is_global_settings_open(&self) -> bool {
+        self.stack.iter().any(|m| matches!(m, ModalState::GlobalSettings))
+    }
+
+    /// Check if layout manager is open
+    pub fn is_layout_manager_open(&self) -> bool {
+        self.stack.iter().any(|m| matches!(m, ModalState::LayoutManager))
+    }
+
+    /// Check if a tile is maximized
+    pub fn get_maximized_tile(&self) -> Option<&str> {
+        for modal in self.stack.iter().rev() {
+            if let ModalState::Maximized { tile_id } = modal {
+                return Some(tile_id);
+            }
+        }
+        None
+    }
+
+    /// Check if tile settings is open and get tile_id
+    pub fn get_tile_settings(&self) -> Option<&str> {
+        for modal in self.stack.iter().rev() {
+            if let ModalState::TileSettings { tile_id } = modal {
+                return Some(tile_id);
+            }
+        }
+        None
+    }
+
+    /// Check if add tile picker is open
+    pub fn get_add_tile_picker(&self) -> Option<(usize, usize)> {
+        for modal in self.stack.iter().rev() {
+            if let ModalState::AddTilePicker { cursor_col, cursor_row } = modal {
+                return Some((*cursor_col, *cursor_row));
+            }
+        }
+        None
+    }
+
+    /// Close a specific modal type (removes first match from top)
+    pub fn close(&mut self, modal: &ModalState) {
+        if let Some(pos) = self.stack.iter().rposition(|m| std::mem::discriminant(m) == std::mem::discriminant(modal)) {
+            self.stack.remove(pos);
+        }
+    }
 }
 
 #[cfg(test)]
