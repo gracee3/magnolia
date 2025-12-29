@@ -9,6 +9,7 @@ nannou = "0.19.0"
 sysinfo = { version = "0.37.2", features = ["default"] }
 
 talisman_core = { path = "../../core", features = ["tile-rendering"] }
+talisman_signals = { path = "../../crates/talisman-signals" }
 aphrodite = { path = "../../crates/aphrodite", features = ["tile-rendering"] }
 talisman-ui = { path = "../../crates/talisman-ui", features = ["tile-rendering"] }
 audio_input = { path = "../../crates/audio_input", features = ["tile-rendering"] }

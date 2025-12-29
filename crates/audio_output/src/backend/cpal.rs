@@ -54,7 +54,9 @@ impl AudioOutputBackend for CpalOutputBackend {
         }
         .ok_or_else(|| anyhow::anyhow!("No output device"))?;
 
-        let resolved_name = resolved_device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let resolved_name = resolved_device
+            .name()
+            .unwrap_or_else(|_| "Unknown".to_string());
 
         let config = resolved_device.default_output_config()?;
         let sample_rate = config.sample_rate().0;
@@ -87,5 +89,3 @@ impl AudioOutputBackend for CpalOutputBackend {
         ))
     }
 }
-
-

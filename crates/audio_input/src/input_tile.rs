@@ -110,7 +110,10 @@ impl TileRenderer for AudioInputTile {
         );
 
         let selected = self.settings.selected();
-        let active = self.settings.active_device().unwrap_or_else(|| "None".to_string());
+        let active = self
+            .settings
+            .active_device()
+            .unwrap_or_else(|| "None".to_string());
         let fmt = self
             .settings
             .format()
@@ -146,9 +149,29 @@ impl TileRenderer for AudioInputTile {
         );
 
         let muted = self.is_muted.lock().map(|v| *v).unwrap_or(true);
-        let mute_color = if muted { srgba(1.0, 0.3, 0.3, 1.0) } else { srgba(0.5, 0.5, 0.5, 1.0) };
-        draw_text(draw, FontId::PlexSansBold, "MUTE [M]", pt2(rect.right() - 100.0, rect.top() - 90.0), 14.0, mute_color, TextAlignment::Right);
-        draw_text(draw, FontId::PlexSansBold, if muted { "MUTED" } else { "ACTIVE" }, pt2(rect.right() - 100.0, rect.top() - 110.0), 14.0, mute_color, TextAlignment::Right);
+        let mute_color = if muted {
+            srgba(1.0, 0.3, 0.3, 1.0)
+        } else {
+            srgba(0.5, 0.5, 0.5, 1.0)
+        };
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "MUTE [M]",
+            pt2(rect.right() - 100.0, rect.top() - 90.0),
+            14.0,
+            mute_color,
+            TextAlignment::Right,
+        );
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            if muted { "MUTED" } else { "ACTIVE" },
+            pt2(rect.right() - 100.0, rect.top() - 110.0),
+            14.0,
+            mute_color,
+            TextAlignment::Right,
+        );
 
         if let Some(err) = self.settings.last_error() {
             draw_text(
@@ -186,14 +209,11 @@ impl TileRenderer for AudioInputTile {
             let row = Rect::from_x_y_w_h(rect.x(), y, rect.w() * 0.8, row_h - 2.0);
             let focused = idx == focus;
 
-            draw.rect()
-                .xy(row.xy())
-                .wh(row.wh())
-                .color(if focused {
-                    srgba(0.0, 0.25, 0.25, 0.55)
-                } else {
-                    srgba(0.08, 0.08, 0.10, 0.9)
-                });
+            draw.rect().xy(row.xy()).wh(row.wh()).color(if focused {
+                srgba(0.0, 0.25, 0.25, 0.55)
+            } else {
+                srgba(0.08, 0.08, 0.10, 0.9)
+            });
 
             let label = if *id == "Default" {
                 "Default".to_string()

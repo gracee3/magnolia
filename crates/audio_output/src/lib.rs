@@ -1,11 +1,11 @@
+mod backend;
 mod settings;
 #[cfg(feature = "tile-rendering")]
 pub mod tile;
-mod backend;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,12 +13,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use log::{info, warn};
 
+use crate::backend::{default_backend, AudioOutputBackend, BackendStream};
 use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
 use talisman_signals::ring_buffer::{self, RingBufferSender};
-use crate::backend::{default_backend, AudioOutputBackend, BackendStream};
 
-pub use settings::AudioOutputSettings;
 use settings::AudioDeviceEntry;
+pub use settings::AudioOutputSettings;
 
 const OUTPUT_CAPACITY: usize = 32768;
 
@@ -172,7 +172,8 @@ impl AudioOutputSink {
                 let mut backend_guard = match backend.lock() {
                     Ok(g) => g,
                     Err(_) => {
-                        settings.set_last_error(Some("AudioOutput backend lock poisoned".to_string()));
+                        settings
+                            .set_last_error(Some("AudioOutput backend lock poisoned".to_string()));
                         thread::sleep(Duration::from_millis(200));
                         continue;
                     }

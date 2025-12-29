@@ -11,4 +11,4 @@ mod viz_sink;
 pub use input_tile::AudioInputTile;
 pub use settings::AudioInputSettings;
 pub use source::AudioInputSource;
-pub use viz_sink::AudioVizSink;
+pub use viz_sink::{AudioVizRingSink, AudioVizSink};

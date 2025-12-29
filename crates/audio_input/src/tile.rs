@@ -182,9 +182,26 @@ pub struct AudioVisTile {
 
     /// Sample rate tracking
     sample_rate_hz: Arc<AtomicU32>,
+
+    /// Channel count tracking (written by audio viz sink, read by UI thread)
+    channels_count: Arc<AtomicU32>,
+
+    /// Circular buffer cursors (next write index)
+    mono_pos: usize,
+    left_pos: usize,
+    right_pos: usize,
+
+    /// FFT throttling (update spectrum every N frames)
+    #[cfg(feature = "tile-rendering")]
+    fft_tick: u32,
 }
 
 const BUFFER_SIZE: usize = 2048;
+// Reduce draw complexity (and GPU power) by decimating points/bins.
+const MAX_SCOPE_POINTS: usize = 512;
+const MAX_LISSAJOUS_POINTS: usize = 512;
+#[cfg(feature = "tile-rendering")]
+const FFT_EVERY_N_FRAMES: u32 = 2;
 
 impl AudioVisTile {
     pub fn new(id: &str) -> Self {
@@ -216,12 +233,20 @@ impl AudioVisTile {
             legacy_buffer: Arc::new(Mutex::new(vec![0.0; BUFFER_SIZE])),
             latency_us: None,
             sample_rate_hz: Arc::new(AtomicU32::new(44100)),
+            channels_count: Arc::new(AtomicU32::new(2)),
+            mono_pos: 0,
+            left_pos: 0,
+            right_pos: 0,
+            #[cfg(feature = "tile-rendering")]
+            fft_tick: 0,
         }
     }
 
     pub fn connect_audio_stream(&mut self, receiver: RingBufferReceiver<f32>, channels: u16) {
         self.ring_rx = Some(receiver);
         self.channels = channels;
+        self.channels_count
+            .store((channels as u32).max(1), Ordering::Relaxed);
         #[cfg(feature = "tile-rendering")]
         {
             self.error = None; // Clear error when connected
@@ -247,6 +272,10 @@ impl AudioVisTile {
 
     pub fn get_sample_rate_meter(&self) -> Arc<AtomicU32> {
         self.sample_rate_hz.clone()
+    }
+
+    pub fn get_channels_meter(&self) -> Arc<AtomicU32> {
+        self.channels_count.clone()
     }
 
     #[cfg(feature = "tile-rendering")]
@@ -281,7 +310,26 @@ impl AudioVisTile {
         }
     }
 
+    #[inline]
+    fn mono_start(&self) -> usize {
+        self.mono_pos % self.buffer.len().max(1)
+    }
+    #[inline]
+    fn left_start(&self) -> usize {
+        self.left_pos % self.left_buffer.len().max(1)
+    }
+    #[inline]
+    fn right_start(&self) -> usize {
+        self.right_pos % self.right_buffer.len().max(1)
+    }
+
     fn poll_audio(&mut self) {
+        // Allow the sink to update channels dynamically (e.g. device switch).
+        let desired_ch = self.channels_count.load(Ordering::Relaxed) as u16;
+        if desired_ch >= 1 && desired_ch != self.channels {
+            self.channels = desired_ch;
+        }
+
         if let Some(ref rx) = self.ring_rx {
             let mut frames_processed = 0;
             let max_frames = BUFFER_SIZE;
@@ -290,17 +338,18 @@ impl AudioVisTile {
                 match self.channels {
                     1 => {
                         if let Some(sample) = rx.try_recv() {
-                            self.buffer.rotate_left(1);
-                            let len = self.buffer.len();
-                            self.buffer[len - 1] = sample;
-
-                            self.left_buffer.rotate_left(1);
-                            let len_l = self.left_buffer.len();
-                            self.left_buffer[len_l - 1] = sample;
-
-                            self.right_buffer.rotate_left(1);
-                            let len_r = self.right_buffer.len();
-                            self.right_buffer[len_r - 1] = sample;
+                            if !self.buffer.is_empty() {
+                                self.buffer[self.mono_pos] = sample;
+                                self.mono_pos = (self.mono_pos + 1) % self.buffer.len();
+                            }
+                            if !self.left_buffer.is_empty() {
+                                self.left_buffer[self.left_pos] = sample;
+                                self.left_pos = (self.left_pos + 1) % self.left_buffer.len();
+                            }
+                            if !self.right_buffer.is_empty() {
+                                self.right_buffer[self.right_pos] = sample;
+                                self.right_pos = (self.right_pos + 1) % self.right_buffer.len();
+                            }
 
                             frames_processed += 1;
                         } else {
@@ -312,17 +361,18 @@ impl AudioVisTile {
                             let right = rx.try_recv().unwrap_or(0.0);
                             let mono = (left + right) * 0.5;
 
-                            self.buffer.rotate_left(1);
-                            let len = self.buffer.len();
-                            self.buffer[len - 1] = mono;
-
-                            self.left_buffer.rotate_left(1);
-                            let len_l = self.left_buffer.len();
-                            self.left_buffer[len_l - 1] = left;
-
-                            self.right_buffer.rotate_left(1);
-                            let len_r = self.right_buffer.len();
-                            self.right_buffer[len_r - 1] = right;
+                            if !self.buffer.is_empty() {
+                                self.buffer[self.mono_pos] = mono;
+                                self.mono_pos = (self.mono_pos + 1) % self.buffer.len();
+                            }
+                            if !self.left_buffer.is_empty() {
+                                self.left_buffer[self.left_pos] = left;
+                                self.left_pos = (self.left_pos + 1) % self.left_buffer.len();
+                            }
+                            if !self.right_buffer.is_empty() {
+                                self.right_buffer[self.right_pos] = right;
+                                self.right_pos = (self.right_pos + 1) % self.right_buffer.len();
+                            }
 
                             frames_processed += 1;
                         } else {
@@ -344,17 +394,18 @@ impl AudioVisTile {
                                 }
                             }
                             let mono = sum / ch as f32;
-                            self.buffer.rotate_left(1);
-                            let len = self.buffer.len();
-                            self.buffer[len - 1] = mono;
-
-                            self.left_buffer.rotate_left(1);
-                            let len_l = self.left_buffer.len();
-                            self.left_buffer[len_l - 1] = s1;
-
-                            self.right_buffer.rotate_left(1);
-                            let len_r = self.right_buffer.len();
-                            self.right_buffer[len_r - 1] = s2;
+                            if !self.buffer.is_empty() {
+                                self.buffer[self.mono_pos] = mono;
+                                self.mono_pos = (self.mono_pos + 1) % self.buffer.len();
+                            }
+                            if !self.left_buffer.is_empty() {
+                                self.left_buffer[self.left_pos] = s1;
+                                self.left_pos = (self.left_pos + 1) % self.left_buffer.len();
+                            }
+                            if !self.right_buffer.is_empty() {
+                                self.right_buffer[self.right_pos] = s2;
+                                self.right_pos = (self.right_pos + 1) % self.right_buffer.len();
+                            }
                             got_frame = true;
                         }
 
@@ -423,7 +474,10 @@ impl AudioVisTile {
     fn update_spectrum(&mut self) {
         self.ensure_fft();
 
-        for (i, sample) in self.buffer.iter().enumerate() {
+        let n = self.buffer.len();
+        let start = self.mono_start();
+        for i in 0..n {
+            let sample = self.buffer[(start + i) % n];
             let w = self.window.get(i).copied().unwrap_or(1.0);
             self.fft_buffer[i] = Complex::new(sample * w, 0.0);
         }
@@ -479,15 +533,26 @@ impl TileRenderer for AudioVisTile {
                     let top_y = content_rect.y() + content_rect.h() * 0.25;
                     let bot_y = content_rect.y() - content_rect.h() * 0.25;
 
-                    let left_points: Vec<Point2> = self.left_buffer.iter().enumerate().map(|(i, &s)| {
-                        let x = map_range(i, 0, self.left_buffer.len(), content_rect.left(), content_rect.right());
-                        pt2(x, top_y + s * h2 * self.sensitivity)
-                    }).collect();
+                    let n_l = self.left_buffer.len().max(1);
+                    let n_r = self.right_buffer.len().max(1);
+                    let step_l = (n_l / MAX_SCOPE_POINTS).max(1);
+                    let step_r = (n_r / MAX_SCOPE_POINTS).max(1);
+                    let start_l = self.left_start();
+                    let start_r = self.right_start();
 
-                    let right_points: Vec<Point2> = self.right_buffer.iter().enumerate().map(|(i, &s)| {
-                        let x = map_range(i, 0, self.right_buffer.len(), content_rect.left(), content_rect.right());
-                        pt2(x, bot_y + s * h2 * self.sensitivity)
-                    }).collect();
+                    let mut left_points: Vec<Point2> = Vec::with_capacity(n_l / step_l + 1);
+                    for i in (0..n_l).step_by(step_l) {
+                        let s = self.left_buffer[(start_l + i) % n_l];
+                        let x = map_range(i, 0, n_l, content_rect.left(), content_rect.right());
+                        left_points.push(pt2(x, top_y + s * h2 * self.sensitivity));
+                    }
+
+                    let mut right_points: Vec<Point2> = Vec::with_capacity(n_r / step_r + 1);
+                    for i in (0..n_r).step_by(step_r) {
+                        let s = self.right_buffer[(start_r + i) % n_r];
+                        let x = map_range(i, 0, n_r, content_rect.left(), content_rect.right());
+                        right_points.push(pt2(x, bot_y + s * h2 * self.sensitivity));
+                    }
 
                     if !left_points.is_empty() {
                         draw.polyline().weight(1.5).points(left_points).color(srgba(0.2, 0.6, 1.0, 0.9));
@@ -496,22 +561,16 @@ impl TileRenderer for AudioVisTile {
                         draw.polyline().weight(1.5).points(right_points).color(srgba(1.0, 0.3, 0.3, 0.9));
                     }
                 } else {
-                    let points: Vec<Point2> = buffer
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &sample)| {
-                            let x = map_range(
-                                i,
-                                0,
-                                buffer.len(),
-                                content_rect.left(),
-                                content_rect.right(),
-                            );
-                            let y =
-                                content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
-                            pt2(x, y)
-                        })
-                        .collect();
+                    let n = buffer.len().max(1);
+                    let step = (n / MAX_SCOPE_POINTS).max(1);
+                    let start = self.mono_start();
+                    let mut points: Vec<Point2> = Vec::with_capacity(n / step + 1);
+                    for i in (0..n).step_by(step) {
+                        let sample = self.buffer[(start + i) % n];
+                        let x = map_range(i, 0, n, content_rect.left(), content_rect.right());
+                        let y = content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
+                        points.push(pt2(x, y));
+                    }
 
                     if !points.is_empty() {
                         draw.polyline().weight(2.0).points(points).color(color);
@@ -525,7 +584,11 @@ impl TileRenderer for AudioVisTile {
                 }
                 
                 // Use a logarithmic distribution for better frequency representation
-                let num_display_bins = if self.vis_type == VisualizationType::SpectrumBars { 40 } else { 128 };
+                let num_display_bins = if self.vis_type == VisualizationType::SpectrumBars {
+                    32
+                } else {
+                    96
+                };
                 let mut display_spectrum = vec![0.0; num_display_bins];
                 
                 let n = spectrum.len();
@@ -589,16 +652,18 @@ impl TileRenderer for AudioVisTile {
                     .color(color);
             }
             VisualizationType::Lissajous => {
-                let points: Vec<Point2> = self
-                    .left_buffer
-                    .iter()
-                    .zip(self.right_buffer.iter())
-                    .map(|(&l, &r)| {
-                        let x = content_rect.x() + l * content_rect.w() * 0.4 * self.sensitivity;
-                        let y = content_rect.y() + r * content_rect.h() * 0.4 * self.sensitivity;
-                        pt2(x, y)
-                    })
-                    .collect();
+                let n = self.left_buffer.len().min(self.right_buffer.len()).max(1);
+                let step = (n / MAX_LISSAJOUS_POINTS).max(1);
+                let start_l = self.left_start();
+                let start_r = self.right_start();
+                let mut points: Vec<Point2> = Vec::with_capacity(n / step + 1);
+                for i in (0..n).step_by(step) {
+                    let l = self.left_buffer[(start_l + i) % self.left_buffer.len()];
+                    let r = self.right_buffer[(start_r + i) % self.right_buffer.len()];
+                    let x = content_rect.x() + l * content_rect.w() * 0.4 * self.sensitivity;
+                    let y = content_rect.y() + r * content_rect.h() * 0.4 * self.sensitivity;
+                    points.push(pt2(x, y));
+                }
                 if !points.is_empty() {
                     draw.polyline().weight(2.0).points(points).color(color);
                 }
@@ -755,7 +820,10 @@ impl TileRenderer for AudioVisTile {
                 self.vis_type,
                 VisualizationType::SpectrumBars | VisualizationType::SpectrumLine
             ) {
-                self.update_spectrum();
+                self.fft_tick = self.fft_tick.wrapping_add(1);
+                if self.fft_tick % FFT_EVERY_N_FRAMES == 0 {
+                    self.update_spectrum();
+                }
             }
         }
     }

@@ -970,6 +970,7 @@ dependencies = [
  "talisman-ui",
  "talisman_core",
  "talisman_module_api",
+ "talisman_signals",
  "tokio",
  "toml 0.8.23",
 ]

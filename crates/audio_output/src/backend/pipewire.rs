@@ -46,7 +46,9 @@ pub struct PipeWireOutputBackend {
 impl PipeWireOutputBackend {
     pub fn new() -> anyhow::Result<Self> {
         pw::init();
-        Ok(Self { devices: Vec::new() })
+        Ok(Self {
+            devices: Vec::new(),
+        })
     }
 
     fn resolve_name(&self, device_id: &str) -> String {
@@ -92,10 +94,14 @@ impl AudioOutputBackend for PipeWireOutputBackend {
                 if global.type_ != pw::types::ObjectType::Node {
                     return;
                 }
-                let Some(props) = global.props else { return; };
+                let Some(props) = global.props else {
+                    return;
+                };
                 let props = props.as_ref();
 
-                let Some(class) = props.get("media.class") else { return; };
+                let Some(class) = props.get("media.class") else {
+                    return;
+                };
                 // Playback sinks
                 if !class.starts_with("Audio/Sink") {
                     return;
@@ -192,7 +198,9 @@ impl AudioOutputBackend for PipeWireOutputBackend {
             let _listener = stream
                 .add_local_listener_with_user_data(data)
                 .param_changed(|_, user_data, id, param| {
-                    let Some(param) = param else { return; };
+                    let Some(param) = param else {
+                        return;
+                    };
                     if id != pw::spa::param::ParamType::Format.as_raw() {
                         return;
                     }
@@ -302,5 +310,3 @@ impl AudioOutputBackend for PipeWireOutputBackend {
         Ok((BackendStream::new(handle), fmt, resolved_name))
     }
 }
-
-

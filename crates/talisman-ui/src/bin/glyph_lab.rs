@@ -340,7 +340,8 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
                     let center = pt2(x, y);
                     let is_selected = i == model.selected_index;
-                    let cell_rect = Rect::from_xy_wh(center, vec2(model.cell_size, model.cell_size));
+                    let cell_rect =
+                        Rect::from_xy_wh(center, vec2(model.cell_size, model.cell_size));
                     let (mr, mg, mb) = theme::muted_stroke();
                     let (cr, cg, cb) = theme::reactive_cyan();
 
@@ -369,7 +370,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
                             .stroke_weight(1.0);
                     }
 
-                    let (tr, tg, tb) = if is_selected { (cr, cg, cb) } else { (180, 180, 180) };
+                    let (tr, tg, tb) = if is_selected {
+                        (cr, cg, cb)
+                    } else {
+                        (180, 180, 180)
+                    };
                     draw_text(
                         &draw,
                         FontId::PlexMonoRegular,

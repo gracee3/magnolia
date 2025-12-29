@@ -68,7 +68,9 @@ impl AudioInputBackend for CpalInputBackend {
         }
         .ok_or_else(|| anyhow::anyhow!("No input device"))?;
 
-        let resolved_name = resolved_device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let resolved_name = resolved_device
+            .name()
+            .unwrap_or_else(|_| "Unknown".to_string());
 
         let config = resolved_device.default_input_config()?;
         let sample_rate = config.sample_rate().0;
@@ -102,5 +104,3 @@ impl AudioInputBackend for CpalInputBackend {
         ))
     }
 }
-
-

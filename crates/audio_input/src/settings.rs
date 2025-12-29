@@ -51,7 +51,10 @@ impl AudioInputSettings {
     }
 
     pub fn selected(&self) -> String {
-        self.selected.lock().map(|s| s.clone()).unwrap_or_else(|_| "Default".to_string())
+        self.selected
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_else(|_| "Default".to_string())
     }
 
     pub fn take_pending(&self) -> bool {

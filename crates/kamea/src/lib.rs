@@ -1,11 +1,9 @@
 #[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
 pub use talisman_core::KameaGrid;
-use talisman_plugin_helper::{
-    export_plugin, SignalBuffer, SignalType, TalismanPlugin,
-};
 #[cfg(feature = "tile-rendering")]
 use talisman_plugin_helper::SignalValue;
+use talisman_plugin_helper::{export_plugin, SignalBuffer, SignalType, TalismanPlugin};
 
 #[cfg(feature = "tile-rendering")]
 use nannou::wgpu; // Access nannou's re-exported wgpu
@@ -79,7 +77,11 @@ impl TalismanPlugin for KameaPlugin {
         self.enabled = enabled;
     }
 
-    fn poll_signal(&mut self, #[cfg_attr(not(feature = "tile-rendering"), allow(unused_variables))] buffer: &mut SignalBuffer) -> bool {
+    fn poll_signal(
+        &mut self,
+        #[cfg_attr(not(feature = "tile-rendering"), allow(unused_variables))]
+        buffer: &mut SignalBuffer,
+    ) -> bool {
         if !self.enabled {
             return false;
         }

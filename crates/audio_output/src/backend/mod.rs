@@ -42,10 +42,10 @@ pub trait AudioOutputBackend: Send {
     ) -> anyhow::Result<(BackendStream, NegotiatedFormat, String)>;
 }
 
-#[cfg(target_os = "linux")]
-mod pipewire;
 #[cfg(not(target_os = "linux"))]
 mod cpal;
+#[cfg(target_os = "linux")]
+mod pipewire;
 
 pub fn default_backend() -> anyhow::Result<Box<dyn AudioOutputBackend>> {
     #[cfg(target_os = "linux")]
@@ -58,5 +58,3 @@ pub fn default_backend() -> anyhow::Result<Box<dyn AudioOutputBackend>> {
         Ok(Box::new(cpal::CpalOutputBackend::new()))
     }
 }
-
-

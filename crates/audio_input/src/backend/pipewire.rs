@@ -55,7 +55,9 @@ impl PipeWireInputBackend {
     pub fn new() -> anyhow::Result<Self> {
         // PipeWire requires global init once per process.
         pw::init();
-        Ok(Self { devices: Vec::new() })
+        Ok(Self {
+            devices: Vec::new(),
+        })
     }
 
     fn resolve_name(&self, device_id: &str) -> String {
@@ -102,10 +104,14 @@ impl AudioInputBackend for PipeWireInputBackend {
                 if global.type_ != pw::types::ObjectType::Node {
                     return;
                 }
-                let Some(props) = global.props else { return; };
+                let Some(props) = global.props else {
+                    return;
+                };
                 let props = props.as_ref();
 
-                let Some(class) = props.get("media.class") else { return; };
+                let Some(class) = props.get("media.class") else {
+                    return;
+                };
                 // Capture sources
                 if !class.starts_with("Audio/Source") {
                     return;
@@ -205,7 +211,9 @@ impl AudioInputBackend for PipeWireInputBackend {
             let _listener = stream
                 .add_local_listener_with_user_data(data)
                 .param_changed(|_, user_data, id, param| {
-                    let Some(param) = param else { return; };
+                    let Some(param) = param else {
+                        return;
+                    };
                     if id != pw::spa::param::ParamType::Format.as_raw() {
                         return;
                     }
@@ -242,7 +250,8 @@ impl AudioInputBackend for PipeWireInputBackend {
                                 let start = n as usize * mem::size_of::<f32>();
                                 let end = start + mem::size_of::<f32>();
                                 if end <= bytes.len() {
-                                    let f = f32::from_le_bytes(bytes[start..end].try_into().unwrap());
+                                    let f =
+                                        f32::from_le_bytes(bytes[start..end].try_into().unwrap());
                                     let _ = tx.try_send(f);
                                 }
                             }
@@ -308,5 +317,3 @@ impl AudioInputBackend for PipeWireInputBackend {
         Ok((BackendStream::new(handle), fmt, resolved_name))
     }
 }
-
-

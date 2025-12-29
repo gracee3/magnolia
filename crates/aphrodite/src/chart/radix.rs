@@ -199,13 +199,7 @@ impl<'a> RadixChart<'a> {
                 .weight(self.settings.stroke_cusps * self.settings.symbol_scale);
 
             // Draw Glyph
-            draw_glyph(
-                draw,
-                *glyph,
-                pos,
-                self.settings.symbol_scale * 12.0,
-                color,
-            );
+            draw_glyph(draw, *glyph, pos, self.settings.symbol_scale * 12.0, color);
         }
     }
 

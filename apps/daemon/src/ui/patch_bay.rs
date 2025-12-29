@@ -168,16 +168,20 @@ pub fn render(
                 .color(rgba(0.0, 0.2, 0.2, 0.2));
         }
 
-            let color = if is_input { srgba(0.0, 1.0, 0.0, 1.0) } else { srgba(1.0, 0.65, 0.0, 1.0) };
-            draw_text(
-                draw,
-                FontId::PlexMonoRegular,
-                dir_str,
-                pt2(rect.left() + 20.0, rect.y()),
-                10.0,
-                color,
-                TextAlignment::Left,
-            );
+        let color = if is_input {
+            srgba(0.0, 1.0, 0.0, 1.0)
+        } else {
+            srgba(1.0, 0.65, 0.0, 1.0)
+        };
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            dir_str,
+            pt2(rect.left() + 20.0, rect.y()),
+            10.0,
+            color,
+            TextAlignment::Left,
+        );
 
         draw_text(
             draw,
@@ -185,7 +189,12 @@ pub fn render(
             &port.label,
             pt2(rect.x(), rect.y()),
             14.0,
-            srgba(color.red as f32 / 255.0, color.green as f32 / 255.0, color.blue as f32 / 255.0, 1.0),
+            srgba(
+                color.red as f32 / 255.0,
+                color.green as f32 / 255.0,
+                color.blue as f32 / 255.0,
+                1.0,
+            ),
             TextAlignment::Center,
         );
 
@@ -221,7 +230,10 @@ pub fn render(
         }
 
         let main_label = format!("{}  ➔  {}", patch.source_module, patch.sink_module);
-        let ports_label = format!("{}:{} ➔ {}:{}", patch.source_module, patch.source_port, patch.sink_module, patch.sink_port);
+        let ports_label = format!(
+            "{}:{} ➔ {}:{}",
+            patch.source_module, patch.source_port, patch.sink_module, patch.sink_port
+        );
 
         draw_text(
             draw,
@@ -229,10 +241,15 @@ pub fn render(
             &main_label,
             pt2(rect.x(), rect.y() + 6.0),
             12.0,
-            srgba(color.red as f32 / 255.0, color.green as f32 / 255.0, color.blue as f32 / 255.0, 1.0),
+            srgba(
+                color.red as f32 / 255.0,
+                color.green as f32 / 255.0,
+                color.blue as f32 / 255.0,
+                1.0,
+            ),
             TextAlignment::Center,
         );
-        
+
         draw_text(
             draw,
             FontId::PlexMonoRegular,
@@ -403,14 +420,14 @@ pub fn handle_key(key: Key, state: &mut PatchBayModalState, patch_bay: &mut Patc
             {
                 let patches = patch_bay.get_patches();
                 let nav = input.nav.as_ref();
-                
+
                 if matches!(nav, Some(UiNav::Delete)) {
                     if let Some(patch) = patches.get(state.patches_focus.focused) {
                         disconnect_id = Some(patch.id.clone());
                     }
                 } else {
                     // Only handle navigation (arrows), don't trigger disconnect on Enter
-                   List::handle_nav(&mut state.patches_focus, patches.len(), &input);
+                    List::handle_nav(&mut state.patches_focus, patches.len(), &input);
                 }
             }
 

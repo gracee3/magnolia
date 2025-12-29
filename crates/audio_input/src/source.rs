@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use log::{info, warn};
+use tokio::time::Instant;
 
 use crate::AudioInputSettings;
 use crate::backend::{default_backend, AudioInputBackend, BackendStream};
@@ -13,7 +14,10 @@ use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source}
 use talisman_signals::ring_buffer::{self, RingBufferReceiver};
 
 const DEFAULT_CAPACITY: usize = 16384;
-const DEFAULT_FRAME_SAMPLES: usize = 1024;
+// 1024 @ 48kHz is ~21.3ms of inherent buffering. 256 is ~5.3ms.
+const DEFAULT_FRAME_SAMPLES: usize = 256;
+// Don't wait forever to fill a frame; emit partial frames to reduce end-to-end latency.
+const MAX_BATCH_WAIT: Duration = Duration::from_millis(3);
 
 /// Audio input source using CPAL, emitting buffered Audio signals.
 pub struct AudioInputSource {
@@ -151,15 +155,27 @@ impl Source for AudioInputSource {
         let target_samples = self.frame_samples * self.channels as usize;
         let mut data = Vec::with_capacity(target_samples);
 
+        let deadline = Instant::now() + MAX_BATCH_WAIT;
         while data.len() < target_samples {
             if let Some(sample) = self.receiver.try_recv() {
                 data.push(sample);
-            } else {
-                if !data.is_empty() {
+                continue;
+            }
+
+            // If we've already captured *some* audio, stop waiting quickly so viz/output doesn't lag.
+            if !data.is_empty() {
+                if Instant::now() >= deadline {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(2)).await;
+                tokio::task::yield_now().await;
+                continue;
             }
+
+            // No samples yet; avoid a tight loop.
+            if Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
 
         if data.is_empty() {

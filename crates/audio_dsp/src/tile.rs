@@ -117,20 +117,65 @@ impl TileRenderer for AudioDspTile {
         let spacing = 30.0;
 
         // Mute Row
-        let mute_color = if muted { srgba(1.0, 0.3, 0.3, 1.0) } else { srgba(0.5, 0.5, 0.5, 1.0) };
-        draw_text(draw, FontId::PlexSansBold, "MUTE [M]", pt2(rect.left() + 100.0, y), 14.0, mute_color, TextAlignment::Left);
-        draw_text(draw, FontId::PlexSansBold, if muted { "MUTED" } else { "ACTIVE" }, pt2(rect.right() - 100.0, y), 14.0, mute_color, TextAlignment::Right);
+        let mute_color = if muted {
+            srgba(1.0, 0.3, 0.3, 1.0)
+        } else {
+            srgba(0.5, 0.5, 0.5, 1.0)
+        };
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            "MUTE [M]",
+            pt2(rect.left() + 100.0, y),
+            14.0,
+            mute_color,
+            TextAlignment::Left,
+        );
+        draw_text(
+            draw,
+            FontId::PlexSansBold,
+            if muted { "MUTED" } else { "ACTIVE" },
+            pt2(rect.right() - 100.0, y),
+            14.0,
+            mute_color,
+            TextAlignment::Right,
+        );
         y -= spacing * 1.5;
 
         // Settings
-        draw_text(draw, FontId::PlexSansRegular, &format!("Gain: {:.2}", gain), pt2(rect.left() + 100.0, y), 14.0, srgba(0.7, 0.7, 0.7, 1.0), TextAlignment::Left);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            &format!("Gain: {:.2}", gain),
+            pt2(rect.left() + 100.0, y),
+            14.0,
+            srgba(0.7, 0.7, 0.7, 1.0),
+            TextAlignment::Left,
+        );
         y -= spacing;
-        draw_text(draw, FontId::PlexSansRegular, &format!("Lowpass: {}", if lowpass { "Enabled" } else { "Disabled" }), pt2(rect.left() + 100.0, y), 14.0, srgba(0.7, 0.7, 0.7, 1.0), TextAlignment::Left);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            &format!("Lowpass: {}", if lowpass { "Enabled" } else { "Disabled" }),
+            pt2(rect.left() + 100.0, y),
+            14.0,
+            srgba(0.7, 0.7, 0.7, 1.0),
+            TextAlignment::Left,
+        );
         y -= spacing;
-        draw_text(draw, FontId::PlexSansRegular, &format!("Cutoff: {:.0} Hz", cutoff), pt2(rect.left() + 100.0, y), 14.0, srgba(0.7, 0.7, 0.7, 1.0), TextAlignment::Left);
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
+            &format!("Cutoff: {:.0} Hz", cutoff),
+            pt2(rect.left() + 100.0, y),
+            14.0,
+            srgba(0.7, 0.7, 0.7, 1.0),
+            TextAlignment::Left,
+        );
 
         // Preview box
-        let preview_rect = Rect::from_x_y_w_h(rect.x(), rect.bottom() + 100.0, rect.w() * 0.6, 150.0);
+        let preview_rect =
+            Rect::from_x_y_w_h(rect.x(), rect.bottom() + 100.0, rect.w() * 0.6, 150.0);
         self.render_monitor(draw, preview_rect, ctx);
 
         false

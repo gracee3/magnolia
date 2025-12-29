@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use audio_dsp::tile::AudioDspTile;
 use audio_dsp::{AudioDspProcessor, AudioDspState};
 use audio_input::tile::AudioVisTile;
-use audio_input::{AudioInputSettings, AudioInputSource, AudioInputTile, AudioVizSink};
+use audio_input::{AudioInputSettings, AudioInputSource, AudioInputTile, AudioVizRingSink};
 use audio_output::tile::AudioOutputTile;
 use audio_output::{AudioOutputSettings, AudioOutputSink, AudioOutputState};
 // use talisman_core::ring_buffer; // Removed usage
@@ -180,12 +180,16 @@ fn model(app: &App) -> Model {
         audio_input_settings.clone(),
     ));
 
-    // Audio visualization tile (fed by AudioVizSink)
+    // Audio visualization tile (fed by AudioVizRingSink -> SPSC ring buffer)
     let mut vis_tile = AudioVisTile::new("audio_viz");
-    let vis_buffer = vis_tile.get_legacy_buffer();
     let vis_latency = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let vis_sr = vis_tile.get_sample_rate_meter();
+    let vis_ch = vis_tile.get_channels_meter();
     vis_tile.connect_latency_meter(vis_latency.clone());
+
+    let (viz_tx, viz_rx) = talisman_signals::ring_buffer::channel::<f32>(65536);
+    // Channels will be updated via `vis_ch` as audio flows, so this is only a startup hint.
+    vis_tile.connect_audio_stream(viz_rx, 2);
     tile_registry.register(vis_tile);
 
     // Audio output tile (fed by AudioOutputSink)
@@ -233,7 +237,7 @@ fn model(app: &App) -> Model {
         log::error!("Failed to spawn audio DSP: {}", e);
     }
 
-    let audio_viz_sink = AudioVizSink::new("audio_viz", vis_buffer, vis_latency, vis_sr);
+    let audio_viz_sink = AudioVizRingSink::new("audio_viz", viz_tx, vis_latency, vis_sr, vis_ch);
     let viz_schema = audio_viz_sink.schema();
     patch_bay.register_module(viz_schema);
     if let Err(e) = module_host.spawn(SinkAdapter::new(audio_viz_sink), 100) {
@@ -891,7 +895,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
                             "+",
                             rect.xy(),
                             24.0,
-                            srgba(stroke_color.red as f32 / 255.0, stroke_color.green as f32 / 255.0, stroke_color.blue as f32 / 255.0, 1.0),
+                            srgba(
+                                stroke_color.red as f32 / 255.0,
+                                stroke_color.green as f32 / 255.0,
+                                stroke_color.blue as f32 / 255.0,
+                                1.0,
+                            ),
                             TextAlignment::Center,
                         );
                     }
@@ -1055,7 +1064,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
             mode_text,
             pt2(win_rect.left() + 50.0, win_rect.bottom() + 20.0),
             14.0,
-            srgba(mode_color.red, mode_color.green, mode_color.blue, mode_color.alpha),
+            srgba(
+                mode_color.red,
+                mode_color.green,
+                mode_color.blue,
+                mode_color.alpha,
+            ),
             TextAlignment::Left,
         );
 
