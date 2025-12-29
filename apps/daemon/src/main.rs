@@ -184,6 +184,7 @@ fn model(app: &App) -> Model {
     let mut vis_tile = AudioVisTile::new("audio_viz");
     let vis_buffer = vis_tile.get_legacy_buffer();
     let vis_latency = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let vis_sr = vis_tile.get_sample_rate_meter();
     vis_tile.connect_latency_meter(vis_latency.clone());
     tile_registry.register(vis_tile);
 
@@ -232,7 +233,7 @@ fn model(app: &App) -> Model {
         log::error!("Failed to spawn audio DSP: {}", e);
     }
 
-    let audio_viz_sink = AudioVizSink::new("audio_viz", vis_buffer, vis_latency);
+    let audio_viz_sink = AudioVizSink::new("audio_viz", vis_buffer, vis_latency, vis_sr);
     let viz_schema = audio_viz_sink.schema();
     patch_bay.register_module(viz_schema);
     if let Err(e) = module_host.spawn(SinkAdapter::new(audio_viz_sink), 100) {
@@ -733,8 +734,9 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
         }
     }
 
-    // If any other modal is active, block grid navigation
-    if !model.modal_stack.is_empty() {
+    // If any other modal is active (Patch Bay, Global Settings), block grid navigation.
+    // BUT allow 'Maximized' tiles to still receive their keybinds.
+    if !model.modal_stack.is_empty() && model.modal_stack.get_maximized_tile().is_none() {
         return;
     }
 

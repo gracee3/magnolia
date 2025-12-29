@@ -13,7 +13,7 @@ use rustfft::num_complex::Complex;
 #[cfg(feature = "tile-rendering")]
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc as StdArc;
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "tile-rendering")]
@@ -103,6 +103,15 @@ impl ColorScheme {
             ColorScheme::Monochrome => "Monochrome",
         }
     }
+
+    pub fn next(&self) -> Self {
+        match self {
+            ColorScheme::CyanReactive => ColorScheme::GreenScope,
+            ColorScheme::GreenScope => ColorScheme::Rainbow,
+            ColorScheme::Rainbow => ColorScheme::Monochrome,
+            ColorScheme::Monochrome => ColorScheme::CyanReactive,
+        }
+    }
 }
 
 /// Audio visualization tile with configurable display modes
@@ -170,6 +179,9 @@ pub struct AudioVisTile {
 
     /// Optional latency meter (microseconds)
     latency_us: Option<Arc<AtomicU64>>,
+
+    /// Sample rate tracking
+    sample_rate_hz: Arc<AtomicU32>,
 }
 
 const BUFFER_SIZE: usize = 2048;
@@ -203,6 +215,7 @@ impl AudioVisTile {
             error: Some(TileError::info("No audio connected")),
             legacy_buffer: Arc::new(Mutex::new(vec![0.0; BUFFER_SIZE])),
             latency_us: None,
+            sample_rate_hz: Arc::new(AtomicU32::new(44100)),
         }
     }
 
@@ -230,6 +243,10 @@ impl AudioVisTile {
 
     pub fn connect_latency_meter(&mut self, latency_us: Arc<AtomicU64>) {
         self.latency_us = Some(latency_us);
+    }
+
+    pub fn get_sample_rate_meter(&self) -> Arc<AtomicU32> {
+        self.sample_rate_hz.clone()
     }
 
     #[cfg(feature = "tile-rendering")]
@@ -353,6 +370,19 @@ impl AudioVisTile {
             if let Ok(buf) = self.legacy_buffer.lock() {
                 let len = buf.len().min(BUFFER_SIZE);
                 if len > 0 {
+                    // Auto-clear error if we see non-zero data
+                    if self.error.is_some() {
+                        let mut activity = false;
+                        for &v in buf.iter().take(100) {
+                            if v.abs() > 0.001 {
+                                activity = true;
+                                break;
+                            }
+                        }
+                        if activity {
+                            self.error = None;
+                        }
+                    }
                     self.buffer[..len].copy_from_slice(&buf[..len]);
                 }
             }
@@ -442,25 +472,50 @@ impl TileRenderer for AudioVisTile {
 
         match self.vis_type {
             VisualizationType::Oscilloscope => {
-                let points: Vec<Point2> = buffer
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &sample)| {
-                        let x = map_range(
-                            i,
-                            0,
-                            buffer.len(),
-                            content_rect.left(),
-                            content_rect.right(),
-                        );
-                        let y =
-                            content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
-                        pt2(x, y)
-                    })
-                    .collect();
+                let channels = self.channels;
+                if channels >= 2 {
+                    // Stereo Mode: Draw two channels (Blue/Red)
+                    let h2 = content_rect.h() * 0.45;
+                    let top_y = content_rect.y() + content_rect.h() * 0.25;
+                    let bot_y = content_rect.y() - content_rect.h() * 0.25;
 
-                if !points.is_empty() {
-                    draw.polyline().weight(2.0).points(points).color(color);
+                    let left_points: Vec<Point2> = self.left_buffer.iter().enumerate().map(|(i, &s)| {
+                        let x = map_range(i, 0, self.left_buffer.len(), content_rect.left(), content_rect.right());
+                        pt2(x, top_y + s * h2 * self.sensitivity)
+                    }).collect();
+
+                    let right_points: Vec<Point2> = self.right_buffer.iter().enumerate().map(|(i, &s)| {
+                        let x = map_range(i, 0, self.right_buffer.len(), content_rect.left(), content_rect.right());
+                        pt2(x, bot_y + s * h2 * self.sensitivity)
+                    }).collect();
+
+                    if !left_points.is_empty() {
+                        draw.polyline().weight(1.5).points(left_points).color(srgba(0.2, 0.6, 1.0, 0.9));
+                    }
+                    if !right_points.is_empty() {
+                        draw.polyline().weight(1.5).points(right_points).color(srgba(1.0, 0.3, 0.3, 0.9));
+                    }
+                } else {
+                    let points: Vec<Point2> = buffer
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &sample)| {
+                            let x = map_range(
+                                i,
+                                0,
+                                buffer.len(),
+                                content_rect.left(),
+                                content_rect.right(),
+                            );
+                            let y =
+                                content_rect.y() + sample * content_rect.h() * 0.4 * self.sensitivity;
+                            pt2(x, y)
+                        })
+                        .collect();
+
+                    if !points.is_empty() {
+                        draw.polyline().weight(2.0).points(points).color(color);
+                    }
                 }
             }
             VisualizationType::SpectrumBars | VisualizationType::SpectrumLine => {
@@ -468,12 +523,33 @@ impl TileRenderer for AudioVisTile {
                 if spectrum.is_empty() {
                     return;
                 }
-                let max_mag = spectrum.iter().cloned().fold(0.0_f32, f32::max).max(1e-6);
+                
+                // Use a logarithmic distribution for better frequency representation
+                let num_display_bins = if self.vis_type == VisualizationType::SpectrumBars { 40 } else { 128 };
+                let mut display_spectrum = vec![0.0; num_display_bins];
+                
+                let n = spectrum.len();
+                for i in 0..num_display_bins {
+                    // Logarithmic mapping: f = base^(i/N)
+                    let f1 = (i as f32 / num_display_bins as f32).powf(2.0); // Simple quadratic curve for now
+                    let f2 = ((i + 1) as f32 / num_display_bins as f32).powf(2.0);
+                    
+                    let start_idx = ((f1 * (n - 1) as f32) as usize).max(0);
+                    let end_idx = ((f2 * (n - 1) as f32) as usize).clamp(start_idx + 1, n);
+                    
+                    let mut max_val = 0.0_f32;
+                    for j in start_idx..end_idx {
+                        max_val = max_val.max(spectrum[j]);
+                    }
+                    display_spectrum[i] = max_val;
+                }
+
+                let max_mag = display_spectrum.iter().cloned().fold(0.0_f32, f32::max).max(1e-6);
 
                 if self.vis_type == VisualizationType::SpectrumBars {
-                    let bar_w = content_rect.w() / spectrum.len() as f32;
-                    for (i, &mag) in spectrum.iter().enumerate() {
-                        let norm = (mag / max_mag).min(1.0);
+                    let bar_w = content_rect.w() / num_display_bins as f32;
+                    for (i, &mag) in display_spectrum.iter().enumerate() {
+                        let norm = (mag / max_mag).powf(0.5).min(1.0); // Some compression for visibility
                         let h = norm * content_rect.h();
                         let x = content_rect.left() + i as f32 * bar_w + bar_w * 0.5;
                         draw.rect()
@@ -482,18 +558,18 @@ impl TileRenderer for AudioVisTile {
                             .color(color);
                     }
                 } else {
-                    let points: Vec<Point2> = spectrum
+                    let points: Vec<Point2> = display_spectrum
                         .iter()
                         .enumerate()
                         .map(|(i, &mag)| {
                             let x = map_range(
                                 i,
                                 0,
-                                spectrum.len(),
+                                num_display_bins,
                                 content_rect.left(),
                                 content_rect.right(),
                             );
-                            let norm = (mag / max_mag).min(1.0);
+                            let norm = (mag / max_mag).powf(0.5).min(1.0);
                             let y = content_rect.bottom() + norm * content_rect.h();
                             pt2(x, y)
                         })
@@ -585,68 +661,86 @@ impl TileRenderer for AudioVisTile {
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
-            .color(srgba(0.02, 0.02, 0.05, 0.98));
+            .color(srgba(0.01, 0.01, 0.02, 1.0));
+
+        // Top Banner
+        let banner_h = 80.0;
+        let banner_rect = Rect::from_x_y_w_h(rect.x(), rect.top() - banner_h / 2.0, rect.w(), banner_h);
+        draw.rect().xy(banner_rect.xy()).wh(banner_rect.wh()).color(srgba(0.0, 0.05, 0.05, 0.5));
 
         draw_text(
             draw,
             FontId::PlexSansBold,
             "AUDIO VISUALIZER",
             pt2(rect.x(), rect.top() - 30.0),
-            18.0,
+            24.0,
             srgba(0.0, 1.0, 1.0, 1.0),
             TextAlignment::Center,
         );
 
-        let subtitle = format!("{} | {}", self.vis_type.label(), self.color_scheme.label());
+        let sr = self.sample_rate_hz.load(Ordering::Relaxed);
+        let subtitle = format!("MODE: {}   |   THEME: {}   |   SENS: {:.1}x   |   SR: {}Hz", 
+            self.vis_type.label().to_uppercase(), 
+            self.color_scheme.label().to_uppercase(),
+            self.sensitivity,
+            sr
+        );
         draw_text(
             draw,
             FontId::PlexSansRegular,
             &subtitle,
-            pt2(rect.x(), rect.top() - 50.0),
-            12.0,
-            srgba(0.5, 0.5, 0.5, 1.0),
+            pt2(rect.x(), rect.top() - 55.0),
+            11.0,
+            srgba(0.4, 0.5, 0.5, 1.0),
             TextAlignment::Center,
         );
 
+        // Latency at top right
         if let Some(latency) = &self.latency_us {
             let latency_ms = latency.load(Ordering::Relaxed) as f32 / 1000.0;
-            let text = format!("Latency: {:.1} ms", latency_ms);
+            let lat_color = if latency_ms < 20.0 { srgba(0.2, 0.8, 0.4, 1.0) } 
+                           else if latency_ms < 50.0 { srgba(0.8, 0.8, 0.2, 1.0) }
+                           else { srgba(1.0, 0.3, 0.3, 1.0) };
+            
             draw_text(
                 draw,
-                FontId::PlexMonoRegular,
-                &text,
-                pt2(rect.x(), rect.top() - 70.0),
-                11.0,
-                srgba(0.4, 0.6, 0.9, 1.0),
-                TextAlignment::Center,
+                FontId::PlexMonoMedium,
+                &format!("LATENCY: {:.1}ms", latency_ms),
+                pt2(rect.right() - 100.0, rect.top() - 30.0),
+                12.0,
+                lat_color,
+                TextAlignment::Right,
             );
         }
 
+        // Main Visualization Area (Centered)
         let preview_rect = Rect::from_x_y_w_h(
-            rect.x() + rect.w() * 0.15,
+            rect.x(),
             rect.y() - 20.0,
-            rect.w() * 0.65,
-            rect.h() * 0.5,
+            rect.w() * 0.85,
+            rect.h() * 0.6,
         );
 
         draw.rect()
             .xy(preview_rect.xy())
             .wh(preview_rect.wh())
             .no_fill()
-            .stroke(srgba(0.2, 0.3, 0.3, 1.0))
+            .stroke(srgba(0.1, 0.2, 0.2, 0.8))
             .stroke_weight(1.0);
 
+        self.render_monitor(draw, preview_rect.pad(2.0), ctx);
+
+        // Controls hint at bottom
         draw_text(
             draw,
-            FontId::PlexSansBold,
-            "LIVE PREVIEW",
-            pt2(preview_rect.x(), preview_rect.top() + 15.0),
+            FontId::PlexSansRegular,
+            "[V] Next Mode   [C] Next Theme   [+/-] Sensitivity   [M] Mute   [F] Freeze",
+            pt2(rect.x(), rect.bottom() + 40.0),
             10.0,
             srgba(0.3, 0.3, 0.3, 1.0),
             TextAlignment::Center,
         );
 
-        self.render_monitor(draw, preview_rect.pad(2.0), ctx);
         false
     }
 
@@ -749,6 +843,9 @@ impl TileRenderer for AudioVisTile {
             BindableAction::new("mute", "Mute", true),
             BindableAction::new("freeze", "Freeze", true),
             BindableAction::new("next_vis", "Next Visualization", false),
+            BindableAction::new("next_theme", "Next Color Scheme", false),
+            BindableAction::new("inc_sens", "Increase Sensitivity", false),
+            BindableAction::new("dec_sens", "Decrease Sensitivity", false),
         ]
     }
 
@@ -770,6 +867,21 @@ impl TileRenderer for AudioVisTile {
             "next_vis" => {
                 self.vis_type = self.vis_type.next();
                 log::info!("Audio vis type: {:?}", self.vis_type);
+                true
+            }
+            "next_theme" => {
+                self.color_scheme = self.color_scheme.next();
+                log::info!("Audio vis theme: {:?}", self.color_scheme);
+                true
+            }
+            "inc_sens" => {
+                self.sensitivity = (self.sensitivity + 0.2).min(5.0);
+                log::info!("Audio vis sensitivity: {:.1}", self.sensitivity);
+                true
+            }
+            "dec_sens" => {
+                self.sensitivity = (self.sensitivity - 0.2).max(0.1);
+                log::info!("Audio vis sensitivity: {:.1}", self.sensitivity);
                 true
             }
             _ => false,

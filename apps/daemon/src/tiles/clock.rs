@@ -88,7 +88,11 @@ impl TileRenderer for ClockTile {
             .color(srgba(0.05, 0.05, 0.1, 0.9));
 
         // Time display
-        let font_size = (rect.h() * 0.3).min(72.0);
+        // Calculate font size based on both width and height to prevent overflow
+        // "18:03:16" is 8 characters. Mono fonts are ~0.6w per h.
+        // We need 8 * 0.6 * font_size < rect.w() * 0.9 (for margin)
+        // font_size < rect.w() / 5.33 ... let's use / 6.5 to be safe with tracking.
+        let font_size = (rect.h() * 0.25).min(rect.w() / 6.5).min(80.0);
 
         // Subtle pulse animation
         let pulse = (ctx.time.elapsed().as_secs_f32() * 1.5).sin() * 0.05 + 0.95;

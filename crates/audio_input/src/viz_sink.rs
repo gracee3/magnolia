@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,15 +19,22 @@ pub struct AudioVizSink {
     enabled: bool,
     buffer: Arc<Mutex<Vec<f32>>>,
     latency_us: Arc<AtomicU64>,
+    sample_rate_hz: Arc<AtomicU32>,
 }
 
 impl AudioVizSink {
-    pub fn new(id: &str, buffer: Arc<Mutex<Vec<f32>>>, latency_us: Arc<AtomicU64>) -> Self {
+    pub fn new(
+        id: &str,
+        buffer: Arc<Mutex<Vec<f32>>>,
+        latency_us: Arc<AtomicU64>,
+        sample_rate_hz: Arc<AtomicU32>,
+    ) -> Self {
         Self {
             id: id.to_string(),
             enabled: true,
             buffer,
             latency_us,
+            sample_rate_hz,
         }
     }
 }
@@ -67,7 +74,10 @@ impl Sink for AudioVizSink {
         }
 
         let Signal::Audio {
-            timestamp_us, data, ..
+            timestamp_us,
+            data,
+            sample_rate,
+            ..
         } = signal
         else {
             return Ok(None);
@@ -80,13 +90,20 @@ impl Sink for AudioVizSink {
             }
         }
 
+        self.sample_rate_hz.store(sample_rate, Ordering::Relaxed);
+
         if let Ok(mut buf) = self.buffer.lock() {
-            if data.len() <= buf.len() {
-                let start = buf.len() - data.len();
-                buf[start..].copy_from_slice(&data);
+            let n = data.len();
+            let buf_len = buf.len();
+            if n >= buf_len {
+                // New data is larger than buffer, just take the end
+                buf.copy_from_slice(&data[n - buf_len..]);
             } else {
-                let start = data.len() - buf.len();
-                buf.copy_from_slice(&data[start..]);
+                // Shift existing samples to the left
+                buf.rotate_left(n);
+                // Copy new samples to the end
+                let start = buf_len - n;
+                buf[start..].copy_from_slice(&data);
             }
         }
 

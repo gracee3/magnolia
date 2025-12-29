@@ -27,9 +27,12 @@ sensitivity = 1.0
 vis_type = "SpectrumBars"
 
 [tiles.settings.keybinds]
-freeze = "f"
-next_vis = "n"
 mute = "m"
+freeze = "f"
+next_vis = "v"
+next_theme = "c"
+inc_sens = "equals"
+dec_sens = "minus"
 
 [[tiles]]
 id = "audio_output"
