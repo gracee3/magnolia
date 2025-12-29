@@ -27,9 +27,9 @@ sensitivity = 1.0
 vis_type = "Oscilloscope"
 
 [tiles.settings.keybinds]
+next_vis = "n"
 mute = "m"
 freeze = "f"
-next_vis = "n"
 
 [[tiles]]
 id = "audio_output"
@@ -91,6 +91,21 @@ show_seconds = true
 [tiles.settings.keybinds]
 toggle_seconds = "s"
 toggle_format = "t"
+
+[[tiles]]
+id = "astro"
+col = 3
+row = 2
+colspan = 1
+rowspan = 1
+module = "astro"
+enabled = true
+
+[tiles.settings.config]
+show_degrees = true
+show_moon = true
+
+[tiles.settings.keybinds]
 
 [[patches]]
 id = "patch_1"

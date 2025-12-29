@@ -82,7 +82,7 @@ enum ModalAnimKey {
     GlobalSettings,
     PatchBay,
     LayoutManager,
-    TileSettings,
+
     AddTilePicker,
 }
 
@@ -199,6 +199,9 @@ fn model(app: &App) -> Model {
     // Audio DSP tile (settings)
     let dsp_state = AudioDspState::new();
     tile_registry.register(AudioDspTile::new("audio_dsp", dsp_state.clone()));
+
+    // Astro tile (astrological chart)
+    tile_registry.register(aphrodite::tile::AstroTile::new());
 
     // Audio pipeline modules
     if let Ok(audio_input_source) = AudioInputSource::new("audio_input", audio_input_settings.clone()) {
@@ -361,13 +364,7 @@ fn model(app: &App) -> Model {
 }
 
 
-/// Map tile ID to module ID for PatchBay
-/// Map tile ID to module ID for PatchBay
-/// In the microkernel architecture, we prefer 1:1 mapping or explicit config.
-/// For now, we default to using the tile_id as the module_id.
-fn tile_to_module(tile_id: &str) -> String {
-    tile_id.to_string()
-}
+
 
 /// Apply saved settings from layout config to all tiles in registry
 fn apply_tile_settings(registry: &tiles::TileRegistry, layout: &Layout) {
@@ -421,13 +418,13 @@ fn update_modal_anims(model: &mut Model) {
     let is_global_settings = model.modal_stack.is_global_settings_open();
     let is_patch_bay = model.modal_stack.is_patch_bay_open();
     let is_layout_manager = model.modal_stack.is_layout_manager_open();
-    let is_tile_settings = model.modal_stack.get_tile_settings().is_some();
+
     let is_add_tile_picker = model.modal_stack.get_add_tile_picker().is_some();
     
     sync_anim(&mut model.modal_anims, ModalAnimKey::GlobalSettings, is_global_settings);
     sync_anim(&mut model.modal_anims, ModalAnimKey::PatchBay, is_patch_bay);
     sync_anim(&mut model.modal_anims, ModalAnimKey::LayoutManager, is_layout_manager);
-    sync_anim(&mut model.modal_anims, ModalAnimKey::TileSettings, is_tile_settings);
+
     sync_anim(&mut model.modal_anims, ModalAnimKey::AddTilePicker, is_add_tile_picker);
 }
 
@@ -829,185 +826,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
             });
     }
 
-    // Tile Settings Modal (Fullscreen Style)
-    if let Some(tile_id) = model.modal_stack.get_tile_settings().map(|s| s.to_string()) {
-        let anim = model.modal_anims.get(&ModalAnimKey::TileSettings);
-        let alpha = anim.map(|a| a.eased()).unwrap_or(1.0);
-        let scale = 0.9 + 0.1 * alpha;
-        
-        let module_id = tile_to_module(&tile_id);
-        let module_info = model.patch_bay.get_module(&module_id).cloned();
-        let screen_rect = ctx.screen_rect();
-        let margin = 50.0 * (1.0 + (1.0 - alpha));
-        let modal_width = (screen_rect.width() - margin * 2.0).min(600.0) * scale;
-        let modal_height = (screen_rect.height() - margin * 2.0) * scale;
-        let modal_x = screen_rect.center().x - modal_width / 2.0;
-        let modal_y = screen_rect.center().y - modal_height / 2.0;
-        
-        // Fullscreen dark backdrop
-        egui::Area::new(egui::Id::new("tile_settings_backdrop"))
-            .fixed_pos(egui::pos2(0.0, 0.0))
-            .show(&ctx, |ui| {
-                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::click());
-                ui.painter().rect_filled(rect, 0.0, 
-                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, (220.0 * alpha) as u8));
-            });
-        
-        egui::Area::new(egui::Id::new("tile_settings_modal"))
-            .fixed_pos(egui::pos2(modal_x, modal_y))
-            .show(&ctx, |ui| {
-                let frame = egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_unmultiplied(8, 8, 12, (250.0 * alpha) as u8))
-                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 255, 255, (200.0 * alpha) as u8)))
-                    .inner_margin(egui::Margin::same(20.0));
-                
-                frame.show(ui, |ui| {
-                    ui.set_min_size(egui::vec2(modal_width, modal_height));
-                    
-                    // Header
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("TILE: {}", tile_id.to_uppercase()))
-                            .heading()
-                            .size(24.0)
-                            .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * alpha) as u8)));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new("[ESC] Close")
-                                .small()
-                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
-                        });
-                    });
-                    
-                    ui.add_space(10.0);
-                    ui.add(egui::Separator::default().spacing(10.0));
-                    ui.add_space(10.0);
-                    
-                    egui::ScrollArea::vertical().max_height(modal_height - 100.0).show(ui, |ui| {
-                        // Module info
-                        if let Some(module) = module_info {
-                            ui.label(egui::RichText::new("MODULE INFO")
-                                .small()
-                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
-                            ui.add_space(5.0);
-                            
-                            egui::Frame::none()
-                                .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 20, (200.0 * alpha) as u8))
-                                .inner_margin(egui::Margin::same(10.0))
-                                .show(ui, |ui| {
-                                    ui.label(egui::RichText::new(format!("Name: {}", module.name))
-                                        .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, (255.0 * alpha) as u8)));
-                                    ui.label(egui::RichText::new(format!("ID: {}", module.id))
-                                        .small()
-                                        .color(egui::Color32::from_rgba_unmultiplied(120, 120, 120, (200.0 * alpha) as u8)));
-                                    ui.label(egui::RichText::new(&module.description)
-                                        .small()
-                                        .color(egui::Color32::from_rgba_unmultiplied(150, 150, 150, (200.0 * alpha) as u8)));
-                                });
-                            
-                            ui.add_space(15.0);
-                            
-                            // Ports
-                            ui.label(egui::RichText::new("PORTS")
-                                .small()
-                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
-                            ui.add_space(5.0);
-                            
-                            for port in &module.ports {
-                                let (icon, r, g, b) = match port.direction {
-                                    talisman_core::PortDirection::Input => ("◀ IN", 100, 200, 100),
-                                    talisman_core::PortDirection::Output => ("▶ OUT", 200, 100, 100),
-                                };
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(icon)
-                                        .color(egui::Color32::from_rgba_unmultiplied(r, g, b, (255.0 * alpha) as u8)));
-                                    ui.label(egui::RichText::new(&port.label)
-                                        .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, (255.0 * alpha) as u8)));
-                                    ui.label(egui::RichText::new(format!("({:?})", port.data_type))
-                                        .small()
-                                        .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
-                                });
-                            }
-                            
-                            ui.add_space(15.0);
-                            
-                            // Connections
-                            ui.label(egui::RichText::new("CONNECTIONS")
-                                .small()
-                                .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
-                            ui.add_space(5.0);
-                            
-                            let incoming = model.patch_bay.get_incoming_patches(&module.id);
-                            let outgoing = model.patch_bay.get_outgoing_patches(&module.id);
-                            
-                            if incoming.is_empty() && outgoing.is_empty() {
-                                ui.label(egui::RichText::new("No connections")
-                                    .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
-                            } else {
-                                for patch in incoming {
-                                    ui.label(egui::RichText::new(format!("← FROM: {}:{}", patch.source_module, patch.source_port))
-                                        .small()
-                                        .color(egui::Color32::from_rgba_unmultiplied(100, 200, 100, (200.0 * alpha) as u8)));
-                                }
-                                for patch in outgoing {
-                                    ui.label(egui::RichText::new(format!("→ TO: {}:{}", patch.sink_module, patch.sink_port))
-                                        .small()
-                                        .color(egui::Color32::from_rgba_unmultiplied(200, 100, 100, (200.0 * alpha) as u8)));
-                                }
-                            }
-                        } else {
-                            ui.label(egui::RichText::new("Module not found in Patch Bay")
-                                .color(egui::Color32::from_rgba_unmultiplied(255, 100, 100, (255.0 * alpha) as u8)));
-                        }
-                        
-                        ui.add_space(15.0);
-                        
-                        // Enabled state
-                        ui.label(egui::RichText::new("STATE")
-                            .small()
-                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
-                        ui.add_space(5.0);
-                        
-                        let tile_config = model.layout.config.tiles.iter().find(|t| t.id == tile_id);
-                        let is_disabled = tile_config.map(|t| !t.enabled).unwrap_or(false);
-                        let (state_text, sr, sg, sb) = if is_disabled { 
-                            ("DISABLED", 255, 100, 100) 
-                        } else { 
-                            ("ENABLED", 100, 255, 100) 
-                        };
-                        ui.label(egui::RichText::new(state_text)
-                            .strong()
-                            .color(egui::Color32::from_rgba_unmultiplied(sr, sg, sb, (255.0 * alpha) as u8)));
-                        
-                        ui.add_space(15.0);
-                        
-                        // Settings (Schema Driven)
-                        ui.label(egui::RichText::new("SETTINGS")
-                            .small()
-                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 110, (200.0 * alpha) as u8)));
-                        ui.add_space(5.0);
-                        
-                        if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
-                            let module_id = tile.module.clone();
-                            if let Some(entry) = model.tile_registry.get(&module_id) {
-                                if let Ok(renderer) = entry.read() {
-                                    if let Some(schema) = renderer.settings_schema() {
-                                        egui::Frame::none()
-                                            .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 20, (200.0 * alpha) as u8))
-                                            .inner_margin(egui::Margin::same(10.0))
-                                            .show(ui, |ui| {
-                                                ui::schema::render_schema_ui(ui, &mut tile.settings.config, &schema);
-                                            });
-                                    } else {
-                                        ui.label(egui::RichText::new("No configurable settings")
-                                            .italics()
-                                            .color(egui::Color32::from_rgba_unmultiplied(100, 100, 100, (200.0 * alpha) as u8)));
-                                    }
-                                }
-                            }
-                        }
-                    });
-                });
-            });
-    }
+
 
     // Layout Manager Modal (Fullscreen Style)
     if model.modal_stack.is_layout_manager_open() {
@@ -1323,9 +1142,7 @@ fn mouse_pressed(_app: &App, _model: &mut Model, _button: MouseButton) {
 
 
 
-fn mouse_released(_app: &App, _model: &mut Model, _button: MouseButton) {
-    // No-op: All operations are click-based, not drag-based
-}
+
 
 fn mouse_moved(_app: &App, _model: &mut Model, _pos: Point2) {
     // Mouse movement handling - keyboard-first navigation only
@@ -1451,9 +1268,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
             AppAction::OpenGlobalSettings => {
                 model.modal_stack.push(ModalState::GlobalSettings);
             },
-            AppAction::OpenLayoutManager => {
-                model.modal_stack.push(ModalState::LayoutManager);
-            },
+
             AppAction::OpenAddTilePicker { col, row } => {
                 model.modal_stack.open_add_tile_picker(col, row);
             },

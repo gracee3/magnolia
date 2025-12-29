@@ -90,7 +90,7 @@ impl TileRenderer for ClockTile {
             .font_size(12);
     }
     
-    fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
+    fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Background
         draw.rect()
             .xy(rect.xy())

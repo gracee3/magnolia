@@ -82,8 +82,7 @@ pub enum AppAction {
     Copy { text: String },
     /// Open the global settings modal
     OpenGlobalSettings,
-    /// Open the layout manager modal
-    OpenLayoutManager,
+
     /// Open the add-tile picker modal at a specific grid cell
     OpenAddTilePicker { col: usize, row: usize },
     /// Open the patch bay modal

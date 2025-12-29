@@ -7,18 +7,12 @@ pub enum ModalState {
     PatchBay,
     /// Global settings modal
     GlobalSettings,
-    /// Tile settings modal (tile_id)
-    TileSettings { tile_id: String },
     /// Layout manager modal
     LayoutManager,
     /// Tile maximized/control view (tile_id)
     Maximized { tile_id: String },
     /// Add tile picker (in layout mode)
     AddTilePicker { cursor_col: usize, cursor_row: usize, selected_idx: usize },
-    /// Context Menu (at position)
-    ContextMenu { x: f32, y: f32, options: Vec<String> }, // Placeholder for now
-    /// Generic Confirmation
-    Confirmation { message: String, action: String },
 }
 
 /// Modal stack for hierarchical modal management
@@ -46,24 +40,9 @@ impl ModalStack {
         self.stack.pop()
     }
 
-    /// Check if a specific modal is active (anywhere in stack)
-    pub fn has(&self, modal: &ModalState) -> bool {
-        self.stack.contains(modal)
-    }
-
     /// Check if any modal is open
     pub fn is_empty(&self) -> bool {
         self.stack.is_empty()
-    }
-
-    /// Get the top modal without removing it
-    pub fn top(&self) -> Option<&ModalState> {
-        self.stack.last()
-    }
-
-    /// Clear all modals
-    pub fn clear(&mut self) {
-        self.stack.clear();
     }
 
     /// Check if patch bay is open
@@ -91,15 +70,7 @@ impl ModalStack {
         None
     }
 
-    /// Check if tile settings is open and get tile_id
-    pub fn get_tile_settings(&self) -> Option<&str> {
-        for modal in self.stack.iter().rev() {
-            if let ModalState::TileSettings { tile_id } = modal {
-                return Some(tile_id);
-            }
-        }
-        None
-    }
+
 
     /// Check if add tile picker is open
     pub fn get_add_tile_picker(&self) -> Option<(usize, usize, usize)> {

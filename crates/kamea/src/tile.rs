@@ -40,10 +40,7 @@ impl KameaTile {
         }
     }
     
-    /// Get the shared text buffer for external input
-    pub fn get_text_buffer(&self) -> Arc<Mutex<String>> {
-        self.current_text.clone()
-    }
+
     
     /// Set the input text (triggers regeneration on next update)
     pub fn set_text(&self, text: &str) {
@@ -195,7 +192,7 @@ impl TileRenderer for KameaTile {
             .font_size(10);
     }
     
-    fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
+    fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Background
         draw.rect()
             .xy(rect.xy())

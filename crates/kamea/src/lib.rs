@@ -1,9 +1,9 @@
 use talisman_plugin_helper::{
     export_plugin, TalismanPlugin, SignalBuffer, SignalType, SignalValue,
 };
-use talisman_core::{Signal, KameaGrid};
+pub use talisman_core::KameaGrid;
 use nannou::prelude::*;
-use std::sync::{Arc, Mutex};
+
 use nannou::wgpu; // Access nannou's re-exported wgpu
 
 mod generator;
@@ -141,6 +141,22 @@ impl TalismanPlugin for KameaPlugin {
                 
                 if !device_ptr.is_null() && !queue_ptr.is_null() {
                     self.init_gpu(device_ptr, queue_ptr);
+                }
+            }
+        } else if input.signal_type == SignalType::Text as u32 {
+            unsafe {
+                if !input.value.ptr.is_null() {
+                    use std::ffi::CStr;
+                    // Cast void* to char*
+                    let ptr = input.value.ptr as *const std::os::raw::c_char;
+                    if let Ok(c_str) = CStr::from_ptr(ptr).to_str() {
+                        if self.tile.is_none() {
+                            self.tile = Some(KameaTile::new());
+                        }
+                        if let Some(tile) = &self.tile {
+                            tile.set_text(c_str);
+                        }
+                    }
                 }
             }
         }
