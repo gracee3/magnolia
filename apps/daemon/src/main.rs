@@ -576,6 +576,23 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     
     let ctrl = _app.keys.mods.ctrl();
     let shift = _app.keys.mods.shift();
+
+    // === MAXIMIZED TILE INPUT ROUTING (tile-local controls) ===
+    // If a tile is maximized, give it first crack at keyboard input (except ESC,
+    // which is reserved for closing modals/maximize).
+    // Let global Ctrl+ shortcuts (quit/copy/etc) win even while maximized.
+    if key != Key::Escape && !ctrl {
+        if let Some(max_id) = model.modal_stack.get_maximized_tile() {
+            if let Some(tile_cfg) = model.layout.config.tiles.iter().find(|t| t.id == max_id) {
+                let handled = model
+                    .tile_registry
+                    .handle_key(&tile_cfg.module, key, ctrl, shift);
+                if handled {
+                    return;
+                }
+            }
+        }
+    }
     
     // === MODAL ESC HANDLING (highest priority) ===
     // ESC closes the top modal before any other input processing

@@ -7,6 +7,8 @@ use nannou::prelude::*;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use super::{TileRenderer, RenderContext, BindableAction};
+use crate::ui::controls;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeFormat {
@@ -25,6 +27,9 @@ pub struct ClockTile {
     format: TimeFormat,
     show_seconds: bool,
     show_date: bool,
+
+    // Control-mode UI state (keyboard focus)
+    focused_control: Mutex<usize>,
 }
 
 impl ClockTile {
@@ -34,6 +39,7 @@ impl ClockTile {
             format: TimeFormat::TwentyFourHour,
             show_seconds: true,
             show_date: false,
+            focused_control: Mutex::new(0),
         }
     }
     
@@ -98,10 +104,13 @@ impl TileRenderer for ClockTile {
             .color(srgba(0.02, 0.02, 0.05, 0.98));
         
         // Title
-        draw.text("CLOCK SETTINGS")
-            .xy(pt2(rect.x(), rect.top() - 30.0))
-            .color(CYAN)
-            .font_size(18);
+        controls::draw_heading(draw, pt2(rect.x(), rect.top() - 30.0), "CLOCK SETTINGS", controls::UiStyle { alpha: 1.0 });
+        controls::draw_subtitle(
+            draw,
+            pt2(rect.x(), rect.top() - 52.0),
+            "↑/↓ focus   ←/→ change   Enter toggle",
+            controls::UiStyle { alpha: 1.0 },
+        );
         
         // Large time preview
         let preview_rect = Rect::from_x_y_w_h(
@@ -117,9 +126,96 @@ impl TileRenderer for ClockTile {
             .color(srgb(0.0, 1.0, 1.0))
             .font_size(font_size);
         
-        // Egui controls removed - migrated to Settings Modal
+        // Controls list (keyboard-only)
+        let list_rect = Rect::from_x_y_w_h(
+            rect.x(),
+            rect.y() - rect.h() * 0.15,
+            rect.w() * 0.70,
+            rect.h() * 0.35,
+        );
+        let focused = self.focused_control.lock().map(|v| *v).unwrap_or(0);
+        let rows = controls::row_stack(list_rect, 3);
+
+        // 0: format stepper
+        let fmt_label = match self.format {
+            TimeFormat::TwentyFourHour => "24 Hour",
+            TimeFormat::TwelveHour => "12 Hour",
+        };
+        controls::draw_stepper_row(
+            draw,
+            rows[0],
+            "Format",
+            fmt_label,
+            focused == 0,
+            controls::UiStyle { alpha: 1.0 },
+        );
+
+        // 1: seconds toggle
+        controls::draw_toggle_row(
+            draw,
+            rows[1],
+            "Show seconds",
+            self.show_seconds,
+            focused == 1,
+            controls::UiStyle { alpha: 1.0 },
+        );
+
+        // 2: date toggle
+        controls::draw_toggle_row(
+            draw,
+            rows[2],
+            "Show date",
+            self.show_date,
+            focused == 2,
+            controls::UiStyle { alpha: 1.0 },
+        );
         
         false
+    }
+
+    fn handle_key(&mut self, key: nannou::prelude::Key, _ctrl: bool, _shift: bool) -> bool {
+        // Control-mode keyboard UI:
+        // - Up/Down moves focus
+        // - Left/Right changes the focused value
+        // - Enter/Space toggles/activates
+        let mut focused = self.focused_control.lock().map(|v| *v).unwrap_or(0);
+
+        match key {
+            nannou::prelude::Key::Up => {
+                focused = focused.saturating_sub(1);
+            }
+            nannou::prelude::Key::Down => {
+                focused = (focused + 1).min(2);
+            }
+            nannou::prelude::Key::Left | nannou::prelude::Key::Right => match focused {
+                0 => {
+                    self.format = match self.format {
+                        TimeFormat::TwentyFourHour => TimeFormat::TwelveHour,
+                        TimeFormat::TwelveHour => TimeFormat::TwentyFourHour,
+                    };
+                }
+                1 => self.show_seconds = !self.show_seconds,
+                2 => self.show_date = !self.show_date,
+                _ => {}
+            },
+            nannou::prelude::Key::Return | nannou::prelude::Key::Space => match focused {
+                0 => {
+                    self.format = match self.format {
+                        TimeFormat::TwentyFourHour => TimeFormat::TwelveHour,
+                        TimeFormat::TwelveHour => TimeFormat::TwentyFourHour,
+                    };
+                }
+                1 => self.show_seconds = !self.show_seconds,
+                2 => self.show_date = !self.show_date,
+                _ => {}
+            },
+            _ => return false,
+        }
+
+        if let Ok(mut guard) = self.focused_control.lock() {
+            *guard = focused;
+        }
+        true
     }
     
     fn settings_schema(&self) -> Option<serde_json::Value> {

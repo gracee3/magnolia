@@ -158,6 +158,17 @@ pub trait TileRenderer: Send + Sync {
         self.render_monitor(draw, rect, ctx);
         false
     }
+
+    // === INPUT (optional) ===
+    //
+    // Tiles are rendered by Nannou, but keyboard routing is handled by the daemon.
+    // When a tile is maximized, the daemon may forward key presses here so the tile
+    // can implement custom controls (toggles, steppers, lists, etc).
+    //
+    // Returns true if the tile consumed the key.
+    fn handle_key(&mut self, _key: nannou::prelude::Key, _ctrl: bool, _shift: bool) -> bool {
+        false
+    }
     
     /// Whether this tile prefers GPU-accelerated rendering
     fn prefers_gpu(&self) -> bool { false }
@@ -293,6 +304,17 @@ impl TileRegistry {
         if let Some(tile) = self.tiles.get(module) {
             if let Ok(mut t) = tile.write() {
                 return t.execute_action(action);
+            }
+        }
+        false
+    }
+
+    /// Forward a keyboard event to a tile (typically when maximized).
+    /// Returns true if the tile consumed the input.
+    pub fn handle_key(&self, module: &str, key: nannou::prelude::Key, ctrl: bool, shift: bool) -> bool {
+        if let Some(tile) = self.tiles.get(module) {
+            if let Ok(mut t) = tile.write() {
+                return t.handle_key(key, ctrl, shift);
             }
         }
         false

@@ -1,4 +1,5 @@
 // use nannou_egui::egui; removed
+#![allow(dead_code)] // Stubbed during egui removal; will be replaced by nannou controls-driven schema UI.
 use serde_json::Value;
 
 /// Render controls for a settings object based on a JSON schema
