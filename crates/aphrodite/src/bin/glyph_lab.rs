@@ -21,6 +21,7 @@ struct Model {
     big_glyph_size: f32,
     small_glyph_size: f32,
     glyphs: Vec<(Glyph, String)>,
+    selected_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -88,13 +89,39 @@ fn model(app: &App) -> Model {
         big_glyph_size: 140.0,
         small_glyph_size: 24.0,
         glyphs,
+        selected_index: 0,
     }
 }
 
 fn update(_app: &App, _model: &mut Model, _update: Update) {}
 
-fn key_pressed(_app: &App, model: &mut Model, key: Key) {
+fn key_pressed(app: &App, model: &mut Model, key: Key) {
+    let win = app.window_rect();
+    let cols = (win.w() / model.cell_size).floor() as usize;
+    if cols == 0 { return; }
+    let count = model.glyphs.len();
+
     match key {
+        Key::Right => {
+            if model.selected_index + 1 < count {
+                model.selected_index += 1;
+            }
+        }
+        Key::Left => {
+            if model.selected_index > 0 {
+                model.selected_index -= 1;
+            }
+        }
+        Key::Down => {
+            if model.selected_index + cols < count {
+                model.selected_index += cols;
+            }
+        }
+        Key::Up => {
+            if model.selected_index >= cols {
+                model.selected_index -= cols;
+            }
+        }
         Key::LBracket => model.stroke_width = (model.stroke_width - 0.5).max(0.1),
         Key::RBracket => model.stroke_width += 0.5,
         Key::Comma => model.tolerance = (model.tolerance - 0.01).max(0.01),
@@ -238,16 +265,22 @@ fn view(app: &App, model: &Model, frame: Frame) {
         let y = start_y - row as f32 * model.cell_size;
         
         let center = pt2(x, y);
+        let is_selected = i == model.selected_index;
         
         // Draw cell Bounds
-        draw.rect().xy(center).w_h(model.cell_size, model.cell_size).no_fill().stroke(GRAY).stroke_weight(1.0);
-        
+        if is_selected {
+            draw.rect().xy(center).w_h(model.cell_size, model.cell_size).no_fill().stroke(CYAN).stroke_weight(3.0);
+        } else {
+            draw.rect().xy(center).w_h(model.cell_size, model.cell_size).no_fill().stroke(GRAY).stroke_weight(1.0);
+        }
+
         if model.show_bounds {
              draw.rect().xy(center).w_h(model.big_glyph_size, model.big_glyph_size).no_fill().stroke(RED).stroke_weight(1.0);
         }
 
         // Draw Name
-        draw.text(name).xy(center + vec2(0.0, -model.cell_size * 0.4)).color(WHITE).font_size(12);
+        let name_color = if is_selected { CYAN } else { WHITE };
+        draw.text(name).xy(center + vec2(0.0, -model.cell_size * 0.4)).color(name_color).font_size(12);
         
         // Draw Large Glyph
         if let Some((ops, bounds)) = glyphs::glyph_ops_bounds(*glyph) {
@@ -290,13 +323,17 @@ fn view(app: &App, model: &Model, frame: Frame) {
     }
     
     // Draw HUD
+    let sel_name = &model.glyphs[model.selected_index].1;
+    let sel_tweak = model.tweaks.get(&sel_name.to_lowercase());
 
     let hud_text = format!(
-        "FPS: {:.1} | Stroke: {:.1} | Tol: {:.2} | Join: {:?} | Cap: {:?} | Fill: {} | Size: {:.0}/{:.0}",
-        app.fps(), model.stroke_width, model.tolerance, model.line_join, model.line_cap, model.fill, model.big_glyph_size, model.small_glyph_size
+        "FPS: {:.1} | Stroke: {:.1} | Tol: {:.2} | Join: {:?} | Cap: {:?} | Fill: {} | Size: {:.0}/{:.0}\n\
+         SELECTED: {} | dx: {:.3} dy: {:.3} sx: {:.3} sy: {:.3} rot: {:.1}",
+        app.fps(), model.stroke_width, model.tolerance, model.line_join, model.line_cap, model.fill, model.big_glyph_size, model.small_glyph_size,
+        sel_name, sel_tweak.dx, sel_tweak.dy, sel_tweak.sx, sel_tweak.sy, sel_tweak.rot_deg
     );
     draw.text(&hud_text)
-        .xy(win.top_left() + vec2(300.0, -20.0))
+        .xy(win.top_left() + vec2(300.0, -40.0))
         .color(YELLOW)
         .font_size(16);
 

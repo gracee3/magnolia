@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 
-#[derive(Debug, Clone, Copy, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct GlyphTweak {
     #[serde(default)]
     pub dx: f32,
@@ -16,6 +16,18 @@ pub struct GlyphTweak {
     pub sy: f32,
     #[serde(default)]
     pub rot_deg: f32,
+}
+
+impl Default for GlyphTweak {
+    fn default() -> Self {
+        Self {
+            dx: 0.0,
+            dy: 0.0,
+            sx: 1.0,
+            sy: 1.0,
+            rot_deg: 0.0,
+        }
+    }
 }
 
 fn default_scale() -> f32 {
