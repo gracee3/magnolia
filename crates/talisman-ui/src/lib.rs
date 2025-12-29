@@ -58,6 +58,11 @@ pub mod plex_mono_medium {
 
 #[cfg(feature = "tile-rendering")]
 pub fn build_path(ops: &[GlyphOp]) -> Path {
+    build_path_at(ops, pt2(0.0, 0.0), 1.0)
+}
+
+#[cfg(feature = "tile-rendering")]
+pub fn build_path_at(ops: &[GlyphOp], pos: Point2, s: f32) -> Path {
     let mut builder = Path::builder();
     let mut open = false;
     for op in ops {
@@ -66,29 +71,36 @@ pub fn build_path(ops: &[GlyphOp]) -> Path {
                 if open {
                     builder.end(false);
                 }
-                builder.begin(lpoint(x, y));
+                builder.begin(lpoint(x * s + pos.x, y * s + pos.y));
                 open = true;
             }
             GlyphOp::L(x, y) => {
                 if !open {
-                    builder.begin(lpoint(x, y));
+                    builder.begin(lpoint(x * s + pos.x, y * s + pos.y));
                     open = true;
                 }
-                builder.line_to(lpoint(x, y));
+                builder.line_to(lpoint(x * s + pos.x, y * s + pos.y));
             }
             GlyphOp::Q(x1, y1, x, y) => {
                 if !open {
-                    builder.begin(lpoint(x, y));
+                    builder.begin(lpoint(x * s + pos.x, y * s + pos.y));
                     open = true;
                 }
-                builder.quadratic_bezier_to(lpoint(x1, y1), lpoint(x, y));
+                builder.quadratic_bezier_to(
+                    lpoint(x1 * s + pos.x, y1 * s + pos.y),
+                    lpoint(x * s + pos.x, y * s + pos.y),
+                );
             }
             GlyphOp::C(x1, y1, x2, y2, x, y) => {
                 if !open {
-                    builder.begin(lpoint(x, y));
+                    builder.begin(lpoint(x * s + pos.x, y * s + pos.y));
                     open = true;
                 }
-                builder.cubic_bezier_to(lpoint(x1, y1), lpoint(x2, y2), lpoint(x, y));
+                builder.cubic_bezier_to(
+                    lpoint(x1 * s + pos.x, y1 * s + pos.y),
+                    lpoint(x2 * s + pos.x, y2 * s + pos.y),
+                    lpoint(x * s + pos.x, y * s + pos.y),
+                );
             }
             GlyphOp::Z => {
                 if open {
@@ -262,11 +274,12 @@ pub enum TextAlignment {
 #[cfg(feature = "tile-rendering")]
 pub fn text_width(font: FontId, text: &str, size: f32) -> f32 {
     let mut width = 0.0;
+    let tracking = 0.1; // 10% extra space for better readability
     for c in text.chars() {
         if let Some(metrics) = glyph_metrics(font, c) {
-            width += metrics.advance_width * size;
+            width += (metrics.advance_width + tracking) * size;
         } else if c == ' ' {
-            width += 0.3 * size;
+            width += (0.4 + tracking) * size;
         }
     }
     width
@@ -282,6 +295,7 @@ pub fn draw_text(
     color: Srgba,
     align: TextAlignment,
 ) {
+    let tracking = 0.1; // 10% extra space for better readability
     let total_width = text_width(font, text, size);
     let mut x_offset = match align {
         TextAlignment::Left => 0.0,
@@ -290,17 +304,19 @@ pub fn draw_text(
     };
 
     for c in text.chars() {
-        if let Some((ops, bounds)) = font_glyph_ops_bounds(font, c) {
+        if let Some((ops, _bounds)) = font_glyph_ops_bounds(font, c) {
             if let Some(metrics) = glyph_metrics(font, c) {
-                let glyph_center =
-                    pt2(pos.x + x_offset + metrics.advance_width * size * 0.5, pos.y);
-                let rect = Rect::from_xy_wh(glyph_center, vec2(size, size));
-                let path = build_path_fit(ops, bounds, rect);
+                // Use pos.y as vertical center, roughly (cap height ~0.7em)
+                let y_base = pos.y - 0.35 * size;
+                let glyph_pos = pt2(pos.x + x_offset, y_base);
+
+                let path = build_path_at(ops, glyph_pos, size);
                 draw.path().fill().color(color).events(path.iter());
-                x_offset += metrics.advance_width * size;
+
+                x_offset += (metrics.advance_width + tracking) * size;
             }
         } else if c == ' ' {
-            x_offset += 0.3 * size;
+            x_offset += (0.4 + tracking) * size;
         }
     }
 }
