@@ -160,6 +160,7 @@ dependencies = [
  "serde_json",
  "swisseph",
  "talisman-plugin-helper",
+ "talisman-ui",
  "talisman_core",
  "talisman_signals",
  "thiserror",
@@ -919,6 +920,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sysinfo",
+ "talisman-ui",
  "talisman_core",
  "talisman_module_api",
  "tokio",
@@ -3630,6 +3632,17 @@ version = "0.1.0"
 dependencies = [
  "talisman-plugin-abi",
  "talisman_signals",
+]
+
+[[package]]
+name = "talisman-ui"
+version = "0.1.0"
+dependencies = [
+ "nannou",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "ttf-parser 0.20.0",
 ]
 
 [[package]]

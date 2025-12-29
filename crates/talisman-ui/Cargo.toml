@@ -1,0 +1,21 @@
+[package]
+name = "talisman-ui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Gaia Tools"]
+license = "AGPL-3.0-or-later"
+
+[features]
+default = []
+tile-rendering = ["dep:nannou"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+nannou = { version = "0.19", optional = true }
+
+[build-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+ttf-parser = "0.20"

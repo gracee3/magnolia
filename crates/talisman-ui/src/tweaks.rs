@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct GlyphTweak {
     #[serde(default)]
