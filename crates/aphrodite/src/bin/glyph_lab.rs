@@ -149,6 +149,18 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         Key::R => {
             model.stroke_width = 2.0;
             model.tolerance = 0.1;
+            model.line_join = LineJoin::Round;
+            model.line_cap = LineCap::Round;
+            model.fill = false;
+            model.stroke = true;
+            model.big_glyph_size = 140.0;
+            model.small_glyph_size = 24.0;
+            model.show_bounds = false;
+        }
+        Key::P => {
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../screenshots/glyph_lab.png");
+            app.main_window().capture_frame(path);
+            println!("Screenshot saved to {}", path);
         }
         Key::T => {
              let tweaks_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../configs/glyph_tweaks.toml");
@@ -165,12 +177,6 @@ fn build_path_for_glyph(_glyph: Glyph, ops: &[GlyphOp], bounds: glyphs::GlyphBou
     let width = bounds.max_x - bounds.min_x;
     let height = bounds.max_y - bounds.min_y;
     
-    // Apply tweak (Rotation -> Scale -> Translate) in normalized space (or rather, modify the bounds/ops effectively before fit)
-    // Actually, simple fit logic:
-    // 1. Center the glyph based on its bounds
-    // 2. Apply tweaks (which might shift it relative to its own center or scale it)
-    // 3. Fit to target rect
-    
     let tweak = tweaks.get(glyph_name.to_lowercase().as_str());
 
     // Original center
@@ -185,9 +191,6 @@ fn build_path_for_glyph(_glyph: Glyph, ops: &[GlyphOp], bounds: glyphs::GlyphBou
     let s = (rect.w() / width).min(rect.h() / height);
     // Base fit transform: translate center to 0,0, apply scale s, move to rect center
     let center = rect.xy();
-    
-    // We want to apply tweak BEFORE fitting to rect, or rather, as a modification of the glyph shape itself.
-    // User asked: "apply the affine tweak transform (scale → rotate → translate) in glyph-local space then apply the 'fit-to-rect' transform"
 
     let rot_rad = tweak.rot_deg.to_radians();
     let (sin, cos) = rot_rad.sin_cos();
@@ -252,11 +255,18 @@ fn view(app: &App, model: &Model, frame: Frame) {
     draw.background().color(BLACK);
 
     let win = app.window_rect();
-    let cols = (win.w() / model.cell_size).floor() as usize;
+    // Reserve space for HUD at the top
+    let hud_height = 80.0;
+    let grid_rect = Rect::from_corners(
+        win.top_left() + vec2(0.0, -hud_height),
+        win.bottom_right()
+    );
+
+    let cols = (grid_rect.w() / model.cell_size).floor() as usize;
     if cols == 0 { return; }
 
-    let start_x = win.left() + model.cell_size * 0.5;
-    let start_y = win.top() - model.cell_size * 0.5;
+    let start_x = grid_rect.left() + model.cell_size * 0.5;
+    let start_y = grid_rect.top() - model.cell_size * 0.5;
 
     for (i, (glyph, name)) in model.glyphs.iter().enumerate() {
         let col = i % cols;
@@ -289,7 +299,9 @@ fn view(app: &App, model: &Model, frame: Frame) {
              
              if model.fill {
                  draw.path().fill().events(path.iter()).color(WHITE);
-             } else {
+             }
+             
+             if model.stroke {
                  let join = match model.line_join {
                      LineJoin::Miter => nannou::lyon::tessellation::LineJoin::Miter,
                      LineJoin::Round => nannou::lyon::tessellation::LineJoin::Round,
@@ -316,24 +328,27 @@ fn view(app: &App, model: &Model, frame: Frame) {
              
              if model.fill {
                   draw.path().fill().events(small_path.iter()).color(WHITE);
-             } else {
+             } 
+             
+             if model.stroke {
                   draw.path().stroke().weight(1.0).events(small_path.iter()).color(WHITE);
              }
         }
     }
     
-    // Draw HUD
+    // Draw HUD text in reserved top area
     let sel_name = &model.glyphs[model.selected_index].1;
     let sel_tweak = model.tweaks.get(&sel_name.to_lowercase());
 
     let hud_text = format!(
-        "FPS: {:.1} | Stroke: {:.1} | Tol: {:.2} | Join: {:?} | Cap: {:?} | Fill: {} | Size: {:.0}/{:.0}\n\
+        "FPS: {:.1} | Stroke: {:.1} | Tol: {:.2} | Join: {:?} | Cap: {:?} | Fill: {} | Stroke: {} | Size: {:.0}/{:.0}\n\
          SELECTED: {} | dx: {:.3} dy: {:.3} sx: {:.3} sy: {:.3} rot: {:.1}",
-        app.fps(), model.stroke_width, model.tolerance, model.line_join, model.line_cap, model.fill, model.big_glyph_size, model.small_glyph_size,
+        app.fps(), model.stroke_width, model.tolerance, model.line_join, model.line_cap, model.fill, model.stroke, model.big_glyph_size, model.small_glyph_size,
         sel_name, sel_tweak.dx, sel_tweak.dy, sel_tweak.sx, sel_tweak.sy, sel_tweak.rot_deg
     );
+    
     draw.text(&hud_text)
-        .xy(win.top_left() + vec2(300.0, -40.0))
+        .xy(win.top_left() + vec2(300.0, -30.0)) // Roughly centered vertically in the 80px top strip
         .color(YELLOW)
         .font_size(16);
 
