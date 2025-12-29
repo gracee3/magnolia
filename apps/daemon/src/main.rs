@@ -187,6 +187,9 @@ fn model(app: &App) -> Model {
     let dsp_state = AudioDspState::new();
     tile_registry.register(AudioDspTile::new("audio_dsp", dsp_state.clone()));
 
+    // Astro tile (astrological chart)
+    tile_registry.register(aphrodite::tile::AstroTile::new());
+
     // Audio pipeline modules
     if let Ok(audio_input_source) = AudioInputSource::new("audio_input", audio_input_settings.clone()) {
         let schema = audio_input_source.schema();

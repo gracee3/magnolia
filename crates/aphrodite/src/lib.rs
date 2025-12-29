@@ -7,6 +7,12 @@ pub mod aspects;
 pub mod ephemeris;
 pub mod vedic;
 pub mod western;
+pub mod layout;
+pub mod rendering;
+
+#[cfg(feature = "tile-rendering")]
+pub mod tile;
+
 use ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation};
 
 use std::time::{Duration, Instant};

@@ -156,6 +156,7 @@ dependencies = [
  "lazy_static",
  "nannou",
  "nannou_egui",
+ "regex",
  "serde",
  "serde_json",
  "swisseph",
@@ -920,6 +921,7 @@ name = "daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aphrodite",
  "arboard",
  "async-trait",
  "audio_dsp",
