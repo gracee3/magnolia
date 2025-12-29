@@ -578,11 +578,17 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     let shift = _app.keys.mods.shift();
 
     // === MAXIMIZED TILE INPUT ROUTING (tile-local controls) ===
-    // If a tile is maximized, give it first crack at keyboard input (except ESC,
-    // which is reserved for closing modals/maximize).
-    // Let global Ctrl+ shortcuts (quit/copy/etc) win even while maximized.
+    // If a tile is maximized AND it is the top modal, give it input.
     if key != Key::Escape && !ctrl {
-        if let Some(max_id) = model.modal_stack.get_maximized_tile() {
+        // Only route if Maximized is the top modal (not covered by PatchBay etc)
+        // We use a scope to limit the borrow of modal_stack
+        let max_tile_id = if let Some(crate::ui::modals::ModalState::Maximized { tile_id }) = model.modal_stack.top_mut() {
+            Some(tile_id.clone())
+        } else {
+            None
+        };
+
+        if let Some(max_id) = max_tile_id {
             if let Some(tile_cfg) = model.layout.config.tiles.iter().find(|t| t.id == max_id) {
                 let handled = model
                     .tile_registry
@@ -594,22 +600,42 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
         }
     }
     
-    // === MODAL ESC HANDLING (highest priority) ===
-    // ESC closes the top modal before any other input processing
+    // === MODAL INPUT ROUTING ===
+    // Route input to active modals (Patch Bay, Global Settings)
+    // Return early if consumed.
+    if let Some(mut state) = model.modal_stack.get_patch_bay_state_mut() {
+        if ui::patch_bay::handle_key(key, &mut state, &mut model.patch_bay) {
+            return;
+        }
+        // If Escape was not consumed (returned false), close the modal
+        if key == Key::Escape {
+            model.modal_stack.pop();
+            return;
+        }
+        // For other keys, if not consumed, we typically block or allow fallthrough? 
+        // If handle_key returns true for all nav keys, we are good.
+        // It returns true by default for unknown keys too to consume them.
+    }
+    
+    if let Some(mut state) = model.modal_stack.get_global_settings_state_mut() {
+        if ui::settings::handle_key(key, &mut state) {
+            return;
+        }
+        if key == Key::Escape {
+            model.modal_stack.pop();
+            return;
+        }
+    }
+
+    // === MODAL ESC HANDLING (Generic) ===
+    // If we are here, no specific modal consumed Escape.
     if key == Key::Escape {
         // Check if a tile is maximized - close it first
         if model.modal_stack.get_maximized_tile().is_some() {
-            model.is_closing = true;
+            model.modal_stack.pop();
             return;
         }
-        if let Some(mut state) = model.modal_stack.get_patch_bay_state_mut() {
-            ui::patch_bay::handle_key(key, &mut state, &mut model.patch_bay);
-            return;
-        }
-        if let Some(mut state) = model.modal_stack.get_global_settings_state_mut() {
-            ui::settings::handle_key(key, &mut state);
-            return;
-        }
+
         // Pop any other modal from stack
         if model.modal_stack.pop().is_some() {
             return;
@@ -620,12 +646,6 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     // Update grid size for navigation
     let (grid_cols, grid_rows) = model.layout.config.resolve_grid();
     model.keyboard_nav.set_grid_size(grid_cols, grid_rows);
-
-    // === MODAL NAVIGATION ===
-    if key == Key::Escape && !model.modal_stack.is_empty() {
-        model.modal_stack.pop();
-        return;
-    }
 
     // === ADD TILE PICKER INPUT (captures keys while open) ===
     if let Some((col, row, selected_idx)) = model.modal_stack.get_add_tile_picker() {

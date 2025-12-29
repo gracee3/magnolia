@@ -1,7 +1,7 @@
 use nannou::prelude::*;
 use crate::ui::controls::{List, UiInput, UiNav};
 use crate::ui::modals::{PatchBayModalState, PatchBayPane};
-use crate::ui::fullscreen_modal::{ModalAnim, draw_modal_header};
+use crate::ui::fullscreen_modal::{ModalAnim, draw_modal_header, draw_modal_background, calculate_modal_rect};
 use talisman_core::{PatchBay, PortDirection};
 
 pub fn render(
@@ -11,10 +11,16 @@ pub fn render(
     anim: &ModalAnim,
     patch_bay: &PatchBay,
 ) {
-    // 1. Draw Modal Container
-    let content_rect = draw_modal_header(draw, rect, "PATCH BAY", anim);
+    // Calculate animated modal rect
+    let modal_rect = calculate_modal_rect(rect, anim);
+
+    // 0. Draw Modal Background (Backdrop + Window)
+    draw_modal_background(draw, modal_rect, anim);
+
+    // 1. Draw Modal Header
+    let content_rect = draw_modal_header(draw, modal_rect, "PATCH BAY", anim);
     
-    // Background Fill (Opaque)
+    // Background Fill (Opaque) for content area
     draw.rect()
         .xy(content_rect.xy())
         .wh(content_rect.wh())
@@ -197,12 +203,26 @@ pub fn render(
         .font_size(14);
 }
 
+/// Handle key input. Returns true if the key event was consumed by the modal.
+/// Returns false if it should be handled by the parent (e.g. global close).
 pub fn handle_key(
     key: Key, 
     state: &mut PatchBayModalState, 
     patch_bay: &mut PatchBay
-) {
+) -> bool {
     let input = UiInput::from_key(key, false, false); 
+    
+    // Escape Handling
+    if let Some(UiNav::Escape) = input.nav {
+        // If staging a connection, cancel it
+        if state.staged_source.is_some() {
+            state.staged_source = None;
+            state.focus_pane = PatchBayPane::Ports; // Or Modules?
+            return true;
+        }
+        // Otherwise, allow parent to close modal
+        return false;
+    }
     
     // Global Navigation
     if let Some(UiNav::Tab) = input.nav {
@@ -211,7 +231,7 @@ pub fn handle_key(
             PatchBayPane::Ports => PatchBayPane::Patches,
             PatchBayPane::Patches => PatchBayPane::Modules,
         };
-        return;
+        return true;
     }
     
     match state.focus_pane {
@@ -277,4 +297,6 @@ pub fn handle_key(
              }
         }
     }
+    
+    true // Consume other keys
 }

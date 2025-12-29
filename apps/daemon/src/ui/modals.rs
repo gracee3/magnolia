@@ -96,6 +96,11 @@ impl ModalStack {
         self.stack.pop()
     }
 
+    /// Get mutable reference to the top modal
+    pub fn top_mut(&mut self) -> Option<&mut ModalState> {
+        self.stack.last_mut()
+    }
+
     /// Check if any modal is open
     pub fn is_empty(&self) -> bool {
         self.stack.is_empty()

@@ -1,7 +1,7 @@
 use nannou::prelude::*;
 use crate::ui::controls::{Form, UiInput, UiNav};
 use crate::ui::modals::GlobalSettingsState;
-use crate::ui::fullscreen_modal::{ModalAnim, draw_modal_header};
+use crate::ui::fullscreen_modal::{ModalAnim, draw_modal_header, draw_modal_background, calculate_modal_rect};
 
 pub fn render(
     draw: &Draw,
@@ -9,8 +9,14 @@ pub fn render(
     state: &GlobalSettingsState,
     anim: &ModalAnim,
 ) {
-    // 1. Draw Modal Container
-    let content_rect = draw_modal_header(draw, rect, "GLOBAL SETTINGS", anim);
+    // Calculate animated modal rect
+    let modal_rect = calculate_modal_rect(rect, anim);
+
+    // 0. Draw Modal Background
+    draw_modal_background(draw, modal_rect, anim);
+
+    // 1. Draw Modal Container (Header)
+    let content_rect = draw_modal_header(draw, modal_rect, "GLOBAL SETTINGS", anim);
     
     // 2. Draw Settings Form
     // Center the form
@@ -57,9 +63,14 @@ pub fn render(
 pub fn handle_key(
     key: Key,
     state: &mut GlobalSettingsState,
-) {
+) -> bool {
     let input = UiInput::from_key(key, false, false); // Ctrl/shift not passed yet, todo
     
+    // Escape Handling
+    if let Some(UiNav::Escape) = input.nav {
+        return false; // Let parent close
+    }
+
     // 1. Handle Navigation
     // Manual navigation since Form::nav was removed or isn't usable without state
     if let Some(nav) = &input.nav {
@@ -117,4 +128,6 @@ pub fn handle_key(
             _ => {}
         }
     }
+    
+    true // Consumed
 }

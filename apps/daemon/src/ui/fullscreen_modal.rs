@@ -11,7 +11,7 @@ use nannou::prelude::*;
 pub const ANIM_SPEED: f32 = 0.12;
 
 /// Modal margin from screen edges
-pub const MODAL_MARGIN: f32 = 40.0;
+pub const MODAL_MARGIN: f32 = 0.0;
 
 /// Header height for modal title bar
 pub const HEADER_HEIGHT: f32 = 50.0;
