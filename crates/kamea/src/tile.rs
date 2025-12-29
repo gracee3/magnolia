@@ -7,7 +7,6 @@
 //! Control mode: Settings for grid size, colors, stroke weight
 
 use nannou::prelude::*;
-use nannou_egui::egui;
 use sha2::{Sha256, Digest};
 use crate::generator::{generate_path, SigilConfig};
 use std::sync::{Arc, Mutex};
@@ -236,72 +235,9 @@ impl TileRenderer for KameaTile {
         
         self.render_sigil(draw, preview_rect.pad(5.0));
         
-        // Egui controls
-        let mut used_egui = false;
-        if let Some(egui_ctx) = ctx.egui_ctx {
-            used_egui = true;
-            
-            let panel_x = rect.left() + 40.0 + (rect.w() / 2.0);
-            let panel_y = rect.top() - 80.0 + (rect.h() / 2.0);
-            
-            egui::Area::new(egui::Id::new("kamea_controls"))
-                .fixed_pos(egui::pos2(panel_x, panel_y))
-                .show(egui_ctx, |ui| {
-                    ui.set_max_width(280.0);
-                    
-                    egui::Frame::none()
-                        .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 15, 240))
-                        .inner_margin(egui::Margin::same(15.0))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 100, 100)))
-                        .show(ui, |ui| {
-                            ui.heading(egui::RichText::new("Sigil Settings").color(egui::Color32::from_rgb(0, 255, 255)));
-                            ui.add_space(10.0);
-                            
-                            // Grid size
-                            ui.label(egui::RichText::new("Grid Size").color(egui::Color32::GRAY).small());
-                            let mut grid_size = self.config.grid_rows;
-                            ui.add(egui::Slider::new(&mut grid_size, 3..=9).text("×"));
-                            
-                            ui.add_space(8.0);
-                            
-                            // Stroke weight
-                            ui.label(egui::RichText::new("Line Thickness").color(egui::Color32::GRAY).small());
-                            let mut weight = self.config.stroke_weight;
-                            ui.add(egui::Slider::new(&mut weight, 0.5..=8.0));
-                            
-                            ui.add_space(8.0);
-                            
-                            // Glow intensity
-                            ui.label(egui::RichText::new("Glow Intensity").color(egui::Color32::GRAY).small());
-                            let mut glow = self.glow_intensity;
-                            ui.add(egui::Slider::new(&mut glow, 0.0..=0.5));
-                            
-                            ui.add_space(8.0);
-                            
-                            // Show grid dots
-                            let mut dots = self.show_grid_dots;
-                            ui.checkbox(&mut dots, "Show Grid Dots");
-                            
-                            ui.add_space(15.0);
-                            ui.separator();
-                            ui.add_space(10.0);
-                            
-                            // Keybindings
-                            ui.label(egui::RichText::new("Keybindings").color(egui::Color32::from_rgb(0, 255, 255)));
-                            for action in self.bindable_actions() {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&action.label).color(egui::Color32::LIGHT_GRAY));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        let mut key = String::from("_");
-                                        ui.add(egui::TextEdit::singleline(&mut key).desired_width(30.0));
-                                    });
-                                });
-                            }
-                        });
-                });
-        }
+        // Egui controls removed - migrated to Settings Modal
         
-        used_egui
+        false
     }
     
     fn settings_schema(&self) -> Option<serde_json::Value> {

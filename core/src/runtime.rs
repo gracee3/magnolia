@@ -273,6 +273,11 @@ impl ModuleHost {
             Err(format!("Module {} not found", module_id))
         }
     }
+    
+    /// Get a direct sender to a module's inbox (for UI/Tiles)
+    pub fn get_sender(&self, module_id: &str) -> Option<mpsc::Sender<Signal>> {
+        self.modules.get(module_id).map(|h| h.inbox.clone())
+    }
 }
 
 impl Drop for ModuleHost {

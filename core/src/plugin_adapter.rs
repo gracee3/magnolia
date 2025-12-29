@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::ffi::CStr;
 use tokio::sync::mpsc;
 use talisman_plugin_abi::*;
-use crate::{Signal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal};
+use crate::{Signal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal, ControlSignal};
 
 pub struct PluginModuleAdapter {
     plugin: PluginLibrary,
@@ -255,12 +255,27 @@ impl ModuleRuntime for PluginModuleAdapter {
     fn schema(&self) -> ModuleSchema {
         // Since the current C ABI doesn't support full schema introspection yet
         // we create a basic schema from the cached info
+        
+        let settings_schema = unsafe {
+             if let Some(schema_ptr) = self.plugin.schema {
+                 if !schema_ptr.is_null() && !(*schema_ptr).settings_schema.is_null() {
+                      let c_str = CStr::from_ptr((*schema_ptr).settings_schema);
+                      let json_str = c_str.to_string_lossy();
+                      serde_json::from_str(&json_str).ok()
+                 } else {
+                     None
+                 }
+             } else {
+                 None
+             }
+        };
+
         ModuleSchema {
             id: self.id_cache.clone(),
             name: self.name_cache.clone(),
             description: format!("Plugin: {}", self.name_cache),
             ports: vec![], // TODO: Extend ABI to support port definitions
-            settings_schema: None,
+            settings_schema,
         }
     }
     
@@ -312,6 +327,16 @@ impl ModuleRuntime for PluginModuleAdapter {
             
             // Send incoming signals to plugin and handle any output
             while let Ok(signal) = inbox.try_recv() {
+                // Intercept Settings Control Signal to use specific VTable method
+                if let Signal::Control(ControlSignal::Settings(val)) = &signal {
+                    let json_str = val.to_string();
+                    let c_str = std::ffi::CString::new(json_str).unwrap_or_default();
+                    unsafe {
+                        (self.plugin.vtable.apply_settings)(self.plugin.instance, c_str.as_ptr());
+                    }
+                    continue; // Skip consume_signal for this special control message
+                }
+
                 let maybe_output = unsafe {
                     let signal_buf = self.encode_signal(&signal);
                     let output_ptr = (self.plugin.vtable.consume_signal)(self.plugin.instance, &signal_buf);

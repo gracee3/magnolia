@@ -25,7 +25,7 @@ impl HelloPlugin {
 #[no_mangle]
 pub unsafe extern "C" fn talisman_plugin_manifest() -> PluginManifest {
     PluginManifest {
-        abi_version: 3,
+        abi_version: 4,
         name: "Hello Plugin\0".as_ptr() as *const i8,
         version: "0.1.0\0".as_ptr() as *const i8,
         description: "Example plugin that demonstrates the plugin ABI\0".as_ptr() as *const i8,
@@ -48,6 +48,7 @@ static VTABLE: ModuleRuntimeVTable = ModuleRuntimeVTable {
     set_enabled: hello_set_enabled,
     poll_signal: hello_poll_signal,
     consume_signal: hello_consume_signal,
+    apply_settings: hello_apply_settings,
     destroy: hello_destroy,
 };
 
@@ -106,6 +107,10 @@ unsafe extern "C" fn hello_consume_signal(_instance: *mut c_void, _buffer: *cons
     // This example plugin doesn't consume signals, just produces them
     // Return null to indicate no output signal
     std::ptr::null_mut()
+}
+
+unsafe extern "C" fn hello_apply_settings(_instance: *mut c_void, _json: *const i8) {
+    // No-op for hello plugin
 }
 
 unsafe extern "C" fn hello_destroy(instance: *mut c_void) {

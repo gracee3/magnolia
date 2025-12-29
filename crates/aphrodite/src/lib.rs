@@ -1,12 +1,14 @@
 use talisman_plugin_helper::{
     export_plugin, TalismanPlugin, SignalBuffer, SignalType, SignalValue,
 };
-use talisman_core::Signal; // Not used directly for return, but for types? No, we use ABI.
+use talisman_signals::AstrologyData;
 
-mod ephemeris;
+pub mod aspects;
+pub mod ephemeris;
+pub mod vedic;
+pub mod western;
 use ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation};
 
-use serde_json::json;
 use std::time::{Duration, Instant};
 
 struct AphroditePlugin {
@@ -84,14 +86,6 @@ impl TalismanPlugin for AphroditePlugin {
                  let moon_lon = pos.planets.get("moon").map(|p| p.lon).unwrap_or(0.0);
                  let asc_lon = pos.houses.as_ref().and_then(|h| h.angles.get("asc")).cloned().unwrap_or(0.0);
                  
-                 let planetary_positions: Vec<(String, f64)> = pos.planets.iter()
-                    .map(|(k, v)| (k.clone(), v.lon))
-                    .collect();
-
-use talisman_signals::AstrologyData;
-
-// ...
-
                  let planetary_positions: Vec<(String, f64)> = pos.planets.iter()
                     .map(|(k, v)| (k.clone(), v.lon))
                     .collect();

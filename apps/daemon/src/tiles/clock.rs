@@ -118,45 +118,9 @@ impl TileRenderer for ClockTile {
             .color(srgb(0.0, 1.0, 1.0))
             .font_size(font_size);
         
-        // Egui controls
-        let mut used_egui = false;
-        if let Some(egui_ctx) = ctx.egui_ctx {
-            used_egui = true;
-            
-            let panel_x = rect.left() + 60.0 + (rect.w() / 2.0);
-            let panel_y = rect.y() + (rect.h() / 2.0);
-            
-            egui::Area::new(egui::Id::new("clock_controls"))
-                .fixed_pos(egui::pos2(panel_x, panel_y))
-                .show(egui_ctx, |ui| {
-                    ui.set_max_width(250.0);
-                    
-                    egui::Frame::none()
-                        .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 15, 240))
-                        .inner_margin(egui::Margin::same(15.0))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 100, 100)))
-                        .show(ui, |ui| {
-                            ui.heading(egui::RichText::new("Display Options").color(egui::Color32::from_rgb(0, 255, 255)));
-                            ui.add_space(10.0);
-                            
-                            ui.label(egui::RichText::new("Time Format").color(egui::Color32::GRAY).small());
-                            ui.horizontal(|ui| {
-                                let _ = ui.selectable_label(self.format == TimeFormat::TwentyFourHour, "24-hour");
-                                let _ = ui.selectable_label(self.format == TimeFormat::TwelveHour, "12-hour");
-                            });
-                            
-                            ui.add_space(8.0);
-                            
-                            let mut show_sec = self.show_seconds;
-                            ui.checkbox(&mut show_sec, "Show Seconds");
-                            
-                            let mut show_dt = self.show_date;
-                            ui.checkbox(&mut show_dt, "Show Date");
-                        });
-                });
-        }
+        // Egui controls removed - migrated to Settings Modal
         
-        used_egui
+        false
     }
     
     fn settings_schema(&self) -> Option<serde_json::Value> {

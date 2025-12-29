@@ -11,6 +11,7 @@ pub struct PluginLibrary {
     pub manifest: PluginManifest,
     pub vtable: &'static ModuleRuntimeVTable,
     pub instance: *mut c_void,
+    pub schema: Option<*const ModuleSchemaAbi>,
 }
 
 // Safety: The plugin instance must be thread-safe for the operations called on it.
@@ -51,6 +52,20 @@ impl PluginLibrary {
             .context("Plugin missing talisman_plugin_get_vtable symbol")?;
         let vtable = &*vtable_fn();
         
+        // Get schema (optional)
+        let schema = if let Ok(schema_fn) = lib.get::<PluginGetSchemaFn>(PLUGIN_SCHEMA_SYMBOL) {
+            log::info!("Plugin exports schema symbol");
+            let schema_ptr = schema_fn();
+            if !schema_ptr.is_null() {
+                Some(schema_ptr)
+            } else {
+                None
+            }
+        } else {
+            log::debug!("Plugin does not export schema symbol");
+            None
+        };
+        
         // Create instance
         let create_fn: Symbol<PluginCreateFn> = lib
             .get(PLUGIN_CREATE_SYMBOL)
@@ -70,6 +85,7 @@ impl PluginLibrary {
             manifest,
             vtable,
             instance,
+            schema,
         })
     }
     

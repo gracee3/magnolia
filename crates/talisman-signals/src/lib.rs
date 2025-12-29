@@ -74,6 +74,8 @@ pub enum ControlMsg {
 pub enum ControlSignal {
     Shutdown,
     ReloadConfig,
+    /// Apply settings update
+    Settings(serde_json::Value),
 }
 
 // ============================================================================

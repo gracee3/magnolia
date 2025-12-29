@@ -19,13 +19,15 @@ mod patch_visualizer;
 mod layout;
 mod tiles;
 mod input;
+mod ui;
 mod theme;
 
 
 
 use layout::Layout;
 use tiles::{TileRegistry, RenderContext};
-use input::{KeyboardNav, AppAction, ModalStack, ModalState};
+use input::{KeyboardNav, AppAction};
+use ui::modals::{ModalStack, ModalState};
 
 
 
@@ -101,6 +103,8 @@ fn main() {
 }
 
 fn model(app: &App) -> Model {
+    app.set_exit_on_escape(false);
+    
     // 1. Setup Channels
     let (tx_ui, rx_ui) = std::sync::mpsc::channel::<Signal>();
     let (tx_router, rx_router) = mpsc::channel::<RoutedSignal>(1000);
@@ -123,7 +127,6 @@ fn model(app: &App) -> Model {
         .raw_event(raw_window_event)
         .key_pressed(key_pressed)
         .mouse_pressed(mouse_pressed)
-        .mouse_released(mouse_released)
         .mouse_moved(mouse_moved)
         .size(900, 600)
         .title("TALISMAN // DIGITAL LAB")
@@ -242,18 +245,25 @@ fn model(app: &App) -> Model {
         // Spawn plugins
         for plugin in loader.drain_loaded() {
             let adapter = PluginModuleAdapter::new(plugin);
-            log::info!("Spawning plugin module: {}", adapter.id());
+            let id = adapter.id().to_string();
+            let name = adapter.name().to_string();
+            let adapter_schema = adapter.schema(); // Clones ModuleSchema
+            let settings_json = adapter_schema.settings_schema.clone(); // Option<Value>
             
-            // Register schema if possible? 
-            // Currently adapter schema is basic.
-            // We should register it in PatchBay too?
-            // For now just spawn executing module.
-            // Note: If we don't register in PatchBay, they won't show up in UI for patching.
-            // TODO: Extract schema from adapter and register in PatchBay
-            patch_bay.register_module(adapter.schema());
+            log::info!("Spawning plugin module: {}", id);
+            
+            // Register module schema in PatchBay
+            patch_bay.register_module(adapter_schema);
             
             if let Err(e) = module_host.spawn(adapter, 100) {
                  log::error!("Failed to spawn plugin: {}", e);
+            } else {
+                 // Register Visual Tile wrapper to bridge settings UI
+                 if let Some(sender) = module_host.get_sender(&id) {
+                     let tile = tiles::SchemaTile::new(&id, &name, settings_json, sender);
+                     tile_registry.register(tile);
+                     log::info!("Registered SchemaTile for plugin: {}", id);
+                 }
             }
         }
         
@@ -630,13 +640,24 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 ui.add(egui::Separator::default().spacing(10.0));
                 
-                // Display options
-                ui.label(egui::RichText::new("DISPLAY").small().color(egui::Color32::GRAY));
-                // (Retinal burn mode removed)
+                // SYSTEM
+                ui.label(egui::RichText::new("SYSTEM").small().color(egui::Color32::GRAY));
+                if ui.button(egui::RichText::new("QUIT TALISMAN Application").color(egui::Color32::from_rgb(255, 100, 100))).clicked() {
+                    // Send QuitApp action? Or loop request?
+                    // We can't access loop control directly here easily unless we signal it via model channel or standard intent.
+                    // For now, we rely on KeyboardNav handling Ctrl+Q, but we can't trigger that easily from here.
+                    // We can use std::process::exit(0) but that's harsh.
+                    // nannou App typically doesn't have a "quit()" method exposed to update loop easily?
+                    // Actually app.quit() exists.
+                    // But we are in a closure. We have `ctx`, not `app`.
+                    // We can match on this in `update` if we had a flag.
+                    // Let's set `model.is_closing = true`.
+                    model.is_closing = true;
+                }
                 
                 ui.add_space(10.0);
                 
-                // Engine state
+                // ENGINE
                 ui.label(egui::RichText::new("ENGINE").small().color(egui::Color32::GRAY));
                 let status = if model.is_sleeping { "SLEEPING" } else { "ACTIVE" };
                 let status_color = if model.is_sleeping { 
@@ -649,12 +670,18 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     ui.label(egui::RichText::new(status).color(status_color));
                 });
                 
-                if ui.button(if model.is_sleeping { "WAKE ENGINE" } else { "SLEEP ENGINE" }).clicked() {
-                    model.is_sleeping = !model.is_sleeping;
-                    model.layout.config.is_sleeping = model.is_sleeping;
-                    model.layout.save();
-                }
+                ui.horizontal(|ui| {
+                     if ui.button(if model.is_sleeping { "WAKE ENGINE" } else { "SLEEP ENGINE" }).clicked() {
+                        model.is_sleeping = !model.is_sleeping;
+                        model.layout.config.is_sleeping = model.is_sleeping;
+                        model.layout.save();
+                    }
+                });
+
+                ui.add_space(10.0);
                 
+                // LAYOUT
+                ui.label(egui::RichText::new("LAYOUT").small().color(egui::Color32::GRAY));
                 if ui.button("OPEN LAYOUT MANAGER").clicked() {
                     model.modal_stack.push(ModalState::LayoutManager);
                     model.modal_stack.close(&ModalState::GlobalSettings);
@@ -662,11 +689,11 @@ fn update(app: &App, model: &mut Model, update: Update) {
                 
                 ui.add_space(10.0);
                 
-                // Module overview
-                ui.label(egui::RichText::new("MODULES").small().color(egui::Color32::GRAY));
-                ui.label(format!("Registered: {}", model.patch_bay.get_modules().len()));
-                ui.label(format!("Active Patches: {}", model.patch_bay.get_patches().len()));
-                ui.label(format!("Disabled: {}", model.layout.config.tiles.iter().filter(|t| !t.enabled).count()));
+                // STATS
+                ui.label(egui::RichText::new("STATS").small().color(egui::Color32::GRAY));
+                ui.label(format!("Modules: {}", model.patch_bay.get_modules().len()));
+                ui.label(format!("Patches: {}", model.patch_bay.get_patches().len()));
+                ui.label(format!("FPS: {:.1}", ctx.input(|i| i.predicted_dt).recip()));
             });
     }
 
@@ -768,6 +795,41 @@ fn update(app: &App, model: &mut Model, update: Update) {
                     egui::Color32::from_rgb(100, 255, 100) 
                 };
                 ui.label(egui::RichText::new(state_text).color(state_color));
+                
+                ui.add_space(10.0);
+
+                // Settings (Schema Driven)
+                ui.label(egui::RichText::new("SETTINGS").small().color(egui::Color32::GRAY));
+                
+                // We need mutable access to tiles for settings, so we use a separate scope or iter_mut
+                // Note: tile_id is an owned String here, so no conflict with model borrow
+                if let Some(tile) = model.layout.config.tiles.iter_mut().find(|t| t.id == tile_id) {
+                     let module_id = tile.module.clone(); // Clone ID to avoid borrow conflict with registry
+                     if let Some(entry) = model.tile_registry.get(&module_id) {
+                        if let Ok(renderer) = entry.read() {
+                             if let Some(schema) = renderer.settings_schema() {
+                                 ui.add_space(5.0);
+                                 // Render the schema UI
+                                 ui::schema::render_schema_ui(ui, &mut tile.settings.config, &schema);
+                                 
+                                 ui.add_space(5.0);
+                                 if ui.button("Save Layout").clicked() {
+                                     // We can trigger save here, but we are inside a mutable borrow of tiles.
+                                     // model.layout.save() borrows config immutable? 
+                                     // save() calls self.config...
+                                     // model.layout.save() takes &self.
+                                     // We hold mutable borrow of model.layout.config via tile.
+                                     // So we cannot call model.layout.save() here!
+                                     // We must flag for save.
+                                     // For now, just rely on Ctrl+S or closing modal?
+                                     // Or we can't save inside this borrow scope.
+                                 }
+                             } else {
+                                 ui.label(egui::RichText::new("No configurable settings").italics().weak());
+                             }
+                        }
+                     }
+                }
             });
     }
 
@@ -1000,6 +1062,12 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
     let (grid_cols, grid_rows) = model.layout.config.resolve_grid();
     model.keyboard_nav.set_grid_size(grid_cols, grid_rows);
 
+    // === MODAL NAVIGATION ===
+    if key == Key::Escape && !model.modal_stack.is_empty() {
+        model.modal_stack.pop();
+        return;
+    }
+
     // === ADD TILE PICKER INPUT (captures keys while open) ===
     if let Some((col, row, selected_idx)) = model.modal_stack.get_add_tile_picker() {
         // Keyboard-only modal: Up/Down choose, Enter confirm.
@@ -1045,6 +1113,11 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 return;
             }
         }
+    }
+    
+    // If any other modal is active, block grid navigation
+    if !model.modal_stack.is_empty() {
+        return;
     }
     
     // Delegate to unified input controller

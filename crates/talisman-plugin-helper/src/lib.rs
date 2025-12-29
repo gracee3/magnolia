@@ -46,12 +46,51 @@ macro_rules! export_plugin {
             set_enabled: _plugin_set_enabled,
             poll_signal: _plugin_poll_signal,
             consume_signal: _plugin_consume_signal,
+            apply_settings: _plugin_apply_settings,
             destroy: _plugin_destroy,
         };
 
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn talisman_plugin_get_vtable() -> *const $crate::ModuleRuntimeVTable {
             &VTABLE as *const _
+        }
+        
+        // --- SCHEMA ---
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn talisman_plugin_get_schema() -> *const $crate::talisman_plugin_abi::ModuleSchemaAbi {
+            // Leak strings to keep them valid for the lifetime of the plugin (static)
+            use std::ffi::CString;
+            
+            // Note: We don't support ports via macro yet, user must implement strict ABI manually if they want ports.
+            // But we do support settings_schema.
+            
+            static mut SCHEMA: Option<$crate::talisman_plugin_abi::ModuleSchemaAbi> = None;
+            static mut SCHEMA_INIT: std::sync::Once = std::sync::Once::new();
+            
+            unsafe {
+                SCHEMA_INIT.call_once(|| {
+                    let id = CString::new(<$plugin_type>::name()).unwrap(); // Use name as ID for now
+                    let name = CString::new(<$plugin_type>::name()).unwrap();
+                    let desc = CString::new(<$plugin_type>::description()).unwrap();
+                    
+                    let settings = if let Some(s) = <$plugin_type>::settings_schema() {
+                        CString::new(s).unwrap().into_raw()
+                    } else {
+                        std::ptr::null()
+                    };
+                    
+                    SCHEMA = Some($crate::talisman_plugin_abi::ModuleSchemaAbi {
+                        id: id.into_raw(),
+                        name: name.into_raw(),
+                        description: desc.into_raw(),
+                        ports: std::ptr::null(), // Ports not supported via basic macro yet
+                        ports_len: 0,
+                        settings_schema: settings,
+                    });
+                });
+                
+                SCHEMA.as_ref().unwrap() as *const _
+            }
         }
 
         // --- TRAMPOLINES ---
@@ -90,6 +129,15 @@ macro_rules! export_plugin {
                 None => std::ptr::null_mut()
             }
         }
+        
+        unsafe extern "C" fn _plugin_apply_settings(instance: *mut std::os::raw::c_void, json: *const std::os::raw::c_char) {
+            let plugin = &mut *(instance as *mut $plugin_type);
+            if !json.is_null() {
+                if let Ok(c_str) = std::ffi::CStr::from_ptr(json).to_str() {
+                    plugin.apply_settings(c_str);
+                }
+            }
+        }
 
         unsafe extern "C" fn _plugin_destroy(instance: *mut std::os::raw::c_void) {
             let _ = Box::from_raw(instance as *mut $plugin_type);
@@ -113,4 +161,8 @@ pub trait TalismanPlugin: Default {
     
     fn poll_signal(&mut self, buffer: &mut SignalBuffer) -> bool;
     fn consume_signal(&mut self, input: &SignalBuffer) -> Option<SignalBuffer>;
+    
+    // Settings
+    fn settings_schema() -> Option<String> { None }
+    fn apply_settings(&mut self, _json: &str) {}
 }

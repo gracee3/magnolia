@@ -1,7 +1,7 @@
 use std::os::raw::{c_char, c_void};
 
 /// Current ABI version - increment when making breaking changes
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// Plugin manifest - describes the plugin's capabilities
 #[repr(C)]
@@ -54,6 +54,8 @@ pub struct ModuleSchemaAbi {
     pub description: *const c_char,
     pub ports: *const PortSchemaAbi,
     pub ports_len: usize,
+    /// Optional JSON Schema for settings (null if none)
+    pub settings_schema: *const c_char,
 }
 
 /// VTable for module runtime callbacks
@@ -79,6 +81,9 @@ pub struct ModuleRuntimeVTable {
     /// Consume incoming signal (sink behavior)
     /// Returns: 0 = no output, pointer = output signal buffer (caller must free)
     pub consume_signal: unsafe extern "C" fn(*mut c_void, *const SignalBuffer) -> *mut SignalBuffer,
+    
+    /// Apply settings as JSON string
+    pub apply_settings: unsafe extern "C" fn(*mut c_void, *const c_char),
     
     /// Destroy the module instance
     pub destroy: unsafe extern "C" fn(*mut c_void),

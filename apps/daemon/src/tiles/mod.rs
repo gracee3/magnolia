@@ -11,6 +11,8 @@
 
 
 // Local tile implementations (remaining - clock is still local)
+pub mod schema_tile;
+pub use schema_tile::SchemaTile;
 pub mod clock;
 pub mod compositor;
 
