@@ -63,4 +63,3 @@ pub struct LayerContext {
     pub location: Option<GeoLocation>,
     pub settings: EphemerisSettings,
 }
-

@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
-use talisman_core::{TileRenderer, RenderContext};
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use talisman_core::{RenderContext, TileRenderer};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
-use crate::{AudioOutputState, AudioOutputSettings};
+use crate::{AudioOutputSettings, AudioOutputState};
 
 pub struct AudioOutputTile {
     id: String,
@@ -26,10 +26,14 @@ impl AudioOutputTile {
 }
 
 impl TileRenderer for AudioOutputTile {
-    fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { "Audio Output" }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        "Audio Output"
+    }
     fn update(&mut self) {}
-    
+
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
         draw.rect()
             .xy(rect.xy())

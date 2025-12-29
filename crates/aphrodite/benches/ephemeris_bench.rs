@@ -1,10 +1,10 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use aphrodite::ephemeris::{EphemerisSettings, GeoLocation, SwissEphemerisAdapter};
-use chrono::{Utc, TimeZone};
+use chrono::{TimeZone, Utc};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn bench_calc_positions_basic(c: &mut Criterion) {
     let mut adapter = SwissEphemerisAdapter::new(None).unwrap();
-    
+
     let settings = EphemerisSettings {
         zodiac_type: "tropical".to_string(),
         ayanamsa: None,
@@ -17,14 +17,14 @@ fn bench_calc_positions_basic(c: &mut Criterion) {
             "mars".to_string(),
         ],
     };
-    
+
     let location = Some(GeoLocation {
         lat: 40.7128,
         lon: -74.0060,
     });
-    
+
     let dt = Utc::now();
-    
+
     c.bench_function("calc_positions_basic", |b| {
         b.iter(|| {
             adapter.calc_positions(
@@ -38,7 +38,7 @@ fn bench_calc_positions_basic(c: &mut Criterion) {
 
 fn bench_calc_positions_all_planets(c: &mut Criterion) {
     let mut adapter = SwissEphemerisAdapter::new(None).unwrap();
-    
+
     let settings = EphemerisSettings {
         zodiac_type: "tropical".to_string(),
         ayanamsa: None,
@@ -58,14 +58,14 @@ fn bench_calc_positions_all_planets(c: &mut Criterion) {
             "north_node".to_string(),
         ],
     };
-    
+
     let location = Some(GeoLocation {
         lat: 51.48,
         lon: 0.0,
     });
-    
+
     let dt = Utc.with_ymd_and_hms(2000, 1, 1, 12, 0, 0).unwrap();
-    
+
     c.bench_function("calc_positions_all_planets", |b| {
         b.iter(|| {
             adapter.calc_positions(
@@ -79,7 +79,7 @@ fn bench_calc_positions_all_planets(c: &mut Criterion) {
 
 fn bench_calc_positions_sidereal(c: &mut Criterion) {
     let mut adapter = SwissEphemerisAdapter::new(None).unwrap();
-    
+
     let settings = EphemerisSettings {
         zodiac_type: "sidereal".to_string(),
         ayanamsa: Some("lahiri".to_string()),
@@ -92,14 +92,14 @@ fn bench_calc_positions_sidereal(c: &mut Criterion) {
             "mars".to_string(),
         ],
     };
-    
+
     let location = Some(GeoLocation {
         lat: 28.6139,
         lon: 77.2090,
     });
-    
+
     let dt = Utc.with_ymd_and_hms(2000, 1, 1, 12, 0, 0).unwrap();
-    
+
     c.bench_function("calc_positions_sidereal", |b| {
         b.iter(|| {
             adapter.calc_positions(
@@ -111,6 +111,10 @@ fn bench_calc_positions_sidereal(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_calc_positions_basic, bench_calc_positions_all_planets, bench_calc_positions_sidereal);
+criterion_group!(
+    benches,
+    bench_calc_positions_basic,
+    bench_calc_positions_all_planets,
+    bench_calc_positions_sidereal
+);
 criterion_main!(benches);
-

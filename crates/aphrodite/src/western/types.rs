@@ -1,9 +1,9 @@
 //! Western astrology types and integration structures.
 
+use crate::western::decans::DecanInfo;
+use crate::western::dignities::DignityResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::western::dignities::DignityResult;
-use crate::western::decans::DecanInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WesternLayerData {
@@ -12,4 +12,3 @@ pub struct WesternLayerData {
     pub dignities: HashMap<String, Vec<DignityResult>>,
     pub decans: HashMap<String, DecanInfo>,
 }
-

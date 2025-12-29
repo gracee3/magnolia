@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use talisman_core::{Sink, Signal, Result, ModuleSchema, Port, DataType, PortDirection};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
 
 /// Output format for SaveFileSink
 #[derive(Clone, Debug, Default)]
@@ -38,22 +38,22 @@ impl SaveFileSink {
             audio_writer: Arc::new(Mutex::new(None)),
         }
     }
-    
+
     /// Set the output file path
     pub fn set_path(&self, path: PathBuf) {
         *self.output_path.lock().unwrap() = path;
     }
-    
+
     /// Get the current output path
     pub fn get_path(&self) -> PathBuf {
         self.output_path.lock().unwrap().clone()
     }
-    
+
     /// Set the output format
     pub fn set_format(&self, format: OutputFormat) {
         *self.output_format.lock().unwrap() = format;
     }
-    
+
     /// Get the current output format
     pub fn get_format(&self) -> OutputFormat {
         self.output_format.lock().unwrap().clone()
@@ -68,8 +68,10 @@ impl Default for SaveFileSink {
 
 #[async_trait]
 impl Sink for SaveFileSink {
-    fn name(&self) -> &str { "save_file" }
-    
+    fn name(&self) -> &str {
+        "save_file"
+    }
+
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "save_file".to_string(),
@@ -98,13 +100,13 @@ impl Sink for SaveFileSink {
             settings_schema: Some(serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "output_path": { 
-                        "type": "string", 
+                    "output_path": {
+                        "type": "string",
                         "title": "Output Path",
                         "default": "output.txt"
                     },
-                    "format": { 
-                        "type": "string", 
+                    "format": {
+                        "type": "string",
                         "enum": ["text", "png", "bmp", "wav"],
                         "title": "Output Format",
                         "default": "text"
@@ -113,27 +115,27 @@ impl Sink for SaveFileSink {
             })),
         }
     }
-    
-    fn is_enabled(&self) -> bool { 
-        self.enabled 
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
     }
-    
-    fn set_enabled(&mut self, enabled: bool) { 
-        self.enabled = enabled; 
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
-    
+
     fn render_output(&self) -> Option<String> {
         self.last_saved.lock().unwrap().clone()
     }
-    
+
     async fn consume(&self, signal: Signal) -> Result<Option<Signal>> {
-        if !self.enabled { 
-            return Ok(None); 
+        if !self.enabled {
+            return Ok(None);
         }
-        
+
         let path = self.output_path.lock().unwrap().clone();
         let format = self.output_format.lock().unwrap().clone();
-        
+
         match signal {
             Signal::Text(text) => {
                 if matches!(format, OutputFormat::Text) {
@@ -152,34 +154,43 @@ impl Sink for SaveFileSink {
                         }
                     }
                 }
-            },
-            Signal::Blob { bytes, mime_type } => {
-                match format {
-                    OutputFormat::Png | OutputFormat::Bmp => {
-                        match File::create(&path) {
-                            Ok(mut file) => {
-                                if let Err(e) = file.write_all(&bytes) {
-                                    log::error!("SaveFileSink: Failed to write blob: {}", e);
-                                } else {
-                                    let msg = format!("Saved {} bytes ({}) to {:?}", bytes.len(), mime_type, path);
-                                    log::info!("SaveFileSink: {}", msg);
-                                    *self.last_saved.lock().unwrap() = Some(msg);
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("SaveFileSink: Failed to create file {:?}: {}", path, e);
-                            }
+            }
+            Signal::Blob { bytes, mime_type } => match format {
+                OutputFormat::Png | OutputFormat::Bmp => match File::create(&path) {
+                    Ok(mut file) => {
+                        if let Err(e) = file.write_all(&bytes) {
+                            log::error!("SaveFileSink: Failed to write blob: {}", e);
+                        } else {
+                            let msg = format!(
+                                "Saved {} bytes ({}) to {:?}",
+                                bytes.len(),
+                                mime_type,
+                                path
+                            );
+                            log::info!("SaveFileSink: {}", msg);
+                            *self.last_saved.lock().unwrap() = Some(msg);
                         }
-                    },
-                    _ => {
-                        log::warn!("SaveFileSink: Received Blob but format is {:?}, ignoring", format);
                     }
+                    Err(e) => {
+                        log::error!("SaveFileSink: Failed to create file {:?}: {}", path, e);
+                    }
+                },
+                _ => {
+                    log::warn!(
+                        "SaveFileSink: Received Blob but format is {:?}, ignoring",
+                        format
+                    );
                 }
             },
 
-            Signal::Audio { sample_rate, channels, timestamp_us: _, data } => {
+            Signal::Audio {
+                sample_rate,
+                channels,
+                timestamp_us: _,
+                data,
+            } => {
                 let mut guard = self.audio_writer.lock().unwrap();
-                
+
                 // Initialize writer if None or if we should check path changes (simplified here)
                 // Realistically we should check if path changed, but for now assuming session consistency
                 if guard.is_none() {
@@ -189,18 +200,20 @@ impl Sink for SaveFileSink {
                         bits_per_sample: 32,
                         sample_format: hound::SampleFormat::Float,
                     };
-                    
+
                     match File::create(&path) {
                         Ok(file) => {
                             let buf_writer = std::io::BufWriter::new(file);
-                             match hound::WavWriter::new(buf_writer, spec) {
+                            match hound::WavWriter::new(buf_writer, spec) {
                                 Ok(writer) => {
                                     *guard = Some(writer);
                                     log::info!("SaveFileSink: Started WAV recording to {:?}", path);
-                                },
-                                Err(e) => log::error!("SaveFileSink: Failed to create WavWriter: {}", e),
+                                }
+                                Err(e) => {
+                                    log::error!("SaveFileSink: Failed to create WavWriter: {}", e)
+                                }
                             }
-                        },
+                        }
                         Err(e) => log::error!("SaveFileSink: Failed to create WAV file: {}", e),
                     }
                 }
@@ -212,12 +225,12 @@ impl Sink for SaveFileSink {
                             break;
                         }
                     }
-                    // Try to flush frequently so data is safe? 
+                    // Try to flush frequently so data is safe?
                     // WavWriter doesn't have explicit flush that updates header length easily without finalize.
                     // But we depend on Drop to finalize or manual finalize.
                     // For continuous streaming, we just keep writing.
                 }
-            },
+            }
             _ => {
                 // Ignore other signal types
             }
@@ -230,26 +243,28 @@ impl Sink for SaveFileSink {
 mod tests {
     use super::*;
     use std::env::temp_dir;
-    
+
     #[tokio::test]
     async fn test_save_text_file() {
         let path = temp_dir().join("test_save_file.txt");
         let sink = SaveFileSink::new(path.clone());
-        
-        sink.consume(Signal::Text("Hello, World!".to_string())).await.unwrap();
-        
+
+        sink.consume(Signal::Text("Hello, World!".to_string()))
+            .await
+            .unwrap();
+
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "Hello, World!");
-        
+
         // Cleanup
         std::fs::remove_file(path).ok();
     }
-    
+
     #[test]
     fn test_schema() {
         let sink = SaveFileSink::default();
         let schema = sink.schema();
-        
+
         assert_eq!(schema.id, "save_file");
         assert_eq!(schema.ports.len(), 3); // text, blob, audio inputs
     }

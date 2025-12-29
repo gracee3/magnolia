@@ -1,5 +1,5 @@
 #[cfg(target_os = "linux")]
-use seccompiler::{SeccompAction, SeccompFilter, BpfProgram};
+use seccompiler::{BpfProgram, SeccompAction, SeccompFilter};
 #[cfg(target_os = "linux")]
 use std::collections::BTreeMap;
 
@@ -46,15 +46,15 @@ pub fn create_plugin_sandbox() -> anyhow::Result<BpfProgram> {
     for syscall in allowed_syscalls {
         rules.insert(syscall as i64, vec![]);
     }
-    
+
     // Create filter
     let filter = SeccompFilter::new(
         rules,
         SeccompAction::Errno(libc::EPERM as u32), // Default action: deny with EPERM
-        SeccompAction::Allow, // Mismatch action (should match rules)
+        SeccompAction::Allow,                     // Mismatch action (should match rules)
         std::env::consts::ARCH.try_into()?,
     )?;
-    
+
     Ok(filter.try_into()?)
 }
 

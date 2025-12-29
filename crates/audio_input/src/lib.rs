@@ -1,13 +1,13 @@
 #[cfg(feature = "tile-rendering")]
-pub mod tile;
-mod source;
-mod viz_sink;
-mod settings;
-#[cfg(feature = "tile-rendering")]
 mod input_tile;
+mod settings;
+mod source;
+#[cfg(feature = "tile-rendering")]
+pub mod tile;
+mod viz_sink;
 
-pub use source::AudioInputSource;
-pub use viz_sink::AudioVizSink;
-pub use settings::AudioInputSettings;
 #[cfg(feature = "tile-rendering")]
 pub use input_tile::AudioInputTile;
+pub use settings::AudioInputSettings;
+pub use source::AudioInputSource;
+pub use viz_sink::AudioVizSink;

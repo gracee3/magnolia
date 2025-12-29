@@ -1,5 +1,3 @@
-
-
 /// Audio data wrapper for shared (Arc) signals
 #[derive(Debug, Clone)]
 pub struct AudioData {

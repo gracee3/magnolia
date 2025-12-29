@@ -8,8 +8,6 @@
 //! - **Control Mode**: Maximized tile view, settings UI with live preview
 //! - **Error Handling**: Tiles can report errors displayed in monitor view
 
-
-
 // Local tile implementations (remaining - clock is still local)
 pub mod schema_tile;
 pub use schema_tile::SchemaTile;
@@ -18,12 +16,7 @@ pub mod compositor;
 
 // Re-export main types from talisman_core
 pub use talisman_core::{
-    TileRenderer, 
-    TileRegistry, 
-    RenderContext, 
- 
-    BindableAction,
-    render_error_overlay,
+    render_error_overlay, BindableAction, RenderContext, TileRegistry, TileRenderer,
 };
 
 // Re-export Compositor (daemon-specific)
@@ -33,9 +26,9 @@ pub use compositor::Compositor;
 /// External tiles must be loaded via PluginManager
 pub fn create_default_registry() -> TileRegistry {
     let mut registry = TileRegistry::new();
-    
+
     // Register local system tiles
     registry.register(clock::ClockTile::new());
-    
+
     registry
 }

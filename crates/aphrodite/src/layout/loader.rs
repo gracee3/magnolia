@@ -19,19 +19,16 @@ pub enum WheelDefinitionError {
 pub fn load_wheel_definition_from_json(
     json: &str,
 ) -> Result<WheelDefinitionWithPresets, WheelDefinitionError> {
-    let parsed: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| WheelDefinitionError::InvalidJson(e.to_string()))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| WheelDefinitionError::InvalidJson(e.to_string()))?;
 
     validate_wheel_definition(&parsed)?;
 
-    serde_json::from_value(parsed)
-        .map_err(|e| WheelDefinitionError::ValidationError(e.to_string()))
+    serde_json::from_value(parsed).map_err(|e| WheelDefinitionError::ValidationError(e.to_string()))
 }
 
 /// Validate a wheel definition
-fn validate_wheel_definition(
-    definition: &serde_json::Value,
-) -> Result<(), WheelDefinitionError> {
+fn validate_wheel_definition(definition: &serde_json::Value) -> Result<(), WheelDefinitionError> {
     // Check that it's an object
     if !definition.is_object() {
         return Err(WheelDefinitionError::ValidationError(
@@ -266,10 +263,7 @@ fn validate_ring_definition(
     }
 
     // Validate radiusInner < radiusOuter
-    if let (Some(inner), Some(outer)) = (
-        ring_obj.get("radiusInner"),
-        ring_obj.get("radiusOuter"),
-    ) {
+    if let (Some(inner), Some(outer)) = (ring_obj.get("radiusInner"), ring_obj.get("radiusOuter")) {
         let inner_val = inner.as_f64().unwrap();
         let outer_val = outer.as_f64().unwrap();
         if inner_val >= outer_val {
@@ -287,9 +281,9 @@ fn validate_ring_definition(
             index
         )));
     }
-    let data_source = ring_obj
-        .get("dataSource")
-        .ok_or_else(|| WheelDefinitionError::MissingField(format!("rings[{}].dataSource", index)))?;
+    let data_source = ring_obj.get("dataSource").ok_or_else(|| {
+        WheelDefinitionError::MissingField(format!("rings[{}].dataSource", index))
+    })?;
     if !data_source.is_object() {
         return Err(WheelDefinitionError::InvalidFieldValue(format!(
             "rings[{}].dataSource must be an object",
@@ -348,7 +342,8 @@ fn validate_ring_definition(
         }
 
         if kind_str == "layer_varga_planets" {
-            if !data_source_obj.contains_key("layerId") || !data_source_obj.contains_key("vargaId") {
+            if !data_source_obj.contains_key("layerId") || !data_source_obj.contains_key("vargaId")
+            {
                 return Err(WheelDefinitionError::MissingField(format!(
                     "rings[{}].dataSource.layerId and vargaId (required for layer_varga_planets)",
                     index
@@ -376,4 +371,3 @@ fn validate_ring_definition(
 
     Ok(())
 }
-

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use talisman_core::{Processor, ModuleSchema, Port, PortDirection, DataType, Signal};
+use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
 
 #[cfg(feature = "tile-rendering")]
 pub mod tile;
@@ -118,7 +118,8 @@ impl Processor for AudioDspProcessor {
             channels,
             timestamp_us,
             mut data,
-        } = signal else {
+        } = signal
+        else {
             return Ok(None);
         };
 

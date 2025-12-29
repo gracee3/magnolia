@@ -1,5 +1,5 @@
-use std::sync::{Arc, RwLock};
 use slab::Slab;
+use std::sync::{Arc, RwLock};
 
 /// A handle to a buffer in the pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -34,26 +34,23 @@ impl<T> BufferPool<T> {
         let mut store = self.store.write().unwrap();
         let entry = store.vacant_entry();
         let id = entry.key();
-        
+
         // We don't have generation in Slab's vacant entry directly in all versions,
         // but Slab reuses indices. We need to maintain our own generation count if Slab doesn't.
-        // Wait, standard Slab doesn't have generation counters built-in in older versions, 
+        // Wait, standard Slab doesn't have generation counters built-in in older versions,
         // but let's assume valid access pattern. For strict safety we need our own wrapper or a crate like `generational-arena`.
         // For now, simplistically: Slab + manual generation.
         // Actually, let's just use `0` for now if we don't store generation in Slab explicitly.
         // Or wait, if we re-use slots, we risk ABA.
         // Let's implement a simple generation check.
-        
+
         // Inserting into Slab
         entry.insert(Entry {
             data: Arc::new(data),
             generation: 0, // TODO: Implement proper generation increment on reuse
         });
 
-        BufferHandle {
-            id,
-            generation: 0,
-        }
+        BufferHandle { id, generation: 0 }
     }
 
     /// Get a reference to the buffer if the handle is valid

@@ -1,4 +1,4 @@
-use crate::aspects::types::{AspectCore, AspectPair, AspectObjectRef, AspectSet, AspectSettings};
+use crate::aspects::types::{AspectCore, AspectObjectRef, AspectPair, AspectSet, AspectSettings};
 use crate::ephemeris::types::LayerPositions;
 use std::collections::HashMap;
 
@@ -32,8 +32,11 @@ impl AspectCalculator {
 
         // Filter to included objects
         if !settings.include_objects.is_empty() {
-            let include_set: std::collections::HashSet<&str> =
-                settings.include_objects.iter().map(|s| s.as_str()).collect();
+            let include_set: std::collections::HashSet<&str> = settings
+                .include_objects
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
             planet_ids.retain(|pid| include_set.contains(pid.as_str()));
         }
 
@@ -108,8 +111,11 @@ impl AspectCalculator {
 
         // Filter to included objects
         if !settings.include_objects.is_empty() {
-            let include_set: std::collections::HashSet<&str> =
-                settings.include_objects.iter().map(|s| s.as_str()).collect();
+            let include_set: std::collections::HashSet<&str> = settings
+                .include_objects
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
             planet_ids_a.retain(|pid| include_set.contains(pid.as_str()));
             planet_ids_b.retain(|pid| include_set.contains(pid.as_str()));
         }
@@ -152,7 +158,11 @@ impl AspectCalculator {
 
         AspectSet {
             id: format!("{}:{}", layer_id_a, layer_id_b),
-            label: format!("{} / {} Aspects", capitalize_first(layer_id_a), capitalize_first(layer_id_b)),
+            label: format!(
+                "{} / {} Aspects",
+                capitalize_first(layer_id_a),
+                capitalize_first(layer_id_b)
+            ),
             kind: "inter_layer".to_string(),
             layer_ids: vec![layer_id_a.to_string(), layer_id_b.to_string()],
             pairs,
@@ -218,10 +228,7 @@ impl AspectCalculator {
         };
 
         // Early exit if angle is too large to be any aspect (with max orb)
-        let max_orb = orb_settings
-            .values()
-            .copied()
-            .fold(8.0, f64::max);
+        let max_orb = orb_settings.values().copied().fold(8.0, f64::max);
         if angle_diff > 180.0 + max_orb {
             return None;
         }
@@ -233,14 +240,8 @@ impl AspectCalculator {
 
             if orb_value <= orb {
                 // Determine if applying or separating
-                let is_applying = self.is_aspect_applying(
-                    lon1,
-                    lon2,
-                    speed1,
-                    speed2,
-                    *aspect_angle,
-                    angle_diff,
-                );
+                let is_applying =
+                    self.is_aspect_applying(lon1, lon2, speed1, speed2, *aspect_angle, angle_diff);
                 let is_exact = orb_value < 0.1; // Within 0.1 degrees is "exact"
                 let is_retrograde = speed1 < 0.0 || speed2 < 0.0;
 
@@ -325,4 +326,3 @@ fn capitalize_first(s: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
     }
 }
-

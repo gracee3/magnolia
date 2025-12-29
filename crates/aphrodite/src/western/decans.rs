@@ -1,5 +1,5 @@
 //! Western astrology decans calculations.
-//! 
+//!
 //! Each sign is divided into 3 decans (10 degrees each), with decan rulers based on element groups.
 
 use serde::{Deserialize, Serialize};
@@ -39,9 +39,18 @@ lazy_static::lazy_static! {
 }
 
 const SIGN_ORDER: &[&str] = &[
-    "aries", "taurus", "gemini", "cancer",
-    "leo", "virgo", "libra", "scorpio",
-    "sagittarius", "capricorn", "aquarius", "pisces",
+    "aries",
+    "taurus",
+    "gemini",
+    "cancer",
+    "leo",
+    "virgo",
+    "libra",
+    "scorpio",
+    "sagittarius",
+    "capricorn",
+    "aquarius",
+    "pisces",
 ];
 
 // Build element groups
@@ -78,7 +87,7 @@ pub fn get_decan_index(degree_in_sign: f64) -> u8 {
     if degree_in_sign < 0.0 || degree_in_sign >= 30.0 {
         panic!("degree_in_sign must be in [0, 30), got {}", degree_in_sign);
     }
-    
+
     if degree_in_sign < 10.0 {
         1
     } else if degree_in_sign < 20.0 {
@@ -93,23 +102,26 @@ pub fn get_decan_info_for_sign_and_degree(
     sign: &str,
     degree_in_sign: f64,
 ) -> Result<DecanInfo, String> {
-    let sign_meta = SIGNS.iter()
+    let sign_meta = SIGNS
+        .iter()
         .find(|s| s.name == sign)
         .ok_or_else(|| format!("Unknown sign: {}", sign))?;
-    
+
     let decan_index = get_decan_index(degree_in_sign);
-    
-    let group = ELEMENT_GROUPS.get(&sign_meta.element)
+
+    let group = ELEMENT_GROUPS
+        .get(&sign_meta.element)
         .ok_or_else(|| format!("Element group not found for {}", sign))?;
-    
-    let group_index = group.iter()
+
+    let group_index = group
+        .iter()
         .position(|g| g.name == sign)
         .ok_or_else(|| format!("Sign {} not found in element group", sign))?;
-    
+
     // Rotate through the 3 rulers in the element group
     let ruler_index = (group_index + (decan_index as usize - 1)) % group.len();
     let decan_ruler = group[ruler_index].ruler.clone();
-    
+
     Ok(DecanInfo {
         sign: sign.to_string(),
         element: sign_meta.element,
@@ -126,15 +138,14 @@ pub fn get_decan_info_from_longitude(longitude: f64) -> DecanInfo {
     let sign_index = (lon / 30.0) as usize;
     let degree_in_sign = lon - (sign_index as f64 * 30.0);
     let sign = SIGN_ORDER[sign_index % 12];
-    
-    get_decan_info_for_sign_and_degree(sign, degree_in_sign)
-        .expect("Failed to get decan info")
+
+    get_decan_info_for_sign_and_degree(sign, degree_in_sign).expect("Failed to get decan info")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_get_decan_index() {
         assert_eq!(get_decan_index(0.0), 1);
@@ -147,7 +158,7 @@ mod tests {
         assert_eq!(get_decan_index(25.0), 3);
         assert_eq!(get_decan_index(29.999), 3);
     }
-    
+
     #[test]
     fn test_get_decan_info_for_sign_and_degree() {
         let info = get_decan_info_for_sign_and_degree("aries", 5.0).unwrap();
@@ -158,4 +169,3 @@ mod tests {
         assert_eq!(info.decan_ruler, "mars");
     }
 }
-

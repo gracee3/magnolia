@@ -1,4 +1,4 @@
-pub use talisman_signals::{Manifest, PortDesc, ControlMsg, ControlSignal};
+pub use talisman_signals::{ControlMsg, ControlSignal, Manifest, PortDesc};
 
 /// A restricted context for RT-safe tick operations.
 /// No allocation allowed here for Tier 0 modules.
@@ -38,7 +38,7 @@ impl ControlCx {
 pub trait StaticModule: Send {
     /// Static metadata about the module
     fn manifest(&self) -> Manifest;
-    
+
     /// Declare input/output ports
     fn ports(&self) -> &[PortDesc];
 

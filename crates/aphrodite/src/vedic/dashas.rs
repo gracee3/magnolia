@@ -1,11 +1,11 @@
 //! Vimshottari and other dasha calculations for Vedic astrology.
-//! 
+//!
 //! Dashas are time periods ruled by planets, calculated based on the Moon's nakshatra.
 
-use chrono::{DateTime, Utc, Duration};
-use serde::{Deserialize, Serialize};
 use crate::ephemeris::types::LayerPositions;
 use crate::vedic::nakshatra::get_nakshatra_for_longitude;
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 
 pub const VIMSHOTTARI_TOTAL_YEARS: f64 = 120.0;
 pub const VIMSHOTTARI_YEAR_DAYS: f64 = 365.25; // Placeholder synodic year
@@ -64,30 +64,31 @@ pub fn compute_vimshottari_dasha(
     layer_positions: &LayerPositions,
     depth: DashaLevel,
 ) -> Result<Vec<DashaPeriod>, String> {
-    let moon = layer_positions.planets.get("moon")
+    let moon = layer_positions
+        .planets
+        .get("moon")
         .ok_or_else(|| "Moon position required for Vimshottari dasha calculation".to_string())?;
-    
+
     let moon_meta = get_nakshatra_for_longitude(moon.lon);
     let moon_lord = moon_meta.base.lord.clone();
     let progress = moon_meta.progress;
     let start_index = find_sequence_index(&moon_lord, VIMSHOTTARI_SEQUENCE)?;
-    
-    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth)
-        .unwrap_or(0);
+
+    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth).unwrap_or(0);
     let mut current_start = birth_datetime;
     let mut periods: Vec<DashaPeriod> = Vec::new();
-    
+
     for offset in 0..VIMSHOTTARI_SEQUENCE.len() {
         let seq_index = (start_index + offset) % VIMSHOTTARI_SEQUENCE.len();
         let (planet, years) = VIMSHOTTARI_SEQUENCE[seq_index];
-        
+
         // First period is partial depending on Moon's position within the nakshatra
         let effective_years = if offset == 0 {
             years * (1.0 - progress)
         } else {
             years
         };
-        
+
         let period = build_period(
             planet,
             current_start,
@@ -101,7 +102,7 @@ pub fn compute_vimshottari_dasha(
         periods.push(period.clone());
         current_start = period.end;
     }
-    
+
     Ok(periods)
 }
 
@@ -118,7 +119,7 @@ fn build_period(
     let duration_days = duration_years * VIMSHOTTARI_YEAR_DAYS;
     let end = start + Duration::days(duration_days as i64);
     let level = DEPTH_LEVELS[level_index.min(DEPTH_LEVELS.len() - 1)];
-    
+
     let mut period = DashaPeriod {
         planet: planet.to_string(),
         start,
@@ -127,11 +128,11 @@ fn build_period(
         level,
         children: Vec::new(),
     };
-    
+
     if level_index >= target_depth_index {
         return Ok(period);
     }
-    
+
     let mut child_start = start;
     for offset in 0..sequence.len() {
         let child_index = (sequence_start_index + offset) % sequence.len();
@@ -150,12 +151,13 @@ fn build_period(
         period.children.push(child_period.clone());
         child_start = child_period.end;
     }
-    
+
     Ok(period)
 }
 
 fn find_sequence_index(planet: &str, sequence: &[PlanetYears]) -> Result<usize, String> {
-    sequence.iter()
+    sequence
+        .iter()
         .position(|(p, _)| *p == planet)
         .ok_or_else(|| format!("Planet '{}' not found in sequence", planet))
 }
@@ -164,14 +166,14 @@ fn find_sequence_index(planet: &str, sequence: &[PlanetYears]) -> Result<usize, 
 pub const YOGINI_TOTAL_YEARS: f64 = 8.0;
 
 const YOGINI_SEQUENCE: &[(&str, f64)] = &[
-    ("mangala", 1.0),   // Mars
-    ("pingala", 2.0),   // Sun
-    ("dhanya", 3.0),    // Jupiter
-    ("bhramari", 4.0),  // Mercury
-    ("bhadrika", 5.0),  // Saturn
-    ("ulkika", 6.0),    // Venus
-    ("siddha", 7.0),    // Moon
-    ("sankata", 8.0),   // Rahu
+    ("mangala", 1.0),  // Mars
+    ("pingala", 2.0),  // Sun
+    ("dhanya", 3.0),   // Jupiter
+    ("bhramari", 4.0), // Mercury
+    ("bhadrika", 5.0), // Saturn
+    ("ulkika", 6.0),   // Venus
+    ("siddha", 7.0),   // Moon
+    ("sankata", 8.0),  // Rahu
 ];
 
 const YOGINI_TO_PLANET: &[(&str, &str)] = &[
@@ -186,7 +188,8 @@ const YOGINI_TO_PLANET: &[(&str, &str)] = &[
 ];
 
 fn yogini_name_to_planet(yogini_name: &str) -> &str {
-    YOGINI_TO_PLANET.iter()
+    YOGINI_TO_PLANET
+        .iter()
         .find(|(name, _)| *name == yogini_name)
         .map(|(_, planet)| *planet)
         .unwrap_or(yogini_name)
@@ -198,33 +201,34 @@ pub fn compute_yogini_dasha(
     layer_positions: &LayerPositions,
     depth: DashaLevel,
 ) -> Result<Vec<DashaPeriod>, String> {
-    let moon = layer_positions.planets.get("moon")
+    let moon = layer_positions
+        .planets
+        .get("moon")
         .ok_or_else(|| "Moon position required for Yogini dasha calculation".to_string())?;
-    
+
     let moon_meta = get_nakshatra_for_longitude(moon.lon);
     let nakshatra_index = moon_meta.base.index;
     let progress = moon_meta.progress;
-    
+
     // Yogini dasha starts from nakshatra index mod 8
     let start_index = nakshatra_index % YOGINI_SEQUENCE.len();
-    
-    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth)
-        .unwrap_or(0);
+
+    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth).unwrap_or(0);
     let mut current_start = birth_datetime;
     let mut periods: Vec<DashaPeriod> = Vec::new();
-    
+
     for offset in 0..YOGINI_SEQUENCE.len() {
         let seq_index = (start_index + offset) % YOGINI_SEQUENCE.len();
         let (yogini_name, years) = YOGINI_SEQUENCE[seq_index];
         let planet = yogini_name_to_planet(yogini_name);
-        
+
         // First period is partial
         let effective_years = if offset == 0 {
             years * (1.0 - progress)
         } else {
             years
         };
-        
+
         let period = build_period_yogini(
             planet,
             yogini_name,
@@ -237,7 +241,7 @@ pub fn compute_yogini_dasha(
         periods.push(period.clone());
         current_start = period.end;
     }
-    
+
     Ok(periods)
 }
 
@@ -253,7 +257,7 @@ fn build_period_yogini(
     let duration_days = duration_years * VIMSHOTTARI_YEAR_DAYS;
     let end = start + Duration::days(duration_days as i64);
     let level = DEPTH_LEVELS[level_index.min(DEPTH_LEVELS.len() - 1)];
-    
+
     let mut period = DashaPeriod {
         planet: planet.to_string(),
         start,
@@ -262,11 +266,11 @@ fn build_period_yogini(
         level,
         children: Vec::new(),
     };
-    
+
     if level_index >= target_depth_index {
         return Ok(period);
     }
-    
+
     let mut child_start = start;
     for offset in 0..YOGINI_SEQUENCE.len() {
         let child_index = (sequence_start_index + offset) % YOGINI_SEQUENCE.len();
@@ -285,7 +289,7 @@ fn build_period_yogini(
         period.children.push(child_period.clone());
         child_start = child_period.end;
     }
-    
+
     Ok(period)
 }
 
@@ -310,33 +314,34 @@ pub fn compute_ashtottari_dasha(
     layer_positions: &LayerPositions,
     depth: DashaLevel,
 ) -> Result<Vec<DashaPeriod>, String> {
-    let moon = layer_positions.planets.get("moon")
+    let moon = layer_positions
+        .planets
+        .get("moon")
         .ok_or_else(|| "Moon position required for Ashtottari dasha calculation".to_string())?;
-    
+
     let moon_meta = get_nakshatra_for_longitude(moon.lon);
     let nakshatra_index = moon_meta.base.index;
     let progress = moon_meta.progress;
-    
+
     // Ashtottari starts from specific nakshatra groups
     // Simplified: use nakshatra index mod 9
     let start_index = nakshatra_index % ASHTOTTARI_SEQUENCE.len();
-    
-    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth)
-        .unwrap_or(0);
+
+    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth).unwrap_or(0);
     let mut current_start = birth_datetime;
     let mut periods: Vec<DashaPeriod> = Vec::new();
-    
+
     for offset in 0..ASHTOTTARI_SEQUENCE.len() {
         let seq_index = (start_index + offset) % ASHTOTTARI_SEQUENCE.len();
         let (planet, years) = ASHTOTTARI_SEQUENCE[seq_index];
-        
+
         // First period is partial
         let effective_years = if offset == 0 {
             years * (1.0 - progress)
         } else {
             years
         };
-        
+
         let period = build_period(
             planet,
             current_start,
@@ -350,7 +355,7 @@ pub fn compute_ashtottari_dasha(
         periods.push(period.clone());
         current_start = period.end;
     }
-    
+
     Ok(periods)
 }
 
@@ -366,34 +371,35 @@ pub fn compute_kalachakra_dasha(
     layer_positions: &LayerPositions,
     depth: DashaLevel,
 ) -> Result<Vec<DashaPeriod>, String> {
-    let moon = layer_positions.planets.get("moon")
+    let moon = layer_positions
+        .planets
+        .get("moon")
         .ok_or_else(|| "Moon position required for Kalachakra dasha calculation".to_string())?;
-    
+
     let moon_meta = get_nakshatra_for_longitude(moon.lon);
     let moon_lord = moon_meta.base.lord.clone();
     let progress = moon_meta.progress;
-    
+
     // Find starting planet based on nakshatra lord
     let start_index = find_sequence_index(&moon_lord, KALACHAKRA_SEQUENCE)?;
-    
-    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth)
-        .unwrap_or(0);
+
+    let target_depth_index = DEPTH_LEVELS.iter().position(|&d| d == depth).unwrap_or(0);
     let mut current_start = birth_datetime;
     let mut periods: Vec<DashaPeriod> = Vec::new();
-    
+
     // Kalachakra uses reverse order for some calculations
     // Simplified version - using standard sequence
     for offset in 0..KALACHAKRA_SEQUENCE.len() {
         let seq_index = (start_index + offset) % KALACHAKRA_SEQUENCE.len();
         let (planet, years) = KALACHAKRA_SEQUENCE[seq_index];
-        
+
         // First period is partial
         let effective_years = if offset == 0 {
             years * (1.0 - progress)
         } else {
             years
         };
-        
+
         let period = build_period(
             planet,
             current_start,
@@ -407,37 +413,40 @@ pub fn compute_kalachakra_dasha(
         periods.push(period.clone());
         current_start = period.end;
     }
-    
+
     Ok(periods)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ephemeris::types::{PlanetPosition, LayerPositions};
+    use crate::ephemeris::types::{LayerPositions, PlanetPosition};
     use std::collections::HashMap;
-    
+
     #[test]
     fn test_find_sequence_index() {
         let idx = find_sequence_index("venus", VIMSHOTTARI_SEQUENCE).unwrap();
         assert_eq!(idx, 1);
     }
-    
+
     #[test]
     fn test_compute_vimshottari_dasha() {
         let mut planets = HashMap::new();
-        planets.insert("moon".to_string(), PlanetPosition {
-            lon: 13.33, // In Ashwini nakshatra (Ketu lord)
-            lat: 0.0,
-            speed_lon: 0.0,
-            retrograde: false,
-        });
-        
+        planets.insert(
+            "moon".to_string(),
+            PlanetPosition {
+                lon: 13.33, // In Ashwini nakshatra (Ketu lord)
+                lat: 0.0,
+                speed_lon: 0.0,
+                retrograde: false,
+            },
+        );
+
         let layer_positions = LayerPositions {
             planets,
             houses: None,
         };
-        
+
         let birth = Utc::now();
         let result = compute_vimshottari_dasha(birth, &layer_positions, DashaLevel::Mahadasha);
         assert!(result.is_ok());
@@ -446,4 +455,3 @@ mod tests {
         assert_eq!(periods[0].planet, "ketu");
     }
 }
-

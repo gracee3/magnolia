@@ -87,4 +87,3 @@ pub struct WheelDefinitionWithPresets {
     #[serde(default)]
     pub tags: Option<Vec<String>>,
 }
-

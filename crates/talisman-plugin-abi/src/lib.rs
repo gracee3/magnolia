@@ -64,27 +64,27 @@ pub struct ModuleSchemaAbi {
 pub struct ModuleRuntimeVTable {
     /// Get module ID (must be stable across runs)
     pub get_id: unsafe extern "C" fn(*const c_void) -> *const c_char,
-    
+
     /// Get human-readable module name
     pub get_name: unsafe extern "C" fn(*const c_void) -> *const c_char,
-    
+
     /// Check if module is enabled
     pub is_enabled: unsafe extern "C" fn(*const c_void) -> bool,
-    
+
     /// Enable or disable module
     pub set_enabled: unsafe extern "C" fn(*mut c_void, bool),
-    
+
     /// Poll for outgoing signal (source behavior)
     /// Returns true if signal was written to buffer, false if no signal available
     pub poll_signal: unsafe extern "C" fn(*mut c_void, *mut SignalBuffer) -> bool,
-    
+
     /// Consume incoming signal (sink behavior)
     /// Returns: 0 = no output, pointer = output signal buffer (caller must free)
     pub consume_signal: unsafe extern "C" fn(*mut c_void, *const SignalBuffer) -> *mut SignalBuffer,
-    
+
     /// Apply settings as JSON string
     pub apply_settings: unsafe extern "C" fn(*mut c_void, *const c_char),
-    
+
     /// Destroy the module instance
     pub destroy: unsafe extern "C" fn(*mut c_void),
 }
@@ -101,7 +101,7 @@ pub enum SignalType {
     Control = 5,
     Computed = 6,
     Pulse = 7,
-    GpuContext = 8, 
+    GpuContext = 8,
     Texture = 9,
 }
 
@@ -136,7 +136,9 @@ impl SignalBuffer {
     pub fn empty() -> Self {
         Self {
             signal_type: SignalType::Pulse as u32,
-            value: SignalValue { ptr: std::ptr::null_mut() },
+            value: SignalValue {
+                ptr: std::ptr::null_mut(),
+            },
             size: 0,
             param: 0,
         }
@@ -164,4 +166,3 @@ pub const PLUGIN_CREATE_SYMBOL: &[u8] = b"talisman_plugin_create\0";
 pub const PLUGIN_VTABLE_SYMBOL: &[u8] = b"talisman_plugin_get_vtable\0";
 /// Optional schema export symbol
 pub const PLUGIN_SCHEMA_SYMBOL: &[u8] = b"talisman_plugin_get_schema\0";
-

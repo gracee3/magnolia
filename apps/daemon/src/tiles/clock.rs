@@ -3,13 +3,13 @@
 //! Monitor mode: Shows current time
 //! Control mode: Settings for format (12/24hr), show seconds, etc.
 
-use nannou::prelude::*;
-use chrono::Local;
-use serde::{Deserialize, Serialize};
-use super::{TileRenderer, RenderContext, BindableAction};
+use super::{BindableAction, RenderContext, TileRenderer};
 use crate::ui::controls;
+use chrono::Local;
+use nannou::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeFormat {
@@ -43,7 +43,7 @@ impl ClockTile {
             focused_control: Mutex::new(0),
         }
     }
-    
+
     fn format_time(&self) -> String {
         let now = Local::now();
         let time_str = match (self.format, self.show_seconds) {
@@ -52,7 +52,7 @@ impl ClockTile {
             (TimeFormat::TwelveHour, true) => now.format("%I:%M:%S %p").to_string(),
             (TimeFormat::TwelveHour, false) => now.format("%I:%M %p").to_string(),
         };
-        
+
         if self.show_date {
             format!("{}\n{}", now.format("%Y-%m-%d"), time_str)
         } else {
@@ -68,24 +68,28 @@ impl Default for ClockTile {
 }
 
 impl TileRenderer for ClockTile {
-    fn id(&self) -> &str { "clock" }
-    
-    fn name(&self) -> &str { "Digital Clock" }
-    
+    fn id(&self) -> &str {
+        "clock"
+    }
+
+    fn name(&self) -> &str {
+        "Digital Clock"
+    }
+
     fn update(&mut self) {
         self.current_time = self.format_time();
     }
-    
+
     fn render_monitor(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) {
         // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(srgba(0.05, 0.05, 0.1, 0.9));
-        
+
         // Time display
         let font_size = (rect.h() * 0.3).min(72.0);
-        
+
         // Subtle pulse animation
         let pulse = (ctx.time.elapsed().as_secs_f32() * 1.5).sin() * 0.05 + 0.95;
         let color = srgba(0.0, 1.0, 1.0, pulse);
@@ -99,7 +103,7 @@ impl TileRenderer for ClockTile {
             color,
             TextAlignment::Center,
         );
-        
+
         // Label
         draw_text(
             draw,
@@ -111,31 +115,32 @@ impl TileRenderer for ClockTile {
             TextAlignment::Center,
         );
     }
-    
+
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(srgba(0.02, 0.02, 0.05, 0.98));
-        
+
         // Title
-        controls::draw_heading(draw, pt2(rect.x(), rect.top() - 30.0), "CLOCK SETTINGS", controls::UiStyle { alpha: 1.0 });
+        controls::draw_heading(
+            draw,
+            pt2(rect.x(), rect.top() - 30.0),
+            "CLOCK SETTINGS",
+            controls::UiStyle { alpha: 1.0 },
+        );
         controls::draw_subtitle(
             draw,
             pt2(rect.x(), rect.top() - 52.0),
             "↑/↓ focus   ←/→ change   Enter toggle",
             controls::UiStyle { alpha: 1.0 },
         );
-        
+
         // Large time preview
-        let preview_rect = Rect::from_x_y_w_h(
-            rect.x(),
-            rect.y() + 50.0,
-            rect.w() * 0.8,
-            rect.h() * 0.3,
-        );
-        
+        let preview_rect =
+            Rect::from_x_y_w_h(rect.x(), rect.y() + 50.0, rect.w() * 0.8, rect.h() * 0.3);
+
         let font_size = (preview_rect.h() * 0.6).min(120.0);
         draw_text(
             draw,
@@ -146,7 +151,7 @@ impl TileRenderer for ClockTile {
             srgb(0.0, 1.0, 1.0).into(),
             TextAlignment::Center,
         );
-        
+
         // Controls list (keyboard-only)
         let list_rect = Rect::from_x_y_w_h(
             rect.x(),
@@ -190,7 +195,7 @@ impl TileRenderer for ClockTile {
             focused == 2,
             controls::UiStyle { alpha: 1.0 },
         );
-        
+
         false
     }
 
@@ -238,7 +243,7 @@ impl TileRenderer for ClockTile {
         }
         true
     }
-    
+
     fn settings_schema(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "type": "object",
@@ -259,7 +264,7 @@ impl TileRenderer for ClockTile {
             }
         }))
     }
-    
+
     fn apply_settings(&mut self, settings: &serde_json::Value) {
         if let Some(fmt) = settings.get("format").and_then(|v| v.as_str()) {
             self.format = match fmt {
@@ -274,7 +279,7 @@ impl TileRenderer for ClockTile {
             self.show_date = d;
         }
     }
-    
+
     fn get_settings(&self) -> serde_json::Value {
         serde_json::json!({
             "format": format!("{:?}", self.format),
@@ -282,14 +287,14 @@ impl TileRenderer for ClockTile {
             "show_date": self.show_date
         })
     }
-    
+
     fn bindable_actions(&self) -> Vec<BindableAction> {
         vec![
             BindableAction::new("toggle_format", "Toggle 12/24 Hour", false),
             BindableAction::new("toggle_seconds", "Toggle Seconds", true),
         ]
     }
-    
+
     fn execute_action(&mut self, action: &str) -> bool {
         match action {
             "toggle_format" => {
@@ -298,15 +303,15 @@ impl TileRenderer for ClockTile {
                     TimeFormat::TwelveHour => TimeFormat::TwentyFourHour,
                 };
                 true
-            },
+            }
             "toggle_seconds" => {
                 self.show_seconds = !self.show_seconds;
                 true
-            },
+            }
             _ => false,
         }
     }
-    
+
     fn get_display_text(&self) -> Option<String> {
         Some(self.current_time.clone())
     }

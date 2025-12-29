@@ -6,8 +6,10 @@ use std::collections::HashMap;
 #[cfg(feature = "tile-rendering")]
 pub mod tile;
 #[cfg(feature = "tile-rendering")]
-pub use tile::{TileRenderer, TileRegistry, RenderContext, TileError, ErrorSeverity, BindableAction, render_error_overlay};
-
+pub use tile::{
+    render_error_overlay, BindableAction, ErrorSeverity, RenderContext, TileError, TileRegistry,
+    TileRenderer,
+};
 
 pub mod patch_bay;
 pub use patch_bay::{PatchBay, PatchBayError};
@@ -17,13 +19,13 @@ pub use host::{ModuleHandle, ModuleImpl};
 
 pub mod runtime;
 pub use runtime::RoutedSignal;
-pub use runtime::{ModuleRuntime, ModuleHost, ExecutionModel, Priority};
+pub use runtime::{ExecutionModel, ModuleHost, ModuleRuntime, Priority};
 
 pub mod adapters;
-pub use adapters::{SourceAdapter, SinkAdapter};
+pub use adapters::{SinkAdapter, SourceAdapter};
 
 pub mod ring_buffer;
-pub use ring_buffer::{SPSCRingBuffer, RingBufferSender, RingBufferReceiver};
+pub use ring_buffer::{RingBufferReceiver, RingBufferSender, SPSCRingBuffer};
 
 pub mod audio_frame;
 pub use audio_frame::AudioFrame;
@@ -32,7 +34,7 @@ pub mod shared_data;
 pub use shared_data::{AudioData, BlobData};
 
 pub mod plugin_loader;
-pub use plugin_loader::{PluginLoader, PluginLibrary};
+pub use plugin_loader::{PluginLibrary, PluginLoader};
 
 pub mod plugin_adapter;
 pub use plugin_adapter::PluginModuleAdapter;
@@ -41,7 +43,7 @@ pub mod plugin_manager;
 pub use plugin_manager::PluginManager;
 
 pub mod sandbox;
-pub use sandbox::{create_plugin_sandbox, apply_sandbox};
+pub use sandbox::{apply_sandbox, create_plugin_sandbox};
 
 pub mod plugin_signing;
 pub use plugin_signing::PluginVerifier;
@@ -50,20 +52,20 @@ pub mod resources {
     pub mod buffer_pool;
     pub mod gpu_map;
 }
-pub use resources::buffer_pool::{BufferPool, AudioBufferPool, BlobBufferPool};
-pub use resources::gpu_map::{GpuResourceMap, GpuTextureMap, GpuBufferMap, GpuTextureViewMap};
+pub use resources::buffer_pool::{AudioBufferPool, BlobBufferPool, BufferPool};
+pub use resources::gpu_map::{GpuBufferMap, GpuResourceMap, GpuTextureMap, GpuTextureViewMap};
 
 /// Symbolic Kamea grid size names mapped to dimensions
 /// Based on traditional planetary magic squares
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KameaGrid {
-    Saturn,   // 3×3
-    Jupiter,  // 4×4
-    Mars,     // 5×5
-    Sun,      // 6×6
-    Venus,    // 7×7 (default)
-    Mercury,  // 8×8
-    Moon,     // 9×9
+    Saturn,  // 3×3
+    Jupiter, // 4×4
+    Mars,    // 5×5
+    Sun,     // 6×6
+    Venus,   // 7×7 (default)
+    Mercury, // 8×8
+    Moon,    // 9×9
 }
 
 impl KameaGrid {
@@ -149,7 +151,10 @@ impl LayoutConfig {
     ///
     /// Returns an error when it's impossible to place all tiles (e.g. more tiles
     /// than grid cells).
-    pub fn resolve_conflicts(&mut self, preferred_tile_id: Option<&str>) -> std::result::Result<(), LayoutResolveError> {
+    pub fn resolve_conflicts(
+        &mut self,
+        preferred_tile_id: Option<&str>,
+    ) -> std::result::Result<(), LayoutResolveError> {
         let (cols, rows) = self.resolve_grid();
         self.resolve_conflicts_within(cols, rows, preferred_tile_id)
     }
@@ -175,7 +180,8 @@ impl LayoutConfig {
 
         // Snapshot for retry logic (we may shrink the preferred tile until feasible).
         let original_tiles = self.tiles.clone();
-        let preferred_idx = preferred_tile_id.and_then(|id| self.tiles.iter().position(|t| t.id == id));
+        let preferred_idx =
+            preferred_tile_id.and_then(|id| self.tiles.iter().position(|t| t.id == id));
 
         let mut preferred_bounds = preferred_idx.map(|idx| {
             let t = &self.tiles[idx];
@@ -263,10 +269,10 @@ impl LayoutConfig {
                 } else {
                     place_tile_best_effort(&occupancy, cols, rows, desired_col, desired_row, w, h)
                         .ok_or_else(|| LayoutResolveError::CannotPlace {
-                            tile_id: t.id.clone(),
-                            cols,
-                            rows,
-                        })?
+                        tile_id: t.id.clone(),
+                        cols,
+                        rows,
+                    })?
                 }
             };
 
@@ -277,7 +283,14 @@ impl LayoutConfig {
                 t.colspan = Some(placed_w);
                 t.rowspan = Some(placed_h);
             }
-            rect_occupy(&mut occupancy, cols, placed_col, placed_row, placed_w, placed_h);
+            rect_occupy(
+                &mut occupancy,
+                cols,
+                placed_col,
+                placed_row,
+                placed_w,
+                placed_h,
+            );
         }
 
         Ok(())
@@ -290,16 +303,32 @@ pub enum LayoutResolveError {
     InvalidGrid { cols: usize, rows: usize },
 
     #[error("too many tiles for grid ({tiles} tiles > {cells} cells) in {cols}x{rows}")]
-    TooManyTiles { tiles: usize, cells: usize, cols: usize, rows: usize },
+    TooManyTiles {
+        tiles: usize,
+        cells: usize,
+        cols: usize,
+        rows: usize,
+    },
 
     #[error("could not place tile '{tile_id}' without overlap in {cols}x{rows}")]
-    CannotPlace { tile_id: String, cols: usize, rows: usize },
+    CannotPlace {
+        tile_id: String,
+        cols: usize,
+        rows: usize,
+    },
 
     #[error("layout resolver exceeded retry limit")]
     RetryLimit,
 }
 
-fn rect_is_free(occupancy: &[bool], cols: usize, col: usize, row: usize, w: usize, h: usize) -> bool {
+fn rect_is_free(
+    occupancy: &[bool],
+    cols: usize,
+    col: usize,
+    row: usize,
+    w: usize,
+    h: usize,
+) -> bool {
     for r in row..row + h {
         for c in col..col + w {
             let idx = r.saturating_mul(cols).saturating_add(c);
@@ -344,7 +373,9 @@ fn place_tile_best_effort(
     origins.sort_by(|(ac, ar), (bc, br)| {
         let da = ac.abs_diff(desired_col) + ar.abs_diff(desired_row);
         let db = bc.abs_diff(desired_col) + br.abs_diff(desired_row);
-        da.cmp(&db).then_with(|| ar.cmp(br)).then_with(|| ac.cmp(bc))
+        da.cmp(&db)
+            .then_with(|| ar.cmp(br))
+            .then_with(|| ac.cmp(bc))
     });
 
     while w >= 1 && h >= 1 {
@@ -378,15 +409,13 @@ fn place_tile_best_effort(
     None
 }
 
-
-
 /// Per-tile instance settings stored in layout config
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct TileSettings {
     /// Module-specific settings as JSON
     #[serde(default)]
     pub config: serde_json::Value,
-    
+
     /// Keybindings: action name -> key (e.g., "mute" -> "m")
     #[serde(default)]
     pub keybinds: HashMap<String, String>,
@@ -407,16 +436,18 @@ pub struct TileConfig {
     pub settings: TileSettings,
 }
 
-fn default_enabled() -> bool { true }
+fn default_enabled() -> bool {
+    true
+}
 
-use std::fmt::Debug;
 use schemars::JsonSchema;
+use std::fmt::Debug;
 
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
 
 // Re-export core types from signals
-pub use talisman_signals::{DataType, PortDirection, Signal, ControlSignal, AstrologyData};
-pub use talisman_signals::{AudioBufferHandle, BlobHandle, GpuTextureHandle, GpuBufferHandle};
+pub use talisman_signals::{AstrologyData, ControlSignal, DataType, PortDirection, Signal};
+pub use talisman_signals::{AudioBufferHandle, BlobHandle, GpuBufferHandle, GpuTextureHandle};
 
 /// A typed port on a module for connecting to other modules
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -474,13 +505,15 @@ pub struct Patch {
 pub trait Source: Send + Sync {
     /// The name of this source (e.g., "clipboard_monitor")
     fn name(&self) -> &str;
-    
+
     /// Returns the schema describing this module's ports and capabilities
     fn schema(&self) -> ModuleSchema;
-    
+
     /// Whether this module is currently enabled
-    fn is_enabled(&self) -> bool { true }
-    
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
     /// Enable or disable this module
     fn set_enabled(&mut self, enabled: bool);
 
@@ -496,26 +529,30 @@ pub trait Source: Send + Sync {
 pub trait Sink: Send + Sync {
     /// The name of this sink
     fn name(&self) -> &str;
-    
+
     /// Returns the schema describing this module's ports and capabilities
     fn schema(&self) -> ModuleSchema;
-    
+
     /// Whether this module is currently enabled
-    fn is_enabled(&self) -> bool { true }
-    
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
     /// Enable or disable this module
     fn set_enabled(&mut self, enabled: bool);
-    
+
     /// Render the current output state as a string for clipboard copy
-    fn render_output(&self) -> Option<String> { None }
+    fn render_output(&self) -> Option<String> {
+        None
+    }
 
     /// Consume a signal and optionally produce an output signal.
-    /// 
+    ///
     /// Returns:
     /// - `Ok(Some(signal))` - Successfully processed and produced an output signal
     /// - `Ok(None)` - Successfully processed, no output to emit
     /// - `Err(e)` - Processing failed
-    /// 
+    ///
     /// This replaces the previous pattern of passing a sender to the sink,
     /// allowing cleaner back-channel communication through the return value.
     async fn consume(&self, signal: Signal) -> Result<Option<Signal>>;
@@ -528,16 +565,18 @@ pub trait Sink: Send + Sync {
 pub trait Processor: Send + Sync {
     /// The name of this processor
     fn name(&self) -> &str;
-    
+
     /// Returns the schema describing this module's ports and capabilities
     fn schema(&self) -> ModuleSchema;
-    
+
     /// Whether this module is currently enabled
-    fn is_enabled(&self) -> bool { true }
-    
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
     /// Enable or disable this module
     fn set_enabled(&mut self, enabled: bool);
-    
+
     /// Process an input signal and optionally emit an output signal
     async fn process(&mut self, signal: Signal) -> Result<Option<Signal>>;
 }

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod ring_buffer;
@@ -153,10 +153,7 @@ pub enum Signal {
     /// Astrological Data
     Astrology(AstrologyData),
     /// Raw bytes (e.g., Image, Audio buffer)
-    Blob {
-        mime_type: String,
-        bytes: Vec<u8>,
-    },
+    Blob { mime_type: String, bytes: Vec<u8> },
     /// Host-managed Blob Handle (zero-copy)
     BlobHandle {
         handle: BlobHandle,
@@ -190,7 +187,7 @@ pub enum Signal {
         // Let's use f32 to match ring_buffer tests for now, or define AudioFrame here.
         // Core used AudioFrame.
         // Let's define AudioFrame here.
-        receiver: RingBufferReceiver<f32>, 
+        receiver: RingBufferReceiver<f32>,
     },
     /// Shared blob data (Arc-wrapped) - one allocation, many readers
     #[serde(skip)]
@@ -198,10 +195,7 @@ pub enum Signal {
     /// A control signal for the system (e.g., "Shutdown", "Reload")
     Control(ControlSignal),
     /// Computed/Processed Data (Source, Content)
-    Computed {
-        source: String,
-        content: String,
-    },
+    Computed { source: String, content: String },
     /// Pointer to WGPU Context types (Device, Queue) - Unsafe!
     /// DEPRECATED: Use HostGpuApi instead of passing raw pointers
     #[serde(skip)]
@@ -236,13 +230,22 @@ impl Clone for Signal {
                 handle: *handle,
                 mime_type: mime_type.clone(),
             },
-            Signal::Audio { sample_rate, channels, timestamp_us, data } => Signal::Audio {
+            Signal::Audio {
+                sample_rate,
+                channels,
+                timestamp_us,
+                data,
+            } => Signal::Audio {
                 sample_rate: *sample_rate,
                 channels: *channels,
                 timestamp_us: *timestamp_us,
                 data: data.clone(),
             },
-            Signal::AudioHandle { handle, sample_rate, channels } => Signal::AudioHandle {
+            Signal::AudioHandle {
+                handle,
+                sample_rate,
+                channels,
+            } => Signal::AudioHandle {
                 handle: *handle,
                 sample_rate: *sample_rate,
                 channels: *channels,

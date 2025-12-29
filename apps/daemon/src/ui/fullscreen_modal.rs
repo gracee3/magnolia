@@ -6,7 +6,7 @@
 #![allow(dead_code)] // Framework functions used progressively during migration
 
 use nannou::prelude::*;
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
 /// Animation speed for modal open/close (per frame)
 pub const ANIM_SPEED: f32 = 0.12;
@@ -31,7 +31,10 @@ pub struct ModalAnim {
 
 impl ModalAnim {
     pub fn new() -> Self {
-        Self { factor: 0.0, closing: false }
+        Self {
+            factor: 0.0,
+            closing: false,
+        }
     }
 
     /// Update animation state. Returns true if animation completed closing.
@@ -72,16 +75,16 @@ impl ModalAnim {
 /// Calculate the modal content rect based on animation state
 pub fn calculate_modal_rect(window_rect: Rect, anim: &ModalAnim) -> Rect {
     let t = anim.eased();
-    
+
     // Animate from center of screen (scale up)
     let target = window_rect.pad(MODAL_MARGIN);
     let center = window_rect.xy();
-    
+
     // Scale from 0.8x size to 1.0x size during animation
     let scale = 0.8 + 0.2 * t;
     let w = target.w() * scale;
     let h = target.h() * scale;
-    
+
     // Fade in alpha is handled separately
     Rect::from_x_y_w_h(center.x, center.y, w, h)
 }
@@ -89,19 +92,19 @@ pub fn calculate_modal_rect(window_rect: Rect, anim: &ModalAnim) -> Rect {
 /// Draw modal background with dark theme and border
 pub fn draw_modal_background(draw: &Draw, rect: Rect, anim: &ModalAnim) {
     let alpha = anim.eased();
-    
+
     // Dark backdrop (covers entire screen)
     draw.rect()
         .xy(rect.xy())
         .wh(rect.wh() * 1.5) // Extend beyond modal to cover screen
         .color(rgba(0.0, 0.0, 0.0, 0.85 * alpha));
-    
+
     // Modal background
     draw.rect()
         .xy(rect.xy())
         .wh(rect.wh())
         .color(rgba(0.04, 0.04, 0.05, alpha));
-    
+
     // Reactive cyan border
     draw.rect()
         .xy(rect.xy())
@@ -120,31 +123,34 @@ pub fn draw_modal_header(draw: &Draw, rect: Rect, title: &str, anim: &ModalAnim)
         rect.w(),
         HEADER_HEIGHT,
     );
-    
+
     // Header background
     draw.rect()
         .xy(header_rect.xy())
         .wh(header_rect.wh())
         .color(rgba(0.02, 0.02, 0.03, alpha));
-    
+
     // Separator line
     draw.line()
         .start(pt2(rect.left() + 10.0, rect.top() - HEADER_HEIGHT))
         .end(pt2(rect.right() - 10.0, rect.top() - HEADER_HEIGHT))
         .color(rgba(0.0, 1.0, 1.0, 0.3 * alpha))
         .stroke_weight(1.0);
-    
+
     // Title text
     draw_text(
         draw,
         FontId::PlexSansBold,
         title,
-        pt2(rect.left() + CONTENT_PADDING + 100.0, rect.top() - HEADER_HEIGHT / 2.0),
+        pt2(
+            rect.left() + CONTENT_PADDING + 100.0,
+            rect.top() - HEADER_HEIGHT / 2.0,
+        ),
         20.0,
         rgba(0.0, 1.0, 1.0, alpha).into(),
         TextAlignment::Left,
     );
-    
+
     // ESC hint
     draw_text(
         draw,
@@ -155,11 +161,17 @@ pub fn draw_modal_header(draw: &Draw, rect: Rect, title: &str, anim: &ModalAnim)
         rgba(0.4, 0.4, 0.4, alpha).into(),
         TextAlignment::Right,
     );
-    
+
     // Return content rect (below header)
     Rect::from_corners(
-        pt2(rect.left() + CONTENT_PADDING, rect.bottom() + CONTENT_PADDING),
-        pt2(rect.right() - CONTENT_PADDING, rect.top() - HEADER_HEIGHT - CONTENT_PADDING),
+        pt2(
+            rect.left() + CONTENT_PADDING,
+            rect.bottom() + CONTENT_PADDING,
+        ),
+        pt2(
+            rect.right() - CONTENT_PADDING,
+            rect.top() - HEADER_HEIGHT - CONTENT_PADDING,
+        ),
     )
 }
 
@@ -226,7 +238,7 @@ pub fn draw_value(draw: &Draw, x: f32, y: f32, label: &str, value: &str, alpha: 
         rgba(0.6, 0.6, 0.6, alpha),
         TextAlignment::Left,
     );
-    
+
     draw_text(
         draw,
         FontId::PlexMonoRegular,
@@ -239,43 +251,34 @@ pub fn draw_value(draw: &Draw, x: f32, y: f32, label: &str, value: &str, alpha: 
 }
 
 /// Draw a button-like region (returns true if it would be "hovered" at given position)
-pub fn draw_button(
-    draw: &Draw,
-    rect: Rect,
-    text: &str,
-    selected: bool,
-    alpha: f32,
-) {
+pub fn draw_button(draw: &Draw, rect: Rect, text: &str, selected: bool, alpha: f32) {
     let bg_color = if selected {
         rgba(0.0, 0.4, 0.4, 0.5 * alpha)
     } else {
         rgba(0.1, 0.1, 0.12, alpha)
     };
-    
+
     let border_color = if selected {
         rgba(0.0, 1.0, 1.0, 0.8 * alpha)
     } else {
         rgba(0.3, 0.3, 0.35, alpha)
     };
-    
+
     let text_color = if selected {
         rgba(0.0, 1.0, 1.0, alpha)
     } else {
         rgba(0.7, 0.7, 0.7, alpha)
     };
-    
-    draw.rect()
-        .xy(rect.xy())
-        .wh(rect.wh())
-        .color(bg_color);
-    
+
+    draw.rect().xy(rect.xy()).wh(rect.wh()).color(bg_color);
+
     draw.rect()
         .xy(rect.xy())
         .wh(rect.wh())
         .no_fill()
         .stroke(border_color)
         .stroke_weight(1.5);
-    
+
     draw_text(
         draw,
         FontId::PlexSansBold,
@@ -294,31 +297,28 @@ pub fn draw_button_danger(draw: &Draw, rect: Rect, text: &str, selected: bool, a
     } else {
         rgba(0.15, 0.08, 0.08, alpha)
     };
-    
+
     let border_color = if selected {
         rgba(1.0, 0.3, 0.3, 0.8 * alpha)
     } else {
         rgba(0.4, 0.2, 0.2, alpha)
     };
-    
+
     let text_color = if selected {
         rgba(1.0, 0.4, 0.4, alpha)
     } else {
         rgba(0.8, 0.4, 0.4, alpha)
     };
-    
-    draw.rect()
-        .xy(rect.xy())
-        .wh(rect.wh())
-        .color(bg_color);
-    
+
+    draw.rect().xy(rect.xy()).wh(rect.wh()).color(bg_color);
+
     draw.rect()
         .xy(rect.xy())
         .wh(rect.wh())
         .no_fill()
         .stroke(border_color)
         .stroke_weight(1.5);
-    
+
     draw_text(
         draw,
         FontId::PlexSansBold,
@@ -331,32 +331,26 @@ pub fn draw_button_danger(draw: &Draw, rect: Rect, text: &str, selected: bool, a
 }
 
 /// Draw a list item (selectable)
-pub fn draw_list_item(
-    draw: &Draw,
-    rect: Rect,
-    text: &str,
-    selected: bool,
-    alpha: f32,
-) {
+pub fn draw_list_item(draw: &Draw, rect: Rect, text: &str, selected: bool, alpha: f32) {
     if selected {
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(rgba(0.0, 0.3, 0.3, 0.4 * alpha));
-        
+
         // Selection indicator
         draw.rect()
             .xy(pt2(rect.left() + 3.0, rect.y()))
             .wh(vec2(4.0, rect.h() * 0.6))
             .color(rgba(0.0, 1.0, 1.0, alpha));
     }
-    
+
     let text_color = if selected {
         rgba(0.0, 1.0, 1.0, alpha)
     } else {
         rgba(0.7, 0.7, 0.7, alpha)
     };
-    
+
     draw_text(
         draw,
         FontId::PlexSansRegular,
@@ -384,13 +378,10 @@ pub fn draw_status(draw: &Draw, x: f32, y: f32, status: &str, is_active: bool, a
     } else {
         rgba(1.0, 0.3, 0.3, alpha)
     };
-    
+
     // Status dot
-    draw.ellipse()
-        .xy(pt2(x, y))
-        .radius(4.0)
-        .color(color);
-    
+    draw.ellipse().xy(pt2(x, y)).radius(4.0).color(color);
+
     // Status text
     draw_text(
         draw,

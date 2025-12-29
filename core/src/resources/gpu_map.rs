@@ -1,5 +1,5 @@
-use std::sync::RwLock;
 use slab::Slab;
+use std::sync::RwLock;
 
 /// A generic map for GPU resources managed by the host.
 /// Maps opaque integer handles to actual wgpu definitions.
@@ -24,9 +24,9 @@ impl<T> GpuResourceMap<T> {
         let mut store = self.store.write().unwrap();
         let entry = store.vacant_entry();
         let id = entry.key();
-        
+
         let generation = 0; // TODO: Implement proper generation tracking
-        
+
         entry.insert(Entry {
             resource,
             generation,
@@ -36,7 +36,7 @@ impl<T> GpuResourceMap<T> {
     }
 
     /// Get a reference to the resource if valid
-    /// Since wgpu resources are internal Arcs (Clone is handling ref count), 
+    /// Since wgpu resources are internal Arcs (Clone is handling ref count),
     /// we can return T if T is Clone, or we need to return a reference.
     /// wgpu::Texture is NOT Clone in 0.17? It is not. wgpu::Texture is a Handle.
     /// Wait, wgpu 0.17 Texture is not Clone? `wgpu::Texture` is a struct wrapping an ID and a Context.
@@ -52,9 +52,10 @@ impl<T> GpuResourceMap<T> {
     /// When the module wants to USE it, it asks the Host (or the Compositor uses it).
     /// The Compositor acts as the Host-side consumer.
     /// So `get` is called by the Compositor.
-    
+
     pub fn get_with<F, R>(&self, id: u64, generation: u32, f: F) -> Option<R>
-    where F: FnOnce(&T) -> R 
+    where
+        F: FnOnce(&T) -> R,
     {
         let store = self.store.read().unwrap();
         let idx = id as usize;
@@ -65,14 +66,14 @@ impl<T> GpuResourceMap<T> {
         }
         None
     }
-    
+
     /// Remove resource
     pub fn remove(&self, id: u64) -> Option<T> {
         let mut store = self.store.write().unwrap();
         let idx = id as usize;
         if store.contains(idx) {
-             let entry = store.remove(idx);
-             return Some(entry.resource);
+            let entry = store.remove(idx);
+            return Some(entry.resource);
         }
         None
     }

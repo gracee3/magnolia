@@ -148,7 +148,7 @@ fn generate_ascii_font(manifest_dir: &PathBuf, out_dir: &PathBuf, ttf_name: &str
     let face = Face::parse(&font_bytes, 0).expect(&format!("Failed to parse {}", ttf_name));
     let units_per_em = face.units_per_em();
     let scale = 1.0 / units_per_em as f32;
-    let flip_y = false; 
+    let flip_y = false;
 
     let out_path = out_dir.join(format!("{}.rs", mod_name));
     let mut out = String::new();
@@ -171,11 +171,33 @@ fn generate_ascii_font(manifest_dir: &PathBuf, out_dir: &PathBuf, ttf_name: &str
 
         out.push_str(&format!("pub const GLYPH_{:02X}_OPS: &[GlyphOp] = &[\n", c));
         for op in &collector.ops {
-             match *op {
-                Op::M(x, y) => out.push_str(&format!("    GlyphOp::M({}, {}),\n", fmt_f32(x), fmt_f32(y))),
-                Op::L(x, y) => out.push_str(&format!("    GlyphOp::L({}, {}),\n", fmt_f32(x), fmt_f32(y))),
-                Op::Q(x1, y1, x, y) => out.push_str(&format!("    GlyphOp::Q({}, {}, {}, {}),\n", fmt_f32(x1), fmt_f32(y1), fmt_f32(x), fmt_f32(y))),
-                Op::C(x1, y1, x2, y2, x, y) => out.push_str(&format!("    GlyphOp::C({}, {}, {}, {}, {}, {}),\n", fmt_f32(x1), fmt_f32(y1), fmt_f32(x2), fmt_f32(y2), fmt_f32(x), fmt_f32(y))),
+            match *op {
+                Op::M(x, y) => out.push_str(&format!(
+                    "    GlyphOp::M({}, {}),\n",
+                    fmt_f32(x),
+                    fmt_f32(y)
+                )),
+                Op::L(x, y) => out.push_str(&format!(
+                    "    GlyphOp::L({}, {}),\n",
+                    fmt_f32(x),
+                    fmt_f32(y)
+                )),
+                Op::Q(x1, y1, x, y) => out.push_str(&format!(
+                    "    GlyphOp::Q({}, {}, {}, {}),\n",
+                    fmt_f32(x1),
+                    fmt_f32(y1),
+                    fmt_f32(x),
+                    fmt_f32(y)
+                )),
+                Op::C(x1, y1, x2, y2, x, y) => out.push_str(&format!(
+                    "    GlyphOp::C({}, {}, {}, {}, {}, {}),\n",
+                    fmt_f32(x1),
+                    fmt_f32(y1),
+                    fmt_f32(x2),
+                    fmt_f32(y2),
+                    fmt_f32(x),
+                    fmt_f32(y)
+                )),
                 Op::Z => out.push_str("    GlyphOp::Z,\n"),
             }
         }
@@ -197,7 +219,7 @@ fn generate_ascii_font(manifest_dir: &PathBuf, out_dir: &PathBuf, ttf_name: &str
             "pub const GLYPH_{:02X}_BOUNDS: GlyphBounds = GlyphBounds {{ min_x: {}, min_y: {}, max_x: {}, max_y: {} }};\n",
             c, fmt_f32(min_x), fmt_f32(min_y), fmt_f32(max_x), fmt_f32(max_y)
         ));
-        
+
         out.push_str(&format!(
             "pub const GLYPH_{:02X}_METRICS: GlyphMetrics = GlyphMetrics {{ advance_width: {}, left_side_bearing: {} }};\n\n",
             c, fmt_f32(norm_advance), fmt_f32(norm_lsb)
@@ -208,7 +230,10 @@ fn generate_ascii_font(manifest_dir: &PathBuf, out_dir: &PathBuf, ttf_name: &str
     out.push_str("pub fn ops_for_ascii(c: char) -> Option<&'static [GlyphOp]> {\n");
     out.push_str("    match c {\n");
     for c in 0x20u8..=0x7E {
-        out.push_str(&format!("        {:?} => Some(GLYPH_{:02X}_OPS),\n", c as char, c));
+        out.push_str(&format!(
+            "        {:?} => Some(GLYPH_{:02X}_OPS),\n",
+            c as char, c
+        ));
     }
     out.push_str("        _ => None,\n");
     out.push_str("    }\n");
@@ -218,7 +243,10 @@ fn generate_ascii_font(manifest_dir: &PathBuf, out_dir: &PathBuf, ttf_name: &str
     out.push_str("pub fn bounds_for_ascii(c: char) -> Option<GlyphBounds> {\n");
     out.push_str("    match c {\n");
     for c in 0x20u8..=0x7E {
-         out.push_str(&format!("        {:?} => Some(GLYPH_{:02X}_BOUNDS),\n", c as char, c));
+        out.push_str(&format!(
+            "        {:?} => Some(GLYPH_{:02X}_BOUNDS),\n",
+            c as char, c
+        ));
     }
     out.push_str("        _ => None,\n");
     out.push_str("    }\n");
@@ -228,7 +256,10 @@ fn generate_ascii_font(manifest_dir: &PathBuf, out_dir: &PathBuf, ttf_name: &str
     out.push_str("pub fn metrics_for_ascii(c: char) -> Option<GlyphMetrics> {\n");
     out.push_str("    match c {\n");
     for c in 0x20u8..=0x7E {
-         out.push_str(&format!("        {:?} => Some(GLYPH_{:02X}_METRICS),\n", c as char, c));
+        out.push_str(&format!(
+            "        {:?} => Some(GLYPH_{:02X}_METRICS),\n",
+            c as char, c
+        ));
     }
     out.push_str("        _ => None,\n");
     out.push_str("    }\n");
@@ -241,8 +272,28 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    generate_ascii_font(&manifest_dir, &out_dir, "IBMPlexSans-Regular.ttf", "plex_sans_regular_ops");
-    generate_ascii_font(&manifest_dir, &out_dir, "IBMPlexSans-Bold.ttf", "plex_sans_bold_ops");
-    generate_ascii_font(&manifest_dir, &out_dir, "IBMPlexMono-Regular.ttf", "plex_mono_regular_ops");
-    generate_ascii_font(&manifest_dir, &out_dir, "IBMPlexMono-Medium.ttf", "plex_mono_medium_ops");
+    generate_ascii_font(
+        &manifest_dir,
+        &out_dir,
+        "IBMPlexSans-Regular.ttf",
+        "plex_sans_regular_ops",
+    );
+    generate_ascii_font(
+        &manifest_dir,
+        &out_dir,
+        "IBMPlexSans-Bold.ttf",
+        "plex_sans_bold_ops",
+    );
+    generate_ascii_font(
+        &manifest_dir,
+        &out_dir,
+        "IBMPlexMono-Regular.ttf",
+        "plex_mono_regular_ops",
+    );
+    generate_ascii_font(
+        &manifest_dir,
+        &out_dir,
+        "IBMPlexMono-Medium.ttf",
+        "plex_mono_medium_ops",
+    );
 }

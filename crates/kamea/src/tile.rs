@@ -6,12 +6,12 @@
 //! Monitor mode: Displays the current sigil
 //! Control mode: Settings for grid size, colors, stroke weight
 
-use nannou::prelude::*;
-use sha2::{Sha256, Digest};
 use crate::generator::{generate_path, SigilConfig};
+use nannou::prelude::*;
+use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
-use talisman_core::{TileRenderer, RenderContext, BindableAction};
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use talisman_core::{BindableAction, RenderContext, TileRenderer};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
 pub struct KameaTile {
     current_text: Arc<Mutex<String>>,
@@ -40,16 +40,14 @@ impl KameaTile {
             path_color: (0.0, 1.0, 1.0), // Cyan default
         }
     }
-    
 
-    
     /// Set the input text (triggers regeneration on next update)
     pub fn set_text(&self, text: &str) {
         if let Ok(mut t) = self.current_text.lock() {
             *t = text.to_string();
         }
     }
-    
+
     fn regenerate_path(&mut self, text: &str) {
         // Hash the text
         let mut hasher = Sha256::new();
@@ -57,38 +55,42 @@ impl KameaTile {
         let result = hasher.finalize();
         let mut seed = [0u8; 32];
         seed.copy_from_slice(&result);
-        
+
         // Check if we need to regenerate
         if seed == self.last_text_hash && !self.path_points.is_empty() {
             return;
         }
         self.last_text_hash = seed;
-        
+
         // Generate the path with current config
         self.path_points = generate_path(seed, self.config)
             .into_iter()
             .map(|(x, y)| pt2(x, y))
             .collect();
     }
-    
+
     fn render_sigil(&self, draw: &Draw, rect: Rect) {
         // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(srgba(0.02, 0.02, 0.05, 0.95));
-        
+
         // Calculate scale to fit grid in rect
         let grid_size = self.config.grid_cols.max(self.config.grid_rows) as f32;
         let scale = (rect.w().min(rect.h()) * 0.8) / (grid_size * self.config.spacing);
-        
+
         // Draw grid dots
         if self.show_grid_dots {
             let dot_color = srgba(0.2, 0.3, 0.4, 0.5);
             for row in 0..self.config.grid_rows {
                 for col in 0..self.config.grid_cols {
-                    let x = (col as f32 - (self.config.grid_cols as f32 - 1.0) / 2.0) * self.config.spacing * scale;
-                    let y = (row as f32 - (self.config.grid_rows as f32 - 1.0) / 2.0) * self.config.spacing * scale;
+                    let x = (col as f32 - (self.config.grid_cols as f32 - 1.0) / 2.0)
+                        * self.config.spacing
+                        * scale;
+                    let y = (row as f32 - (self.config.grid_rows as f32 - 1.0) / 2.0)
+                        * self.config.spacing
+                        * scale;
                     draw.ellipse()
                         .xy(rect.xy() + vec2(x, y))
                         .radius(3.0)
@@ -96,17 +98,17 @@ impl KameaTile {
                 }
             }
         }
-        
+
         // Draw sigil path
         if self.path_points.len() >= 2 {
             let (r, g, b) = self.path_color;
             let path_color = srgb(r, g, b);
-            
+
             for window in self.path_points.windows(2) {
                 let offset = vec2(rect.x(), rect.y());
                 let p0 = window[0] * scale + offset;
                 let p1 = window[1] * scale + offset;
-                
+
                 // Glow effect (wider, transparent)
                 if self.glow_intensity > 0.0 {
                     draw.line()
@@ -115,7 +117,7 @@ impl KameaTile {
                         .weight(self.config.stroke_weight * 3.0)
                         .color(srgba(r, g, b, self.glow_intensity));
                 }
-                
+
                 // Main line
                 draw.line()
                     .start(p0)
@@ -123,7 +125,7 @@ impl KameaTile {
                     .weight(self.config.stroke_weight)
                     .color(path_color);
             }
-            
+
             // Start marker - Circle ○
             if let Some(start) = self.path_points.first() {
                 let offset = vec2(rect.x(), rect.y());
@@ -135,7 +137,7 @@ impl KameaTile {
                     .stroke_weight(2.0)
                     .stroke(srgb(0.0, 1.0, 0.5));
             }
-            
+
             // End marker - Cross ×
             if let Some(end) = self.path_points.last() {
                 let offset = vec2(rect.x(), rect.y());
@@ -163,23 +165,29 @@ impl Default for KameaTile {
 }
 
 impl TileRenderer for KameaTile {
-    fn id(&self) -> &str { "kamea" }
-    
-    fn name(&self) -> &str { "Kamea Sigil" }
-    
+    fn id(&self) -> &str {
+        "kamea"
+    }
+
+    fn name(&self) -> &str {
+        "Kamea Sigil"
+    }
+
     fn update(&mut self) {
-        let text = self.current_text.lock()
+        let text = self
+            .current_text
+            .lock()
             .map(|t| t.clone())
             .unwrap_or_default();
-        
+
         if !text.is_empty() {
             self.regenerate_path(&text);
         }
     }
-    
+
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
         self.render_sigil(draw, rect);
-        
+
         // Label
         draw_text(
             draw,
@@ -190,7 +198,7 @@ impl TileRenderer for KameaTile {
             srgba(0.5, 0.5, 0.5, 1.0),
             TextAlignment::Center,
         );
-        
+
         // Grid size indicator
         draw_text(
             draw,
@@ -202,14 +210,14 @@ impl TileRenderer for KameaTile {
             TextAlignment::Right,
         );
     }
-    
+
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(srgba(0.02, 0.02, 0.05, 0.98));
-        
+
         // Title
         draw_text(
             draw,
@@ -220,12 +228,20 @@ impl TileRenderer for KameaTile {
             CYAN,
             TextAlignment::Center,
         );
-        
+
         // Current intent preview
-        let text = self.current_text.lock()
-            .map(|t| if t.len() > 40 { format!("{}...", &t[..40]) } else { t.clone() })
+        let text = self
+            .current_text
+            .lock()
+            .map(|t| {
+                if t.len() > 40 {
+                    format!("{}...", &t[..40])
+                } else {
+                    t.clone()
+                }
+            })
             .unwrap_or_else(|_| "[No text]".to_string());
-        
+
         draw_text(
             draw,
             FontId::PlexMonoRegular,
@@ -235,7 +251,7 @@ impl TileRenderer for KameaTile {
             srgba(0.5, 0.5, 0.5, 1.0),
             TextAlignment::Center,
         );
-        
+
         // Large sigil preview
         let preview_rect = Rect::from_x_y_w_h(
             rect.x() + rect.w() * 0.15,
@@ -243,7 +259,7 @@ impl TileRenderer for KameaTile {
             rect.w() * 0.5,
             rect.h() * 0.5,
         );
-        
+
         // Preview border
         draw.rect()
             .xy(preview_rect.xy())
@@ -251,14 +267,14 @@ impl TileRenderer for KameaTile {
             .no_fill()
             .stroke(srgba(0.2, 0.3, 0.3, 1.0))
             .stroke_weight(1.0);
-        
+
         self.render_sigil(draw, preview_rect.pad(5.0));
-        
+
         // Egui controls removed - migrated to Settings Modal
-        
+
         false
     }
-    
+
     fn settings_schema(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "type": "object",
@@ -298,7 +314,7 @@ impl TileRenderer for KameaTile {
             }
         }))
     }
-    
+
     fn apply_settings(&mut self, settings: &serde_json::Value) {
         if let Some(size) = settings.get("grid_size").and_then(|v| v.as_i64()) {
             let size = (size as usize).clamp(3, 9);
@@ -326,7 +342,7 @@ impl TileRenderer for KameaTile {
             }
         }
     }
-    
+
     fn get_settings(&self) -> serde_json::Value {
         serde_json::json!({
             "grid_size": self.config.grid_rows,
@@ -336,7 +352,7 @@ impl TileRenderer for KameaTile {
             "path_color": [self.path_color.0, self.path_color.1, self.path_color.2]
         })
     }
-    
+
     fn bindable_actions(&self) -> Vec<BindableAction> {
         vec![
             BindableAction::new("toggle_dots", "Toggle Grid Dots", true),
@@ -345,13 +361,13 @@ impl TileRenderer for KameaTile {
             BindableAction::new("regenerate", "Regenerate Sigil", false),
         ]
     }
-    
+
     fn execute_action(&mut self, action: &str) -> bool {
         match action {
             "toggle_dots" => {
                 self.show_grid_dots = !self.show_grid_dots;
                 true
-            },
+            }
             "increase_grid" => {
                 if self.config.grid_rows < 9 {
                     self.config.grid_rows += 1;
@@ -361,7 +377,7 @@ impl TileRenderer for KameaTile {
                 } else {
                     false
                 }
-            },
+            }
             "decrease_grid" => {
                 if self.config.grid_rows > 3 {
                     self.config.grid_rows -= 1;
@@ -371,15 +387,15 @@ impl TileRenderer for KameaTile {
                 } else {
                     false
                 }
-            },
+            }
             "regenerate" => {
                 self.last_text_hash = [0u8; 32]; // Force regeneration
                 true
-            },
+            }
             _ => false,
         }
     }
-    
+
     fn get_display_text(&self) -> Option<String> {
         self.current_text.lock().ok().map(|t| t.clone())
     }

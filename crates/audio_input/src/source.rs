@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::{error, info};
 
-use talisman_core::{Source, ModuleSchema, Port, PortDirection, DataType, Signal};
-use talisman_signals::ring_buffer::{self, RingBufferReceiver, RingBufferSender};
 use crate::AudioInputSettings;
+use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source};
+use talisman_signals::ring_buffer::{self, RingBufferReceiver, RingBufferSender};
 
 const DEFAULT_CAPACITY: usize = 16384;
 const DEFAULT_FRAME_SAMPLES: usize = 1024;
@@ -70,11 +70,7 @@ impl AudioInputSource {
         let host = cpal::default_host();
         let available = host
             .input_devices()
-            .map(|devices| {
-                devices
-                    .filter_map(|d| d.name().ok())
-                    .collect::<Vec<_>>()
-            })
+            .map(|devices| devices.filter_map(|d| d.name().ok()).collect::<Vec<_>>())
             .unwrap_or_default();
         self.settings.set_devices(available);
 
@@ -82,9 +78,9 @@ impl AudioInputSource {
         let device = if selected == "Default" {
             host.default_input_device()
         } else {
-            host.input_devices()
-                .ok()
-                .and_then(|mut devices| devices.find(|d| d.name().ok().as_deref() == Some(&selected)))
+            host.input_devices().ok().and_then(|mut devices| {
+                devices.find(|d| d.name().ok().as_deref() == Some(&selected))
+            })
         }
         .ok_or_else(|| anyhow::anyhow!("No input device"))?;
 
@@ -92,7 +88,10 @@ impl AudioInputSource {
         let sample_rate = config.sample_rate().0;
         let channels = config.channels();
 
-        let tx = self.sender.take().ok_or_else(|| anyhow::anyhow!("No sender available"))?;
+        let tx = self
+            .sender
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("No sender available"))?;
         let capture_us = self.last_capture_us.clone();
 
         let err_fn = |err| error!("cpal input error: {}", err);
@@ -115,9 +114,7 @@ impl AudioInputSource {
         stream.play()?;
         info!(
             "AudioInputSource initialized. SR: {}, Ch: {}, Device: {}",
-            sample_rate,
-            channels,
-            selected
+            sample_rate, channels, selected
         );
         self.stream = Some(SendStream { _stream: stream });
         self.sample_rate = sample_rate;

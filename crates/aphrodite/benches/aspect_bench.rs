@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use aphrodite::aspects::{AspectCalculator, AspectSettings};
 use aphrodite::ephemeris::{LayerPositions, PlanetPosition};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::collections::HashMap;
 
 fn bench_calculate_aspect_conjunction(c: &mut Criterion) {
@@ -11,7 +11,7 @@ fn bench_calculate_aspect_conjunction(c: &mut Criterion) {
     orb_settings.insert("trine".to_string(), 7.0);
     orb_settings.insert("square".to_string(), 6.0);
     orb_settings.insert("sextile".to_string(), 4.0);
-    
+
     c.bench_function("calculate_aspect_conjunction", |b| {
         b.iter(|| {
             calculator.calculate_aspect(
@@ -33,7 +33,7 @@ fn bench_calculate_aspect_opposition(c: &mut Criterion) {
     orb_settings.insert("trine".to_string(), 7.0);
     orb_settings.insert("square".to_string(), 6.0);
     orb_settings.insert("sextile".to_string(), 4.0);
-    
+
     c.bench_function("calculate_aspect_opposition", |b| {
         b.iter(|| {
             calculator.calculate_aspect(
@@ -49,7 +49,7 @@ fn bench_calculate_aspect_opposition(c: &mut Criterion) {
 
 fn bench_compute_intra_layer_aspects_small(c: &mut Criterion) {
     let calculator = AspectCalculator::new();
-    
+
     let mut planets = HashMap::new();
     for i in 0..5 {
         planets.insert(
@@ -62,25 +62,25 @@ fn bench_compute_intra_layer_aspects_small(c: &mut Criterion) {
             },
         );
     }
-    
+
     let positions = LayerPositions {
         planets,
         houses: None,
     };
-    
+
     let mut orb_settings = HashMap::new();
     orb_settings.insert("conjunction".to_string(), 8.0);
     orb_settings.insert("opposition".to_string(), 8.0);
     orb_settings.insert("trine".to_string(), 7.0);
     orb_settings.insert("square".to_string(), 6.0);
     orb_settings.insert("sextile".to_string(), 4.0);
-    
+
     let settings = AspectSettings {
         orb_settings,
         include_objects: vec![],
         only_major: None,
     };
-    
+
     c.bench_function("compute_intra_layer_aspects_small", |b| {
         b.iter(|| {
             calculator.compute_intra_layer_aspects(
@@ -94,15 +94,25 @@ fn bench_compute_intra_layer_aspects_small(c: &mut Criterion) {
 
 fn bench_compute_intra_layer_aspects_large(c: &mut Criterion) {
     let calculator = AspectCalculator::new();
-    
+
     let mut planets = HashMap::new();
     // Include all major planets plus some asteroids
     let planet_names = vec![
-        "sun", "moon", "mercury", "venus", "mars",
-        "jupiter", "saturn", "uranus", "neptune", "pluto",
-        "chiron", "north_node", "south_node",
+        "sun",
+        "moon",
+        "mercury",
+        "venus",
+        "mars",
+        "jupiter",
+        "saturn",
+        "uranus",
+        "neptune",
+        "pluto",
+        "chiron",
+        "north_node",
+        "south_node",
     ];
-    
+
     for (i, name) in planet_names.iter().enumerate() {
         planets.insert(
             name.to_string(),
@@ -114,25 +124,25 @@ fn bench_compute_intra_layer_aspects_large(c: &mut Criterion) {
             },
         );
     }
-    
+
     let positions = LayerPositions {
         planets,
         houses: None,
     };
-    
+
     let mut orb_settings = HashMap::new();
     orb_settings.insert("conjunction".to_string(), 8.0);
     orb_settings.insert("opposition".to_string(), 8.0);
     orb_settings.insert("trine".to_string(), 7.0);
     orb_settings.insert("square".to_string(), 6.0);
     orb_settings.insert("sextile".to_string(), 4.0);
-    
+
     let settings = AspectSettings {
         orb_settings,
         include_objects: vec![],
         only_major: None,
     };
-    
+
     c.bench_function("compute_intra_layer_aspects_large", |b| {
         b.iter(|| {
             calculator.compute_intra_layer_aspects(
@@ -152,4 +162,3 @@ criterion_group!(
     bench_compute_intra_layer_aspects_large
 );
 criterion_main!(benches);
-

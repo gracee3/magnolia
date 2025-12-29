@@ -19,9 +19,9 @@
 //! - **Error Handling**: Tiles can report errors displayed in monitor view
 
 use nannou::prelude::*;
-use talisman_ui::{FontId, draw_text, TextAlignment};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
 /// Describes an action that can be bound to a key
 #[derive(Debug, Clone)]
@@ -94,12 +94,12 @@ impl TileError {
             timestamp: std::time::Instant::now(),
         }
     }
-    
+
     pub fn with_details(mut self, details: &str) -> Self {
         self.details = Some(details.to_string());
         self
     }
-    
+
     pub fn warning(message: &str) -> Self {
         Self {
             message: message.to_string(),
@@ -108,7 +108,7 @@ impl TileError {
             timestamp: std::time::Instant::now(),
         }
     }
-    
+
     pub fn info(message: &str) -> Self {
         Self {
             message: message.to_string(),
@@ -121,38 +121,38 @@ impl TileError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorSeverity {
-    Info,      // Blue - informational
-    Warning,   // Yellow - something might be wrong
-    Error,     // Red - something is wrong
+    Info,    // Blue - informational
+    Warning, // Yellow - something might be wrong
+    Error,   // Red - something is wrong
 }
 
 /// Core trait for all renderable tiles
-/// 
+///
 /// Tiles have two rendering modes:
 /// - `render_monitor`: Read-only display for normal tile view
 /// - `render_controls`: Settings UI for maximized tile view
 pub trait TileRenderer: Send + Sync {
     // === IDENTITY ===
-    
+
     /// Unique identifier for this tile type (should match module ID)
     fn id(&self) -> &str;
-    
+
     /// Human-readable name
     fn name(&self) -> &str;
-    
+
     // === RENDERING ===
-    
+
     /// Render monitor view (small tile, read-only feedback)
-    /// 
+    ///
     /// This is the default view shown in the grid. Should display
     /// current state/feedback without any interactive controls.
     fn render_monitor(&self, draw: &Draw, rect: Rect, ctx: &RenderContext);
-    
+
     /// Render control view (maximized, includes settings UI)
-    /// 
+    ///
     /// This is shown when the tile is maximized (double-click/Enter).
     /// Should include settings controls and a live preview of the tile.
-    /// 
+    ///
     /// Returns true if input was handled.
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
         // Default: just render monitor view
@@ -170,46 +170,58 @@ pub trait TileRenderer: Send + Sync {
     fn handle_key(&mut self, _key: nannou::prelude::Key, _ctrl: bool, _shift: bool) -> bool {
         false
     }
-    
+
     /// Whether this tile prefers GPU-accelerated rendering
-    fn prefers_gpu(&self) -> bool { false }
-    
+    fn prefers_gpu(&self) -> bool {
+        false
+    }
+
     // === ERROR HANDLING ===
-    
+
     /// Get current error state, if any
-    fn get_error(&self) -> Option<TileError> { None }
-    
+    fn get_error(&self) -> Option<TileError> {
+        None
+    }
+
     /// Clear the current error
     fn clear_error(&mut self) {}
-    
+
     // === LIFECYCLE ===
-    
+
     /// Update tile state (called each frame before render)
     fn update(&mut self);
-    
+
     // === SETTINGS ===
-    
+
     /// JSON Schema describing available settings
-    fn settings_schema(&self) -> Option<serde_json::Value> { None }
-    
+    fn settings_schema(&self) -> Option<serde_json::Value> {
+        None
+    }
+
     /// Apply settings from persisted config
     fn apply_settings(&mut self, _settings: &serde_json::Value) {}
-    
+
     /// Get current settings as JSON for persistence
-    fn get_settings(&self) -> serde_json::Value { 
-        serde_json::Value::Null 
+    fn get_settings(&self) -> serde_json::Value {
+        serde_json::Value::Null
     }
-    
+
     // === KEYBINDS ===
-    
+
     /// List of action names that can be bound to keys
-    fn bindable_actions(&self) -> Vec<BindableAction> { vec![] }
-    
+    fn bindable_actions(&self) -> Vec<BindableAction> {
+        vec![]
+    }
+
     /// Execute a bound action, returns true if handled
-    fn execute_action(&mut self, _action: &str) -> bool { false }
-    
+    fn execute_action(&mut self, _action: &str) -> bool {
+        false
+    }
+
     /// Get current display text (for simple text-based tiles)
-    fn get_display_text(&self) -> Option<String> { None }
+    fn get_display_text(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Central registry for tile instances
@@ -223,13 +235,13 @@ impl TileRegistry {
             tiles: HashMap::new(),
         }
     }
-    
+
     /// Register a new tile instance
     pub fn register<T: TileRenderer + 'static>(&mut self, tile: T) {
         let id = tile.id().to_string();
         self.tiles.insert(id, Arc::new(RwLock::new(Box::new(tile))));
     }
-    
+
     /// Get a tile by ID
     pub fn get(&self, id: &str) -> Option<Arc<RwLock<Box<dyn TileRenderer>>>> {
         self.tiles.get(id).cloned()
@@ -241,7 +253,7 @@ impl TileRegistry {
         ids.sort();
         ids
     }
-    
+
     /// Update all tiles (call each frame)
     pub fn update_all(&self) {
         for tile in self.tiles.values() {
@@ -250,7 +262,7 @@ impl TileRegistry {
             }
         }
     }
-    
+
     /// Render a tile in monitor mode by module name
     pub fn render_monitor(&self, module: &str, draw: &Draw, rect: Rect, ctx: &RenderContext) {
         if let Some(tile) = self.tiles.get(module) {
@@ -259,10 +271,16 @@ impl TileRegistry {
             }
         }
     }
-    
+
     /// Render a tile in control mode by module name
     /// Returns true if input was handled.
-    pub fn render_controls(&self, module: &str, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
+    pub fn render_controls(
+        &self,
+        module: &str,
+        draw: &Draw,
+        rect: Rect,
+        ctx: &RenderContext,
+    ) -> bool {
         if let Some(tile) = self.tiles.get(module) {
             if let Ok(t) = tile.read() {
                 return t.render_controls(draw, rect, ctx);
@@ -270,7 +288,7 @@ impl TileRegistry {
         }
         false
     }
-    
+
     /// Get display text for a tile
     pub fn get_display_text(&self, module: &str) -> Option<String> {
         if let Some(tile) = self.tiles.get(module) {
@@ -280,7 +298,7 @@ impl TileRegistry {
         }
         None
     }
-    
+
     /// Apply settings to a tile
     pub fn apply_settings(&self, module: &str, settings: &serde_json::Value) {
         if let Some(tile) = self.tiles.get(module) {
@@ -289,7 +307,7 @@ impl TileRegistry {
             }
         }
     }
-    
+
     /// Get settings from a tile
     pub fn get_settings(&self, module: &str) -> serde_json::Value {
         if let Some(tile) = self.tiles.get(module) {
@@ -299,7 +317,7 @@ impl TileRegistry {
         }
         serde_json::Value::Null
     }
-    
+
     /// Execute an action on a tile
     pub fn execute_action(&self, module: &str, action: &str) -> bool {
         if let Some(tile) = self.tiles.get(module) {
@@ -312,7 +330,13 @@ impl TileRegistry {
 
     /// Forward a keyboard event to a tile (typically when maximized).
     /// Returns true if the tile consumed the input.
-    pub fn handle_key(&self, module: &str, key: nannou::prelude::Key, ctrl: bool, shift: bool) -> bool {
+    pub fn handle_key(
+        &self,
+        module: &str,
+        key: nannou::prelude::Key,
+        ctrl: bool,
+        shift: bool,
+    ) -> bool {
         if let Some(tile) = self.tiles.get(module) {
             if let Ok(mut t) = tile.write() {
                 return t.handle_key(key, ctrl, shift);
@@ -320,7 +344,7 @@ impl TileRegistry {
         }
         false
     }
-    
+
     /// Get error from a tile
     pub fn get_error(&self, module: &str) -> Option<TileError> {
         if let Some(tile) = self.tiles.get(module) {
@@ -330,7 +354,7 @@ impl TileRegistry {
         }
         None
     }
-    
+
     /// Clear error on a tile
     pub fn clear_error(&self, module: &str) {
         if let Some(tile) = self.tiles.get(module) {
@@ -354,7 +378,7 @@ pub fn render_error_overlay(draw: &Draw, rect: Rect, error: &TileError) {
         ErrorSeverity::Warning => (srgba(0.3, 0.25, 0.1, 0.8), srgba(1.0, 0.8, 0.2, 1.0), "⚠"),
         ErrorSeverity::Error => (srgba(0.3, 0.1, 0.1, 0.8), srgba(1.0, 0.3, 0.3, 1.0), "✖"),
     };
-    
+
     let banner_height = 24.0;
     let banner_rect = Rect::from_x_y_w_h(
         rect.x(),
@@ -362,12 +386,12 @@ pub fn render_error_overlay(draw: &Draw, rect: Rect, error: &TileError) {
         rect.w(),
         banner_height,
     );
-    
+
     draw.rect()
         .xy(banner_rect.xy())
         .wh(banner_rect.wh())
         .color(bg_color);
-    
+
     draw_text(
         draw,
         FontId::PlexSansBold,
@@ -377,13 +401,13 @@ pub fn render_error_overlay(draw: &Draw, rect: Rect, error: &TileError) {
         fg_color,
         TextAlignment::Left,
     );
-    
+
     let msg = if error.message.len() > 40 {
         format!("{}...", &error.message[..40])
     } else {
         error.message.clone()
     };
-    
+
     draw_text(
         draw,
         FontId::PlexSansRegular,

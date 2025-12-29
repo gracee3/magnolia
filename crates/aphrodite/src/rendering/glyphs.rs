@@ -4,16 +4,43 @@ use nannou::lyon::path::Path;
 use nannou::prelude::*;
 use std::str::FromStr;
 
-pub use talisman_ui::{FontId, GlyphOp, GlyphBounds, GlyphMetrics};
 #[cfg(feature = "tile-rendering")]
 pub use talisman_ui::{build_path, build_path_fit, font_glyph_ops_bounds};
+pub use talisman_ui::{FontId, GlyphBounds, GlyphMetrics, GlyphOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Glyph {
-    Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto,
-    Chiron, Lilith, NNode, SNode, Fortune,
-    Aries, Taurus, Gemini, Cancer, Leo, Virgo, Libra, Scorpio, Sagittarius, Capricorn, Aquarius, Pisces,
-    Ascendant, Descendant, MC, IC,
+    Sun,
+    Moon,
+    Mercury,
+    Venus,
+    Mars,
+    Jupiter,
+    Saturn,
+    Uranus,
+    Neptune,
+    Pluto,
+    Chiron,
+    Lilith,
+    NNode,
+    SNode,
+    Fortune,
+    Aries,
+    Taurus,
+    Gemini,
+    Cancer,
+    Leo,
+    Virgo,
+    Libra,
+    Scorpio,
+    Sagittarius,
+    Capricorn,
+    Aquarius,
+    Pisces,
+    Ascendant,
+    Descendant,
+    MC,
+    IC,
     House(u8),
     Unknown,
 }
@@ -21,7 +48,7 @@ pub enum Glyph {
 impl FromStr for Glyph {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-         match s {
+        match s {
             "Sun" => Ok(Glyph::Sun),
             "Moon" => Ok(Glyph::Moon),
             "Mercury" => Ok(Glyph::Mercury),
@@ -55,8 +82,12 @@ impl FromStr for Glyph {
             "Ic" => Ok(Glyph::IC),
             s if s.chars().all(|c| c.is_numeric()) => {
                 let n = s.parse::<u8>().map_err(|_| ())?;
-                if n >= 1 && n <= 12 { Ok(Glyph::House(n)) } else { Ok(Glyph::Unknown) }
-            },
+                if n >= 1 && n <= 12 {
+                    Ok(Glyph::House(n))
+                } else {
+                    Ok(Glyph::Unknown)
+                }
+            }
             _ => Ok(Glyph::Unknown),
         }
     }
@@ -94,7 +125,10 @@ pub fn glyph_ops_bounds(glyph: Glyph) -> Option<(&'static [GlyphOp], GlyphBounds
         Glyph::Lilith => Some((glyph_paths::BLACK_MOON_OPS, glyph_paths::BLACK_MOON_BOUNDS)),
         Glyph::NNode => Some((glyph_paths::NORTH_NODE_OPS, glyph_paths::NORTH_NODE_BOUNDS)),
         Glyph::SNode => Some((glyph_paths::SOUTH_NODE_OPS, glyph_paths::SOUTH_NODE_BOUNDS)),
-        Glyph::Fortune => Some((glyph_paths::PART_OF_FORTUNE_OPS, glyph_paths::PART_OF_FORTUNE_BOUNDS)),
+        Glyph::Fortune => Some((
+            glyph_paths::PART_OF_FORTUNE_OPS,
+            glyph_paths::PART_OF_FORTUNE_BOUNDS,
+        )),
         Glyph::Aries => Some((glyph_paths::ARIES_OPS, glyph_paths::ARIES_BOUNDS)),
         Glyph::Taurus => Some((glyph_paths::TAURUS_OPS, glyph_paths::TAURUS_BOUNDS)),
         Glyph::Gemini => Some((glyph_paths::GEMINI_OPS, glyph_paths::GEMINI_BOUNDS)),
@@ -103,7 +137,10 @@ pub fn glyph_ops_bounds(glyph: Glyph) -> Option<(&'static [GlyphOp], GlyphBounds
         Glyph::Virgo => Some((glyph_paths::VIRGO_OPS, glyph_paths::VIRGO_BOUNDS)),
         Glyph::Libra => Some((glyph_paths::LIBRA_OPS, glyph_paths::LIBRA_BOUNDS)),
         Glyph::Scorpio => Some((glyph_paths::SCORPIO_OPS, glyph_paths::SCORPIO_BOUNDS)),
-        Glyph::Sagittarius => Some((glyph_paths::SAGITTARIUS_OPS, glyph_paths::SAGITTARIUS_BOUNDS)),
+        Glyph::Sagittarius => Some((
+            glyph_paths::SAGITTARIUS_OPS,
+            glyph_paths::SAGITTARIUS_BOUNDS,
+        )),
         Glyph::Capricorn => Some((glyph_paths::CAPRICORN_OPS, glyph_paths::CAPRICORN_BOUNDS)),
         Glyph::Aquarius => Some((glyph_paths::AQUARIUS_OPS, glyph_paths::AQUARIUS_BOUNDS)),
         Glyph::Pisces => Some((glyph_paths::PISCES_OPS, glyph_paths::PISCES_BOUNDS)),
@@ -135,14 +172,8 @@ pub fn draw_glyph(draw: &Draw, glyph: Glyph, center: Point2, size: f32, color: S
     let rect = Rect::from_xy_wh(center, vec2(size, size));
     if let Some((ops, bounds)) = glyph_ops_bounds(glyph) {
         let path = build_path_fit(ops, bounds, rect);
-        draw.path()
-            .fill()
-            .color(color)
-            .events(path.iter());
+        draw.path().fill().color(color).events(path.iter());
     } else {
-        draw.ellipse()
-            .xy(center)
-            .radius(size / 2.0)
-            .color(color);
+        draw.ellipse().xy(center).radius(size / 2.0).color(color);
     }
 }

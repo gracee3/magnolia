@@ -128,33 +128,45 @@ pub fn glyph_metrics(font: FontId, c: char) -> Option<GlyphMetrics> {
 pub fn font_glyph_ops_bounds(font: FontId, c: char) -> Option<(&'static [GlyphOp], GlyphBounds)> {
     match font {
         FontId::PlexSansRegular => {
-            if let (Some(ops), Some(bounds)) = (plex_sans_regular::ops_for_ascii(c), plex_sans_regular::bounds_for_ascii(c)) {
+            if let (Some(ops), Some(bounds)) = (
+                plex_sans_regular::ops_for_ascii(c),
+                plex_sans_regular::bounds_for_ascii(c),
+            ) {
                 Some((ops, bounds))
             } else {
                 None
             }
-        },
+        }
         FontId::PlexSansBold => {
-            if let (Some(ops), Some(bounds)) = (plex_sans_bold::ops_for_ascii(c), plex_sans_bold::bounds_for_ascii(c)) {
+            if let (Some(ops), Some(bounds)) = (
+                plex_sans_bold::ops_for_ascii(c),
+                plex_sans_bold::bounds_for_ascii(c),
+            ) {
                 Some((ops, bounds))
             } else {
                 None
             }
-        },
+        }
         FontId::PlexMonoRegular => {
-            if let (Some(ops), Some(bounds)) = (plex_mono_regular::ops_for_ascii(c), plex_mono_regular::bounds_for_ascii(c)) {
+            if let (Some(ops), Some(bounds)) = (
+                plex_mono_regular::ops_for_ascii(c),
+                plex_mono_regular::bounds_for_ascii(c),
+            ) {
                 Some((ops, bounds))
             } else {
                 None
             }
-        },
+        }
         FontId::PlexMonoMedium => {
-            if let (Some(ops), Some(bounds)) = (plex_mono_medium::ops_for_ascii(c), plex_mono_medium::bounds_for_ascii(c)) {
+            if let (Some(ops), Some(bounds)) = (
+                plex_mono_medium::ops_for_ascii(c),
+                plex_mono_medium::bounds_for_ascii(c),
+            ) {
                 Some((ops, bounds))
             } else {
                 None
             }
-        },
+        }
     }
 }
 
@@ -227,13 +239,17 @@ pub fn build_path_fit(ops: &[GlyphOp], bounds: GlyphBounds, rect: Rect) -> Path 
 }
 
 #[cfg(feature = "tile-rendering")]
-pub fn draw_glyph(draw: &Draw, ops: &[GlyphOp], bounds: GlyphBounds, center: Point2, size: f32, color: Srgba) {
+pub fn draw_glyph(
+    draw: &Draw,
+    ops: &[GlyphOp],
+    bounds: GlyphBounds,
+    center: Point2,
+    size: f32,
+    color: Srgba,
+) {
     let rect = Rect::from_xy_wh(center, vec2(size, size));
     let path = build_path_fit(ops, bounds, rect);
-    draw.path()
-        .fill()
-        .color(color)
-        .events(path.iter());
+    draw.path().fill().color(color).events(path.iter());
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,7 +292,8 @@ pub fn draw_text(
     for c in text.chars() {
         if let Some((ops, bounds)) = font_glyph_ops_bounds(font, c) {
             if let Some(metrics) = glyph_metrics(font, c) {
-                let glyph_center = pt2(pos.x + x_offset + metrics.advance_width * size * 0.5, pos.y);
+                let glyph_center =
+                    pt2(pos.x + x_offset + metrics.advance_width * size * 0.5, pos.y);
                 let rect = Rect::from_xy_wh(glyph_center, vec2(size, size));
                 let path = build_path_fit(ops, bounds, rect);
                 draw.path().fill().color(color).events(path.iter());

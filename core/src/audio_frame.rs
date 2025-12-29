@@ -1,5 +1,5 @@
 /// Specialized audio frame for ring buffer transmission
-/// 
+///
 /// This is optimized to be Copy + Default for use in SPSCRingBuffer.
 /// For real-time audio processing with minimal latency.
 #[derive(Debug, Clone, Copy, Default)]
@@ -20,7 +20,7 @@ impl AudioFrame {
             right,
         }
     }
-    
+
     pub fn mono(sample: f32) -> Self {
         Self {
             timestamp_us: 0,
@@ -28,7 +28,7 @@ impl AudioFrame {
             right: sample,
         }
     }
-    
+
     pub fn with_timestamp(mut self, timestamp_us: u64) -> Self {
         self.timestamp_us = timestamp_us;
         self

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
-use talisman_core::{Sink, Signal, Result, ModuleSchema, Port, DataType, PortDirection};
 use regex::Regex;
 use std::sync::{Arc, Mutex};
+use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
 
 // --- Word Count Sink ---
 pub struct WordCountSink {
@@ -11,7 +11,7 @@ pub struct WordCountSink {
 
 impl WordCountSink {
     /// Create a new WordCountSink
-    /// 
+    ///
     /// Note: The tx parameter is no longer needed - signals are returned from consume()
     pub fn new(_tx: Option<std::sync::mpsc::Sender<Signal>>) -> Self {
         Self {
@@ -23,8 +23,10 @@ impl WordCountSink {
 
 #[async_trait]
 impl Sink for WordCountSink {
-    fn name(&self) -> &str { "word_count" }
-    
+    fn name(&self) -> &str {
+        "word_count"
+    }
+
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "word_count".to_string(),
@@ -47,11 +49,15 @@ impl Sink for WordCountSink {
             settings_schema: None,
         }
     }
-    
-    fn is_enabled(&self) -> bool { self.enabled }
-    
-    fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
-    
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
     fn render_output(&self) -> Option<String> {
         let count = *self.last_count.lock().unwrap();
         Some(count.to_string())
@@ -61,12 +67,12 @@ impl Sink for WordCountSink {
         if !self.enabled {
             return Ok(None);
         }
-        
+
         if let Signal::Text(text) = signal {
             let count = text.split_whitespace().count();
             *self.last_count.lock().unwrap() = count;
             log::debug!("[WORD_COUNT] Count: {} | Text: '{}'", count, text);
-            
+
             // Return the computed signal directly instead of using a channel
             return Ok(Some(Signal::Computed {
                 source: "word_count".to_string(),
@@ -86,7 +92,7 @@ pub struct DevowelizerSink {
 
 impl DevowelizerSink {
     /// Create a new DevowelizerSink
-    /// 
+    ///
     /// Note: The tx parameter is no longer needed - signals are returned from consume()
     pub fn new(_tx: Option<std::sync::mpsc::Sender<Signal>>) -> Self {
         Self {
@@ -99,8 +105,10 @@ impl DevowelizerSink {
 
 #[async_trait]
 impl Sink for DevowelizerSink {
-    fn name(&self) -> &str { "devowelizer" }
-    
+    fn name(&self) -> &str {
+        "devowelizer"
+    }
+
     fn schema(&self) -> ModuleSchema {
         ModuleSchema {
             id: "devowelizer".to_string(),
@@ -123,26 +131,34 @@ impl Sink for DevowelizerSink {
             settings_schema: None,
         }
     }
-    
-    fn is_enabled(&self) -> bool { self.enabled }
-    
-    fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
-    
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
     fn render_output(&self) -> Option<String> {
         let output = self.last_output.lock().unwrap().clone();
-        if output.is_empty() { None } else { Some(output) }
+        if output.is_empty() {
+            None
+        } else {
+            Some(output)
+        }
     }
 
     async fn consume(&self, signal: Signal) -> Result<Option<Signal>> {
         if !self.enabled {
             return Ok(None);
         }
-        
+
         if let Signal::Text(text) = signal {
             let devoweled = self.re.replace_all(&text, "").to_string().to_uppercase();
             *self.last_output.lock().unwrap() = devoweled.clone();
             log::debug!("[DEVOWELIZER] '{}'", devoweled);
-            
+
             // Return the computed signal directly instead of using a channel
             return Ok(Some(Signal::Computed {
                 source: "devowelizer".to_string(),

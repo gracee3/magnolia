@@ -1,6 +1,6 @@
-use talisman_module_api::{StaticModule, ControlMsg, ControlCx, TickCx, Manifest, PortDesc};
-use std::sync::{Arc, Mutex};
 use crate::plugin_adapter::PluginModuleAdapter;
+use std::sync::{Arc, Mutex};
+use talisman_module_api::{ControlCx, ControlMsg, Manifest, PortDesc, StaticModule, TickCx};
 
 /// A unified wrapper for both static and dynamic modules.
 pub enum ModuleImpl {
@@ -10,7 +10,7 @@ pub enum ModuleImpl {
     /// For now, we use a placeholder or the existing adapter if it fits.
     /// The existing adapter is async-based, while the new model implies a synchronous tick.
     /// We will need to bridge this.
-    Dynamic(Arc<Mutex<PluginModuleAdapter>>), 
+    Dynamic(Arc<Mutex<PluginModuleAdapter>>),
 }
 
 pub struct ModuleHandle {
@@ -24,7 +24,7 @@ impl ModuleHandle {
     pub fn new_static(module: Box<dyn StaticModule>) -> Self {
         let manifest = module.manifest();
         let ports = module.ports().to_vec();
-        
+
         Self {
             id: manifest.id.clone(),
             inner: ModuleImpl::Static(module),

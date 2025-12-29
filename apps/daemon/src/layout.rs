@@ -4,8 +4,8 @@
 //! and tile rect calculation.
 
 use nannou::prelude::*;
-use talisman_core::{LayoutConfig, TileConfig};
 use std::fs;
+use talisman_core::{LayoutConfig, TileConfig};
 
 pub struct Layout {
     pub window_rect: Rect,
@@ -23,9 +23,12 @@ impl Layout {
                 break;
             }
         }
-        
+
         let content = content.unwrap_or_else(|| {
-            println!("Warning: Could not load layout.toml from {:?}, using default.", paths);
+            println!(
+                "Warning: Could not load layout.toml from {:?}, using default.",
+                paths
+            );
             r#"
             columns = ["1fr"]
             rows = ["1fr"]
@@ -36,34 +39,33 @@ impl Layout {
             row = 0
             colspan = 1
             module = "clock"
-            "# .to_string()
+            "#
+            .to_string()
         });
-            
+
         let config: LayoutConfig = toml::from_str(&content).expect("Failed to parse layout.toml");
-        
-        Self { 
+
+        Self {
             window_rect: win_rect,
             config,
         }
     }
-    
+
     pub fn update(&mut self, win_rect: Rect) {
         self.window_rect = win_rect;
     }
 
     pub fn save(&self) {
         let config = self.config.clone();
-        std::thread::spawn(move || {
-            match toml::to_string_pretty(&config) {
-                Ok(c) => {
-                    if let Err(e) = std::fs::write("configs/layout.toml", c) {
-                        log::error!("Failed to save layout.toml: {}", e);
-                    } else {
-                        log::info!("Saved layout.toml (async body)");
-                    }
-                },
-                Err(e) => log::error!("Failed to serialize layout config: {}", e),
+        std::thread::spawn(move || match toml::to_string_pretty(&config) {
+            Ok(c) => {
+                if let Err(e) = std::fs::write("configs/layout.toml", c) {
+                    log::error!("Failed to save layout.toml: {}", e);
+                } else {
+                    log::info!("Saved layout.toml (async body)");
+                }
             }
+            Err(e) => log::error!("Failed to serialize layout config: {}", e),
         });
     }
 
@@ -73,7 +75,7 @@ impl Layout {
             let t_row = tile.row;
             let t_cols = tile.colspan.unwrap_or(1);
             let t_rows = tile.rowspan.unwrap_or(1);
-            
+
             if col >= t_col && col < t_col + t_cols && row >= t_row && row < t_row + t_rows {
                 return Some(tile);
             }
@@ -88,24 +90,32 @@ impl Layout {
         let rows = self.resolve_tracks(&row_tracks, self.window_rect.h());
 
         let start_x = cols.iter().take(tile.col).sum::<f32>();
-        let width = cols.iter().skip(tile.col).take(tile.colspan.unwrap_or(1)).sum::<f32>();
-        
+        let width = cols
+            .iter()
+            .skip(tile.col)
+            .take(tile.colspan.unwrap_or(1))
+            .sum::<f32>();
+
         let start_y_from_top = rows.iter().take(tile.row).sum::<f32>();
-        let height = rows.iter().skip(tile.row).take(tile.rowspan.unwrap_or(1)).sum::<f32>();
-        
+        let height = rows
+            .iter()
+            .skip(tile.row)
+            .take(tile.rowspan.unwrap_or(1))
+            .sum::<f32>();
+
         // Nannou Coordinate Conversion (center-based, Y up)
         let cx = self.window_rect.left() + start_x + width / 2.0;
         let cy = self.window_rect.top() - start_y_from_top - height / 2.0;
-        
+
         Some(Rect::from_x_y_w_h(cx, cy, width, height))
     }
-    
+
     /// Resolve track definitions (px, %, fr) to pixel values
     pub fn resolve_tracks(&self, tracks: &[String], total_size: f32) -> Vec<f32> {
         let mut resolved = vec![0.0; tracks.len()];
         let mut used_px = 0.0;
         let mut total_fr = 0.0;
-        
+
         // First pass: PX, %, and FR sum
         for (i, track) in tracks.iter().enumerate() {
             if track.ends_with("px") {
@@ -123,23 +133,23 @@ impl Layout {
             } else {
                 // Fallback parsing
                 if track.contains("fr") {
-                    let val = track.replace("fr","").parse::<f32>().unwrap_or(1.0);
+                    let val = track.replace("fr", "").parse::<f32>().unwrap_or(1.0);
                     total_fr += val;
                 } else if track.contains("%") {
-                    let val = track.replace("%","").parse::<f32>().unwrap_or(0.0);
+                    let val = track.replace("%", "").parse::<f32>().unwrap_or(0.0);
                     let px = (val / 100.0) * total_size;
                     resolved[i] = px;
                     used_px += px;
                 } else {
-                    let val = track.replace("px","").parse::<f32>().unwrap_or(0.0);
+                    let val = track.replace("px", "").parse::<f32>().unwrap_or(0.0);
                     resolved[i] = val;
                     used_px += val;
                 }
             }
         }
-        
+
         let remaining = (total_size - used_px).max(0.0);
-        
+
         // Second pass: Resolve FR
         if total_fr > 0.0 {
             for (i, track) in tracks.iter().enumerate() {
@@ -150,9 +160,9 @@ impl Layout {
                 }
             }
         }
-        
+
         resolved
-   }
+    }
 }
 
 // =============================================================================
@@ -164,18 +174,20 @@ impl Layout {
 #[allow(dead_code)]
 pub fn tile_color(id: &str) -> Srgba<u8> {
     // Hash the string to get a deterministic value
-    let hash = id.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-    
+    let hash = id
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+
     // Use golden ratio angle for hue distribution (avoids clustering)
     let hue = ((hash % 360) as f32) / 360.0;
     let saturation = 0.7;
     let lightness = 0.55;
-    
+
     // Convert HSL to RGB
     let c = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
     let x = c * (1.0 - ((hue * 6.0) % 2.0 - 1.0).abs());
     let m = lightness - c / 2.0;
-    
+
     let (r, g, b) = match (hue * 6.0) as u8 {
         0 => (c, x, 0.0),
         1 => (x, c, 0.0),
@@ -184,12 +196,12 @@ pub fn tile_color(id: &str) -> Srgba<u8> {
         4 => (x, 0.0, c),
         _ => (c, 0.0, x),
     };
-    
+
     Srgba::new(
         ((r + m) * 255.0) as u8,
         ((g + m) * 255.0) as u8,
         ((b + m) * 255.0) as u8,
-        255
+        255,
     )
 }
 

@@ -1,19 +1,24 @@
-pub mod radix;
-pub mod transit;
-pub mod settings;
-pub mod data;
 pub mod animation;
+pub mod data;
+pub mod radix;
+pub mod settings;
+pub mod transit;
 
-pub use radix::RadixChart;
-pub use transit::TransitChart;
-pub use settings::ChartSettings;
-pub use data::ChartData;
 pub use animation::ChartAnimation;
-
+pub use data::ChartData;
+pub use radix::RadixChart;
+pub use settings::ChartSettings;
+pub use transit::TransitChart;
 
 use nannou::prelude::*;
 
-pub fn get_point_position(cx: f32, cy: f32, radius: f32, angle_degrees: f32, shift_degrees: f32) -> Point2 {
+pub fn get_point_position(
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    angle_degrees: f32,
+    shift_degrees: f32,
+) -> Point2 {
     let angle_rad = (shift_degrees + angle_degrees).to_radians();
     let x = cx + radius * angle_rad.cos();
     let y = cy + radius * angle_rad.sin();
@@ -31,4 +36,3 @@ pub fn parse_hex_color(hex: &str) -> Srgb {
         Srgb::new(0.0, 0.0, 0.0)
     }
 }
-

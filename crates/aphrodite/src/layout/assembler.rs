@@ -105,7 +105,8 @@ impl WheelAssembler {
             }
             crate::layout::types::RingDataSource::LayerPlanets { layer_id } => {
                 if let Some(positions) = positions_by_layer.get(layer_id) {
-                    let planet_items = build_planet_items(slug, layer_id, positions, include_objects);
+                    let planet_items =
+                        build_planet_items(slug, layer_id, positions, include_objects);
                     items.extend(planet_items.into_iter().map(RingItem::Planet));
                 }
             }
@@ -139,4 +140,3 @@ impl WheelAssembler {
         }
     }
 }
-

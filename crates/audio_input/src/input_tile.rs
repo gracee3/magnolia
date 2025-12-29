@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
-use talisman_core::{TileRenderer, RenderContext, BindableAction};
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use talisman_core::{BindableAction, RenderContext, TileRenderer};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
 use crate::AudioInputSettings;
 
@@ -24,8 +24,12 @@ impl AudioInputTile {
 }
 
 impl TileRenderer for AudioInputTile {
-    fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { "Audio Input" }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        "Audio Input"
+    }
     fn update(&mut self) {}
 
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
@@ -97,5 +101,7 @@ impl TileRenderer for AudioInputTile {
         serde_json::json!({ "device": device })
     }
 
-    fn bindable_actions(&self) -> Vec<BindableAction> { vec![] }
+    fn bindable_actions(&self) -> Vec<BindableAction> {
+        vec![]
+    }
 }

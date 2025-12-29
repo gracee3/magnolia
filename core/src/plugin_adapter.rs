@@ -1,8 +1,8 @@
+use crate::{ControlSignal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal, Signal};
 use async_trait::async_trait;
 use std::ffi::CStr;
-use tokio::sync::mpsc;
 use talisman_plugin_abi::*;
-use crate::{Signal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal, ControlSignal};
+use tokio::sync::mpsc;
 
 pub struct PluginModuleAdapter {
     plugin: PluginLibrary,
@@ -21,10 +21,14 @@ impl PluginModuleAdapter {
                 .into_owned();
             (id, name)
         };
-        
-        Self { plugin, id_cache, name_cache }
+
+        Self {
+            plugin,
+            id_cache,
+            name_cache,
+        }
     }
-    
+
     fn encode_signal(&self, signal: &Signal) -> SignalBuffer {
         // Convert Rust Signal to C SignalBuffer
         match signal {
@@ -32,12 +36,19 @@ impl PluginModuleAdapter {
                 let cstring = std::ffi::CString::new(text.as_str()).unwrap_or_default();
                 SignalBuffer {
                     signal_type: SignalType::Text as u32,
-                    value: SignalValue { ptr: cstring.into_raw() as *mut _ },
+                    value: SignalValue {
+                        ptr: cstring.into_raw() as *mut _,
+                    },
                     size: 0, // null-terminated
                     param: 0,
                 }
             }
-            Signal::Audio { sample_rate, channels, timestamp_us: _, data } => {
+            Signal::Audio {
+                sample_rate,
+                channels,
+                timestamp_us: _,
+                data,
+            } => {
                 // Transfer ownership of data to the buffer
                 // We clone the data here because we can't easily take ownership from &Signal
                 // But in a real hot-path, efficient movement is key.
@@ -57,15 +68,18 @@ impl PluginModuleAdapter {
                     param,
                 }
             }
-            Signal::GpuContext { device, queue } => {
-                SignalBuffer {
-                    signal_type: SignalType::GpuContext as u32,
-                    value: SignalValue { ptr: *device as *mut _ },
-                    size: 0,
-                    param: *queue as u64,
-                }
-            }
-            Signal::Texture { handle, start_time: _ } => {
+            Signal::GpuContext { device, queue } => SignalBuffer {
+                signal_type: SignalType::GpuContext as u32,
+                value: SignalValue {
+                    ptr: *device as *mut _,
+                },
+                size: 0,
+                param: *queue as u64,
+            },
+            Signal::Texture {
+                handle,
+                start_time: _,
+            } => {
                 // We only support sending Handles derived from local pointers back to plugins
                 // which is rare (usually host sends Handles to consumers).
                 // Plugins generating textures (kamea) send TO host.
@@ -76,15 +90,15 @@ impl PluginModuleAdapter {
                     signal_type: SignalType::Texture as u32,
                     value: SignalValue { gpu_id: handle.id },
                     size: 0,
-                    param: 0, 
+                    param: 0,
                 }
             }
             Signal::Pulse => SignalBuffer::empty(),
             // TODO: extensive signal mapping
-            _ => SignalBuffer::empty(), 
+            _ => SignalBuffer::empty(),
         }
     }
-    
+
     unsafe fn decode_signal(&self, buffer: &SignalBuffer) -> Option<Signal> {
         match buffer.signal_type {
             t if t == SignalType::Text as u32 => {
@@ -102,7 +116,7 @@ impl PluginModuleAdapter {
                 let sample_rate = (buffer.param >> 32) as u32;
                 let channels = (buffer.param & 0xFFFFFFFF) as u16;
                 let size = buffer.size as usize;
-                
+
                 // Reconstruct Vec from raw parts
                 // Note: We copy here to be safe and own the data in the Signal
                 // effectively treating the input buffer as borrowed.
@@ -111,10 +125,10 @@ impl PluginModuleAdapter {
                 // Or Consumer copies?
                 // The current adapter implementation assumes it TAKES ownership for freeing
                 // but decoding usually returns a new struct.
-                
+
                 let slice = std::slice::from_raw_parts(buffer.value.ptr as *const f32, size);
                 let data = slice.to_vec(); // Copy
-                
+
                 Some(Signal::Audio {
                     sample_rate,
                     channels,
@@ -127,113 +141,113 @@ impl PluginModuleAdapter {
                 if buffer.value.ptr.is_null() {
                     return Some(Signal::Pulse);
                 }
-                
+
                 let json_str = unsafe {
                     // We take ownership of the string to drop it
                     let len = buffer.size as usize;
                     let vec = Vec::from_raw_parts(buffer.value.ptr as *mut u8, len, len);
                     String::from_utf8_lossy(&vec).to_string()
                 };
-                
+
                 // Parse JSON back to AstrologyData
                 use talisman_signals::AstrologyData;
                 if let Ok(data) = serde_json::from_str::<AstrologyData>(&json_str) {
                     Some(Signal::Astrology(data))
                 } else if let Ok(_val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    // Legacy fallback if plugin sends flat structure? 
+                    // Legacy fallback if plugin sends flat structure?
                     // Current plugin sends: {"sun_sign": ..., "planetary_positions": ...}
                     // This matches AstrologyData struct!
                     // So direct deserialization should work if fields match.
                     // Just in case, manual extract if needed, but strict serde is better.
                     // Let's assume strict for now.
-                     log::warn!("Failed to strict parse AstrologyData - plugin mismatch?");
-                     Some(Signal::Pulse)
+                    log::warn!("Failed to strict parse AstrologyData - plugin mismatch?");
+                    Some(Signal::Pulse)
                 } else {
                     log::warn!("Failed to parse astrology JSON from plugin");
                     Some(Signal::Pulse)
                 }
             }
             t if t == SignalType::GpuContext as u32 => {
-                 let device = buffer.value.ptr as usize;
-                 let queue = buffer.param as usize;
-                 Some(Signal::GpuContext { device, queue })
+                let device = buffer.value.ptr as usize;
+                let queue = buffer.param as usize;
+                Some(Signal::GpuContext { device, queue })
             }
             t if t == SignalType::Texture as u32 => {
-                 // Plugin sends:
-                 // value.ptr = *wgpu::TextureView
-                 
-                 // TODO: Re-enable texture sharing when wgpu::TextureView Clone issue is resolved.
-                 // Current ambiguity: TextureView (alias TextureViewHandle) is !Clone !Copy.
-                 log::warn!("Signal::Texture received but texture sharing is temporarily disabled due to wgpu type issues.");
-                 None
-                 /* 
-                 use wgpu as wgpu_crate;
-                 unsafe {
-                     let view_ptr = buffer.value.ptr as *const wgpu_crate::TextureView;
-                     if !view_ptr.is_null() {
-                         // Clone the view (Arc incr)
-                         // ERROR: TextureView not Clone or Copy
-                         // let view = (*view_ptr).clone(); 
-                         
-                         // Register in our map
-                         // let (id, generation) = self.view_map.insert(view);
-                         
-                         let width = (buffer.param >> 32) as u32;
-                         let height = (buffer.param & 0xFFFFFFFF) as u32;
-                         
-                         let handle = GpuTextureHandle {
-                             id,
-                             generation,
-                             width,
-                             height,
-                         };
-                         
-                         Some(Signal::Texture { 
-                             handle,
-                             start_time: 0.0,
-                         })
-                     } else {
-                         None
-                     }
-                 }
-                 */
+                // Plugin sends:
+                // value.ptr = *wgpu::TextureView
+
+                // TODO: Re-enable texture sharing when wgpu::TextureView Clone issue is resolved.
+                // Current ambiguity: TextureView (alias TextureViewHandle) is !Clone !Copy.
+                log::warn!("Signal::Texture received but texture sharing is temporarily disabled due to wgpu type issues.");
+                None
+                /*
+                use wgpu as wgpu_crate;
+                unsafe {
+                    let view_ptr = buffer.value.ptr as *const wgpu_crate::TextureView;
+                    if !view_ptr.is_null() {
+                        // Clone the view (Arc incr)
+                        // ERROR: TextureView not Clone or Copy
+                        // let view = (*view_ptr).clone();
+
+                        // Register in our map
+                        // let (id, generation) = self.view_map.insert(view);
+
+                        let width = (buffer.param >> 32) as u32;
+                        let height = (buffer.param & 0xFFFFFFFF) as u32;
+
+                        let handle = GpuTextureHandle {
+                            id,
+                            generation,
+                            width,
+                            height,
+                        };
+
+                        Some(Signal::Texture {
+                            handle,
+                            start_time: 0.0,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                */
             }
             t if t == SignalType::Pulse as u32 => Some(Signal::Pulse),
             _ => None,
         }
     }
-    
+
     // === HOT-RELOAD LIFECYCLE HOOKS ===
-    
+
     /// Called before the plugin is unloaded during hot-reload.
     /// Allows the plugin to flush pending data, save state, etc.
     pub fn pre_unload(&mut self) {
         log::info!("Plugin {} preparing for hot-reload unload", self.id_cache);
-        
+
         // Disable the plugin to stop it from processing
         self.set_enabled(false);
-        
+
         // Give it a moment to finish any pending work
         // In a real implementation, you might want to:
         // - Flush any pending output signals
         // - Save plugin state to disk
         // - Close file handles or network connections
     }
-    
+
     /// Called after a new plugin instance is loaded during hot-reload.
     /// Can be used to restore state from the previous instance.
     pub fn post_reload(&mut self, _previous_state: Option<Vec<u8>>) {
         log::info!("Plugin {} completed hot-reload", self.id_cache);
-        
+
         // Re-enable the plugin
         self.set_enabled(true);
-        
+
         // In a real implementation, you might:
         // - Restore saved state
         // - Re-establish connections
         // - Notify the plugin of configuration changes
     }
-    
+
     /// Get plugin state for persistence across hot-reload (placeholder)
     pub fn get_state(&self) -> Option<Vec<u8>> {
         // Future: Plugins could implement a get_state callback in the vtable
@@ -247,27 +261,27 @@ impl ModuleRuntime for PluginModuleAdapter {
     fn id(&self) -> &str {
         &self.id_cache
     }
-    
+
     fn name(&self) -> &str {
         &self.name_cache
     }
-    
+
     fn schema(&self) -> ModuleSchema {
         // Since the current C ABI doesn't support full schema introspection yet
         // we create a basic schema from the cached info
-        
+
         let settings_schema = unsafe {
-             if let Some(schema_ptr) = self.plugin.schema {
-                 if !schema_ptr.is_null() && !(*schema_ptr).settings_schema.is_null() {
-                      let c_str = CStr::from_ptr((*schema_ptr).settings_schema);
-                      let json_str = c_str.to_string_lossy();
-                      serde_json::from_str(&json_str).ok()
-                 } else {
-                     None
-                 }
-             } else {
-                 None
-             }
+            if let Some(schema_ptr) = self.plugin.schema {
+                if !schema_ptr.is_null() && !(*schema_ptr).settings_schema.is_null() {
+                    let c_str = CStr::from_ptr((*schema_ptr).settings_schema);
+                    let json_str = c_str.to_string_lossy();
+                    serde_json::from_str(&json_str).ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         };
 
         ModuleSchema {
@@ -278,39 +292,40 @@ impl ModuleRuntime for PluginModuleAdapter {
             settings_schema,
         }
     }
-    
+
     fn is_enabled(&self) -> bool {
         unsafe { (self.plugin.vtable.is_enabled)(self.plugin.instance as *const _) }
     }
-    
+
     fn set_enabled(&mut self, enabled: bool) {
         unsafe { (self.plugin.vtable.set_enabled)(self.plugin.instance, enabled) }
     }
-    
+
     async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<RoutedSignal>) {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(10));
-        
+
         loop {
             interval.tick().await;
-            
+
             // Poll plugin for outgoing signals
-            // We must process and free the buffer BEFORE awaiting anything, 
+            // We must process and free the buffer BEFORE awaiting anything,
             // because SignalBuffer is !Send (contains raw pointers)
             let maybe_signal = unsafe {
                 let mut signal_buf = SignalBuffer::empty();
                 let mut result = None;
-                
+
                 if (self.plugin.vtable.poll_signal)(self.plugin.instance, &mut signal_buf) {
                     result = self.decode_signal(&signal_buf);
-                    
+
                     // Free the buffer data if allocated by the plugin
-                     if !signal_buf.value.ptr.is_null() {
+                    if !signal_buf.value.ptr.is_null() {
                         if signal_buf.signal_type == SignalType::Text as u32 {
                             let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
                         } else if signal_buf.signal_type == SignalType::Audio as u32 {
                             let size = signal_buf.size as usize;
                             // Assume capacity == length (plugin must ensure this)
-                            let _ = Vec::from_raw_parts(signal_buf.value.ptr as *mut f32, size, size);
+                            let _ =
+                                Vec::from_raw_parts(signal_buf.value.ptr as *mut f32, size, size);
                         }
                     }
                 }
@@ -324,7 +339,7 @@ impl ModuleRuntime for PluginModuleAdapter {
                 };
                 let _ = outbox.send(routed).await;
             }
-            
+
             // Send incoming signals to plugin and handle any output
             while let Ok(signal) = inbox.try_recv() {
                 // Intercept Settings Control Signal to use specific VTable method
@@ -339,27 +354,37 @@ impl ModuleRuntime for PluginModuleAdapter {
 
                 let maybe_output = unsafe {
                     let signal_buf = self.encode_signal(&signal);
-                    let output_ptr = (self.plugin.vtable.consume_signal)(self.plugin.instance, &signal_buf);
-                                        // We allocated signal_buf.data in encode_signal, we must free it
-                     if !signal_buf.value.ptr.is_null() {
+                    let output_ptr =
+                        (self.plugin.vtable.consume_signal)(self.plugin.instance, &signal_buf);
+                    // We allocated signal_buf.data in encode_signal, we must free it
+                    if !signal_buf.value.ptr.is_null() {
                         if signal_buf.signal_type == SignalType::Text as u32 {
-                             let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
+                            let _ = std::ffi::CString::from_raw(signal_buf.value.ptr as *mut i8);
                         } else if signal_buf.signal_type == SignalType::Audio as u32 {
-                             let size = signal_buf.size as usize;
-                             std::mem::drop(Vec::from_raw_parts(signal_buf.value.ptr as *mut f32, size, size));
+                            let size = signal_buf.size as usize;
+                            std::mem::drop(Vec::from_raw_parts(
+                                signal_buf.value.ptr as *mut f32,
+                                size,
+                                size,
+                            ));
                         }
-                     }
-                    
+                    }
+
                     // Check if plugin returned an output signal
                     if !output_ptr.is_null() {
                         let output_signal = self.decode_signal(&*output_ptr);
                         // Free the output buffer that the plugin allocated
                         if !(*output_ptr).value.ptr.is_null() {
                             if (*output_ptr).signal_type == SignalType::Text as u32 {
-                                let _ = std::ffi::CString::from_raw((*output_ptr).value.ptr as *mut i8);
+                                let _ =
+                                    std::ffi::CString::from_raw((*output_ptr).value.ptr as *mut i8);
                             } else if (*output_ptr).signal_type == SignalType::Audio as u32 {
                                 let size = (*output_ptr).size as usize;
-                                let _ = Vec::from_raw_parts((*output_ptr).value.ptr as *mut f32, size, size);
+                                let _ = Vec::from_raw_parts(
+                                    (*output_ptr).value.ptr as *mut f32,
+                                    size,
+                                    size,
+                                );
                             }
                         }
                         // Free the SignalBuffer struct itself (plugin allocated it)
@@ -369,7 +394,7 @@ impl ModuleRuntime for PluginModuleAdapter {
                         None
                     }
                 };
-                
+
                 // Send any output signal from consume_signal
                 if let Some(output) = maybe_output {
                     let routed = RoutedSignal {

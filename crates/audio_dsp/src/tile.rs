@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
-use talisman_core::{TileRenderer, RenderContext};
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use talisman_core::{RenderContext, TileRenderer};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
 use crate::AudioDspState;
 
@@ -27,8 +27,12 @@ impl AudioDspTile {
 }
 
 impl TileRenderer for AudioDspTile {
-    fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { "Audio DSP" }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        "Audio DSP"
+    }
     fn update(&mut self) {}
 
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {

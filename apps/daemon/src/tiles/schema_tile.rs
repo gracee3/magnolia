@@ -1,9 +1,9 @@
-use talisman_core::{TileRenderer, RenderContext, Signal, ControlSignal};
 use nannou::prelude::*;
 use serde_json::Value;
-use tokio::sync::mpsc::Sender;
 use std::sync::Mutex;
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use talisman_core::{ControlSignal, RenderContext, Signal, TileRenderer};
+use talisman_ui::{draw_text, FontId, TextAlignment};
+use tokio::sync::mpsc::Sender;
 
 pub struct SchemaTile {
     id: String,
@@ -31,8 +31,12 @@ impl SchemaTile {
 }
 
 impl TileRenderer for SchemaTile {
-    fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { &self.name }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
 
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
         // Background
@@ -42,7 +46,7 @@ impl TileRenderer for SchemaTile {
             .color(rgba(0.05, 0.05, 0.05, 1.0))
             .stroke(rgba(0.2, 0.2, 0.2, 1.0))
             .stroke_weight(1.0);
-            
+
         // Name
         draw_text(
             draw,
@@ -53,7 +57,7 @@ impl TileRenderer for SchemaTile {
             WHITESMOKE.into(),
             TextAlignment::Center,
         );
-            
+
         // Status indicator (green dot for "Connected" since we have a sender)
         draw.ellipse()
             .x_y(rect.right() - 10.0, rect.top() - 10.0)
@@ -67,7 +71,7 @@ impl TileRenderer for SchemaTile {
             .xy(rect.xy())
             .wh(rect.wh())
             .color(rgba(0.0, 0.0, 0.0, 0.9));
-            
+
         draw_text(
             draw,
             FontId::PlexSansBold,
@@ -77,7 +81,7 @@ impl TileRenderer for SchemaTile {
             CYAN.into(),
             TextAlignment::Center,
         );
-            
+
         draw_text(
             draw,
             FontId::PlexSansRegular,
@@ -87,25 +91,25 @@ impl TileRenderer for SchemaTile {
             GRAY.into(),
             TextAlignment::Center,
         );
-            
+
         false
     }
-    
+
     fn settings_schema(&self) -> Option<Value> {
         self.schema.clone()
     }
-    
+
     fn apply_settings(&mut self, settings: &Value) {
         if let Ok(mut guard) = self.settings.lock() {
             *guard = settings.clone();
             self.send_update(settings.clone());
         }
     }
-    
+
     fn get_settings(&self) -> Value {
         self.settings.lock().unwrap().clone()
     }
-    
+
     fn update(&mut self) {
         // Nothing for now
     }

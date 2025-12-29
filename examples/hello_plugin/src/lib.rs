@@ -81,29 +81,32 @@ unsafe extern "C" fn hello_set_enabled(instance: *mut c_void, enabled: bool) {
 
 unsafe extern "C" fn hello_poll_signal(instance: *mut c_void, buffer: *mut SignalBuffer) -> bool {
     let plugin = &mut *(instance as *mut HelloPlugin);
-    
+
     if !plugin.enabled {
         return false;
     }
-    
+
     // Every 10 polls, emit a text signal
     plugin.counter += 1;
     if plugin.counter % 10 == 0 {
         let message = format!("Hello from plugin! Counter: {}", plugin.counter);
         let message_cstring = CString::new(message).unwrap();
         let message_ptr = message_cstring.into_raw();
-        
+
         (*buffer).signal_type = SignalType::Text as u32;
         (*buffer).value.ptr = message_ptr as *mut c_void;
         (*buffer).size = 0; // Null-terminated string
-        
+
         true
     } else {
         false
     }
 }
 
-unsafe extern "C" fn hello_consume_signal(_instance: *mut c_void, _buffer: *const SignalBuffer) -> *mut SignalBuffer {
+unsafe extern "C" fn hello_consume_signal(
+    _instance: *mut c_void,
+    _buffer: *const SignalBuffer,
+) -> *mut SignalBuffer {
     // This example plugin doesn't consume signals, just produces them
     // Return null to indicate no output signal
     std::ptr::null_mut()

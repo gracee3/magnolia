@@ -1,11 +1,11 @@
 //! Chart Animation Module
-//! 
+//!
 //! Provides smooth transitions for astrological chart updates,
 //! handling the 360°/0° wrap-around correctly for seamless animations.
 
-use std::collections::HashMap;
-use crate::rendering::glyphs::Glyph;
 use super::data::{ChartData, PlanetData};
+use crate::rendering::glyphs::Glyph;
+use std::collections::HashMap;
 
 /// Animation speed per frame (0.0 to 1.0 progress per update)
 pub const ANIM_SPEED: f32 = 0.08;
@@ -128,14 +128,18 @@ impl ChartAnimation {
     pub fn build_animated_data(&self, original: &ChartData) -> ChartData {
         let mut planets = Vec::new();
         for (glyph, planet_data) in &original.planets {
-            let position = self.current_positions
+            let position = self
+                .current_positions
                 .get(glyph)
                 .copied()
                 .unwrap_or(planet_data.position);
-            planets.push((*glyph, PlanetData {
-                position,
-                speed: planet_data.speed,
-            }));
+            planets.push((
+                *glyph,
+                PlanetData {
+                    position,
+                    speed: planet_data.speed,
+                },
+            ));
         }
         ChartData {
             planets,

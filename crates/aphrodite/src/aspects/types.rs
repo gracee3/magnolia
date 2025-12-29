@@ -55,4 +55,3 @@ pub struct AspectSettings {
     /// Whether to only include major aspects
     pub only_major: Option<bool>,
 }
-

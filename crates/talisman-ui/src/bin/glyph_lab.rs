@@ -1,8 +1,8 @@
-use talisman_ui::{self, FontId, GlyphOp, theme, draw_text, TextAlignment};
-use talisman_ui::tweaks::GlyphTweaks;
 use nannou::lyon::math::point as lpoint;
 use nannou::lyon::path::Path;
 use nannou::prelude::*;
+use talisman_ui::tweaks::GlyphTweaks;
+use talisman_ui::{self, draw_text, theme, FontId, GlyphOp, TextAlignment};
 
 fn main() {
     nannou::app(model).update(update).run();
@@ -46,7 +46,10 @@ fn model(app: &App) -> Model {
         .build()
         .unwrap();
 
-    let tweaks_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../configs/glyph_tweaks.toml");
+    let tweaks_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../configs/glyph_tweaks.toml"
+    );
     let tweaks = GlyphTweaks::load_from_file(tweaks_path).unwrap_or_else(|e| {
         eprintln!("Failed to load tweaks: {}", e);
         GlyphTweaks::default()
@@ -62,7 +65,7 @@ fn model(app: &App) -> Model {
     ];
 
     let sample_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{};:'\",.<>/?|\\`~";
-    
+
     for (font, prefix) in fonts {
         for c in sample_chars.chars() {
             glyphs.push((DisplayGlyph::Font(font, c), format!("{}-{}", prefix, c)));
@@ -94,12 +97,11 @@ fn update(_app: &App, _model: &mut Model, _update: Update) {
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     let win = app.window_rect();
     let hud_height = 80.0;
-    let grid_rect = Rect::from_corners(
-        win.top_left() + vec2(0.0, -hud_height),
-        win.bottom_right()
-    );
+    let grid_rect = Rect::from_corners(win.top_left() + vec2(0.0, -hud_height), win.bottom_right());
     let cols = (grid_rect.w() / model.cell_size).floor() as usize;
-    if cols == 0 { return; }
+    if cols == 0 {
+        return;
+    }
     let count = model.glyphs.len();
 
     match key {
@@ -138,17 +140,29 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         Key::Period => model.tolerance += 0.01,
         Key::J => {
             model.line_join = match model.line_join {
-                nannou::lyon::tessellation::LineJoin::Miter => nannou::lyon::tessellation::LineJoin::Round,
-                nannou::lyon::tessellation::LineJoin::Round => nannou::lyon::tessellation::LineJoin::Bevel,
-                nannou::lyon::tessellation::LineJoin::Bevel => nannou::lyon::tessellation::LineJoin::Miter,
+                nannou::lyon::tessellation::LineJoin::Miter => {
+                    nannou::lyon::tessellation::LineJoin::Round
+                }
+                nannou::lyon::tessellation::LineJoin::Round => {
+                    nannou::lyon::tessellation::LineJoin::Bevel
+                }
+                nannou::lyon::tessellation::LineJoin::Bevel => {
+                    nannou::lyon::tessellation::LineJoin::Miter
+                }
                 _ => model.line_join,
             }
         }
         Key::C => {
             model.line_cap = match model.line_cap {
-                nannou::lyon::tessellation::LineCap::Butt => nannou::lyon::tessellation::LineCap::Round,
-                nannou::lyon::tessellation::LineCap::Round => nannou::lyon::tessellation::LineCap::Square,
-                nannou::lyon::tessellation::LineCap::Square => nannou::lyon::tessellation::LineCap::Butt,
+                nannou::lyon::tessellation::LineCap::Butt => {
+                    nannou::lyon::tessellation::LineCap::Round
+                }
+                nannou::lyon::tessellation::LineCap::Round => {
+                    nannou::lyon::tessellation::LineCap::Square
+                }
+                nannou::lyon::tessellation::LineCap::Square => {
+                    nannou::lyon::tessellation::LineCap::Butt
+                }
                 _ => model.line_cap,
             }
         }
@@ -166,16 +180,22 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
             model.show_bounds = false;
         }
         Key::P => {
-            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../screenshots/glyph_lab.png");
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../screenshots/glyph_lab.png"
+            );
             app.main_window().capture_frame(path);
             println!("Screenshot saved to {}", path);
         }
         Key::T => {
-             let tweaks_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../configs/glyph_tweaks.toml");
-             if let Ok(tweaks) = GlyphTweaks::load_from_file(tweaks_path) {
-                 model.tweaks = tweaks;
-                 println!("Reloaded tweaks");
-             }
+            let tweaks_path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../configs/glyph_tweaks.toml"
+            );
+            if let Ok(tweaks) = GlyphTweaks::load_from_file(tweaks_path) {
+                model.tweaks = tweaks;
+                println!("Reloaded tweaks");
+            }
         }
         _ => {}
     }
@@ -185,10 +205,10 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         let row = model.selected_index / cols;
         let y_pos = row as f32 * model.cell_size;
         let visible_height = grid_rect.h();
-        
+
         let view_top = model.scroll_y;
         let view_bottom = model.scroll_y + visible_height;
-        
+
         if y_pos < view_top {
             model.scroll_y = y_pos;
         } else if y_pos + model.cell_size > view_bottom {
@@ -197,10 +217,17 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
     }
 }
 
-fn build_path_for_glyph(_item: DisplayGlyph, ops: &[GlyphOp], bounds: talisman_ui::GlyphBounds, rect: Rect, tweaks: &GlyphTweaks, glyph_name: &str) -> Path {
+fn build_path_for_glyph(
+    _item: DisplayGlyph,
+    ops: &[GlyphOp],
+    bounds: talisman_ui::GlyphBounds,
+    rect: Rect,
+    tweaks: &GlyphTweaks,
+    glyph_name: &str,
+) -> Path {
     let width = bounds.max_x - bounds.min_x;
     let height = bounds.max_y - bounds.min_y;
-    
+
     let tweak = tweaks.get(glyph_name.to_lowercase().as_str());
 
     let bounds_cx = (bounds.min_x + bounds.max_x) * 0.5;
@@ -208,7 +235,7 @@ fn build_path_for_glyph(_item: DisplayGlyph, ops: &[GlyphOp], bounds: talisman_u
 
     let mut builder = Path::builder();
     let mut open = false;
-    
+
     let s = (rect.w() / width).min(rect.h() / height);
     let center = rect.xy();
 
@@ -218,52 +245,67 @@ fn build_path_for_glyph(_item: DisplayGlyph, ops: &[GlyphOp], bounds: talisman_u
     let transform = |x: f32, y: f32| -> nannou::lyon::math::Point {
         let mut lx = x - bounds_cx;
         let mut ly = y - bounds_cy;
-        
+
         lx *= tweak.sx;
         ly *= tweak.sy;
-        
+
         let rx = lx * cos - ly * sin;
         let ry = lx * sin + ly * cos;
         lx = rx;
         ly = ry;
-        
+
         lx += tweak.dx * width;
         ly += tweak.dy * height;
 
         let final_x = lx * s + center.x;
         let final_y = ly * s + center.y;
-        
+
         lpoint(final_x, final_y)
     };
 
     for op in ops {
         match *op {
             GlyphOp::M(x, y) => {
-                if open { builder.end(false); }
+                if open {
+                    builder.end(false);
+                }
                 builder.begin(transform(x, y));
                 open = true;
             }
             GlyphOp::L(x, y) => {
-                 if !open { builder.begin(transform(x, y)); open = true; }
-                 builder.line_to(transform(x, y));
+                if !open {
+                    builder.begin(transform(x, y));
+                    open = true;
+                }
+                builder.line_to(transform(x, y));
             }
             GlyphOp::Q(x1, y1, x, y) => {
-                if !open { builder.begin(transform(x1, y1)); open = true; }
+                if !open {
+                    builder.begin(transform(x1, y1));
+                    open = true;
+                }
                 builder.quadratic_bezier_to(transform(x1, y1), transform(x, y));
             }
             GlyphOp::C(x1, y1, x2, y2, x, y) => {
-                if !open { builder.begin(transform(x1, y1)); open = true; }
+                if !open {
+                    builder.begin(transform(x1, y1));
+                    open = true;
+                }
                 builder.cubic_bezier_to(transform(x1, y1), transform(x2, y2), transform(x, y));
             }
             GlyphOp::Z => {
-                if open { builder.end(true); open = false; }
+                if open {
+                    builder.end(true);
+                    open = false;
+                }
             }
         }
     }
-    if open { builder.end(false); }
+    if open {
+        builder.end(false);
+    }
     builder.build()
 }
-
 
 fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
@@ -271,13 +313,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let win = app.window_rect();
     let hud_height = 80.0;
-    
+
     match model.view_mode {
         ViewMode::Grid => {
-            let grid_rect = Rect::from_corners(
-                win.top_left() + vec2(0.0, -hud_height),
-                win.bottom_right()
-            );
+            let grid_rect =
+                Rect::from_corners(win.top_left() + vec2(0.0, -hud_height), win.bottom_right());
 
             let cols = (grid_rect.w() / model.cell_size).floor() as usize;
             if cols > 0 {
@@ -289,23 +329,40 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     let row = i / cols;
                     let x = start_x + col as f32 * model.cell_size;
                     let y = start_y - row as f32 * model.cell_size;
-                    
+
                     // Optimization: don't draw if off-screen
-                    if y > grid_rect.top() + model.cell_size || y < grid_rect.bottom() - model.cell_size {
+                    if y > grid_rect.top() + model.cell_size
+                        || y < grid_rect.bottom() - model.cell_size
+                    {
                         continue;
                     }
 
                     let center = pt2(x, y);
                     let is_selected = i == model.selected_index;
-                    
+
                     if is_selected {
-                        draw.rect().xy(center).w_h(model.cell_size, model.cell_size).no_fill().stroke(CYAN).stroke_weight(3.0);
+                        draw.rect()
+                            .xy(center)
+                            .w_h(model.cell_size, model.cell_size)
+                            .no_fill()
+                            .stroke(CYAN)
+                            .stroke_weight(3.0);
                     } else {
-                        draw.rect().xy(center).w_h(model.cell_size, model.cell_size).no_fill().stroke(theme::muted_stroke()).stroke_weight(1.0);
+                        draw.rect()
+                            .xy(center)
+                            .w_h(model.cell_size, model.cell_size)
+                            .no_fill()
+                            .stroke(theme::muted_stroke())
+                            .stroke_weight(1.0);
                     }
 
                     if model.show_bounds {
-                         draw.rect().xy(center).w_h(model.big_glyph_size, model.big_glyph_size).no_fill().stroke(RED).stroke_weight(1.0);
+                        draw.rect()
+                            .xy(center)
+                            .w_h(model.big_glyph_size, model.big_glyph_size)
+                            .no_fill()
+                            .stroke(RED)
+                            .stroke_weight(1.0);
                     }
 
                     let name_color = if is_selected { CYAN } else { WHITE };
@@ -318,46 +375,67 @@ fn view(app: &App, model: &Model, frame: Frame) {
                         name_color,
                         TextAlignment::Center,
                     );
-                    
+
                     let DisplayGlyph::Font(font, c) = item;
                     if let Some((ops, bounds)) = talisman_ui::font_glyph_ops_bounds(*font, *c) {
-                         let big_rect = Rect::from_xy_wh(center, vec2(model.big_glyph_size, model.big_glyph_size));
-                         let path = build_path_for_glyph(*item, ops, bounds, big_rect, &model.tweaks, name);
-                         
-                         if model.fill {
-                             draw.path().fill().events(path.iter()).color(WHITE);
-                         }
-                         if model.stroke {
-                             draw.path().stroke().weight(model.stroke_width).join(model.line_join).caps(model.line_cap).events(path.iter()).color(WHITE);
-                         }
+                        let big_rect = Rect::from_xy_wh(
+                            center,
+                            vec2(model.big_glyph_size, model.big_glyph_size),
+                        );
+                        let path =
+                            build_path_for_glyph(*item, ops, bounds, big_rect, &model.tweaks, name);
+
+                        if model.fill {
+                            draw.path().fill().events(path.iter()).color(WHITE);
+                        }
+                        if model.stroke {
+                            draw.path()
+                                .stroke()
+                                .weight(model.stroke_width)
+                                .join(model.line_join)
+                                .caps(model.line_cap)
+                                .events(path.iter())
+                                .color(WHITE);
+                        }
                     }
                 }
             }
         }
         ViewMode::Detail => {
-            let detail_rect = Rect::from_corners(
-                win.top_left() + vec2(0.0, -hud_height),
-                win.bottom_right()
-            ).pad(40.0);
+            let detail_rect =
+                Rect::from_corners(win.top_left() + vec2(0.0, -hud_height), win.bottom_right())
+                    .pad(40.0);
 
             let (item, name) = &model.glyphs[model.selected_index];
             let DisplayGlyph::Font(font, c) = item;
-            
+
             if let Some((ops, bounds)) = talisman_ui::font_glyph_ops_bounds(*font, *c) {
-                let path = build_path_for_glyph(*item, ops, bounds, detail_rect, &model.tweaks, name);
-                
+                let path =
+                    build_path_for_glyph(*item, ops, bounds, detail_rect, &model.tweaks, name);
+
                 if model.fill {
                     draw.path().fill().events(path.iter()).color(WHITE);
                 }
                 if model.stroke {
-                    draw.path().stroke().weight(model.stroke_width).join(model.line_join).caps(model.line_cap).events(path.iter()).color(WHITE);
+                    draw.path()
+                        .stroke()
+                        .weight(model.stroke_width)
+                        .join(model.line_join)
+                        .caps(model.line_cap)
+                        .events(path.iter())
+                        .color(WHITE);
                 }
-                
+
                 if model.show_bounds {
-                    draw.rect().xy(detail_rect.xy()).w_h(detail_rect.w(), detail_rect.h()).no_fill().stroke(RED).stroke_weight(1.0);
+                    draw.rect()
+                        .xy(detail_rect.xy())
+                        .w_h(detail_rect.w(), detail_rect.h())
+                        .no_fill()
+                        .stroke(RED)
+                        .stroke_weight(1.0);
                 }
             }
-            
+
             draw_text(
                 draw,
                 FontId::PlexSansBold,
@@ -369,7 +447,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             );
         }
     }
-    
+
     // Draw HUD
     let sel_name = &model.glyphs[model.selected_index].1;
     let sel_tweak = model.tweaks.get(&sel_name.to_lowercase());
@@ -380,7 +458,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
         app.fps(), model.view_mode, model.stroke_width, model.tolerance, model.line_join, model.line_cap, model.fill, model.stroke, model.big_glyph_size,
         sel_name, sel_tweak.dx, sel_tweak.dy, sel_tweak.sx, sel_tweak.sy, sel_tweak.rot_deg
     );
-    
+
     draw_text(
         draw,
         FontId::PlexMonoRegular,

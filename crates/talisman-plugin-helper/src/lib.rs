@@ -1,8 +1,7 @@
 pub use talisman_plugin_abi;
 // Re-export common types for convenience
 pub use talisman_plugin_abi::{
-    SignalBuffer, SignalType, SignalValue, PluginManifest, ModuleRuntimeVTable,
-    ABI_VERSION,
+    ABI_VERSION, ModuleRuntimeVTable, PluginManifest, SignalBuffer, SignalType, SignalValue,
 };
 
 use std::os::raw::c_char;
@@ -12,7 +11,7 @@ use std::os::raw::c_char;
 macro_rules! export_plugin {
     ($plugin_type:ty) => {
         // We use full paths to avoid import conflicts
-        
+
         // --- MANIFEST ---
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn talisman_plugin_manifest() -> $crate::PluginManifest {
@@ -21,7 +20,7 @@ macro_rules! export_plugin {
             let ver = CString::new(<$plugin_type>::version()).unwrap();
             let desc = CString::new(<$plugin_type>::description()).unwrap();
             let auth = CString::new(<$plugin_type>::author()).unwrap();
-            
+
             $crate::PluginManifest {
                 abi_version: $crate::ABI_VERSION,
                 name: name.into_raw(),
@@ -51,34 +50,36 @@ macro_rules! export_plugin {
         };
 
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn talisman_plugin_get_vtable() -> *const $crate::ModuleRuntimeVTable {
+        pub unsafe extern "C" fn talisman_plugin_get_vtable() -> *const $crate::ModuleRuntimeVTable
+        {
             &VTABLE as *const _
         }
-        
+
         // --- SCHEMA ---
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn talisman_plugin_get_schema() -> *const $crate::talisman_plugin_abi::ModuleSchemaAbi {
+        pub unsafe extern "C" fn talisman_plugin_get_schema()
+        -> *const $crate::talisman_plugin_abi::ModuleSchemaAbi {
             // Leak strings to keep them valid for the lifetime of the plugin (static)
             use std::ffi::CString;
-            
+
             // Note: We don't support ports via macro yet, user must implement strict ABI manually if they want ports.
             // But we do support settings_schema.
-            
+
             static mut SCHEMA: Option<$crate::talisman_plugin_abi::ModuleSchemaAbi> = None;
             static mut SCHEMA_INIT: std::sync::Once = std::sync::Once::new();
-            
+
             unsafe {
                 SCHEMA_INIT.call_once(|| {
                     let id = CString::new(<$plugin_type>::name()).unwrap(); // Use name as ID for now
                     let name = CString::new(<$plugin_type>::name()).unwrap();
                     let desc = CString::new(<$plugin_type>::description()).unwrap();
-                    
+
                     let settings = if let Some(s) = <$plugin_type>::settings_schema() {
                         CString::new(s).unwrap().into_raw()
                     } else {
                         std::ptr::null()
                     };
-                    
+
                     SCHEMA = Some($crate::talisman_plugin_abi::ModuleSchemaAbi {
                         id: id.into_raw(),
                         name: name.into_raw(),
@@ -88,19 +89,23 @@ macro_rules! export_plugin {
                         settings_schema: settings,
                     });
                 });
-                
+
                 SCHEMA.as_ref().unwrap() as *const _
             }
         }
 
         // --- TRAMPOLINES ---
 
-        unsafe extern "C" fn _plugin_get_id(instance: *const std::os::raw::c_void) -> *const std::os::raw::c_char {
+        unsafe extern "C" fn _plugin_get_id(
+            instance: *const std::os::raw::c_void,
+        ) -> *const std::os::raw::c_char {
             let plugin = &*(instance as *const $plugin_type);
             plugin.c_id()
         }
 
-        unsafe extern "C" fn _plugin_get_name(instance: *const std::os::raw::c_void) -> *const std::os::raw::c_char {
+        unsafe extern "C" fn _plugin_get_name(
+            instance: *const std::os::raw::c_void,
+        ) -> *const std::os::raw::c_char {
             let plugin = &*(instance as *const $plugin_type);
             plugin.c_name()
         }
@@ -110,27 +115,37 @@ macro_rules! export_plugin {
             plugin.is_enabled()
         }
 
-        unsafe extern "C" fn _plugin_set_enabled(instance: *mut std::os::raw::c_void, enabled: bool) {
+        unsafe extern "C" fn _plugin_set_enabled(
+            instance: *mut std::os::raw::c_void,
+            enabled: bool,
+        ) {
             let plugin = &mut *(instance as *mut $plugin_type);
             plugin.set_enabled(enabled);
         }
 
-        unsafe extern "C" fn _plugin_poll_signal(instance: *mut std::os::raw::c_void, buffer: *mut $crate::SignalBuffer) -> bool {
+        unsafe extern "C" fn _plugin_poll_signal(
+            instance: *mut std::os::raw::c_void,
+            buffer: *mut $crate::SignalBuffer,
+        ) -> bool {
             let plugin = &mut *(instance as *mut $plugin_type);
             plugin.poll_signal(&mut *buffer)
         }
 
-        unsafe extern "C" fn _plugin_consume_signal(instance: *mut std::os::raw::c_void, buffer: *const $crate::SignalBuffer) -> *mut $crate::SignalBuffer {
+        unsafe extern "C" fn _plugin_consume_signal(
+            instance: *mut std::os::raw::c_void,
+            buffer: *const $crate::SignalBuffer,
+        ) -> *mut $crate::SignalBuffer {
             let plugin = &mut *(instance as *mut $plugin_type);
             match plugin.consume_signal(&*buffer) {
-                Some(mut out) => {
-                    Box::into_raw(Box::new(out))
-                }
-                None => std::ptr::null_mut()
+                Some(mut out) => Box::into_raw(Box::new(out)),
+                None => std::ptr::null_mut(),
             }
         }
-        
-        unsafe extern "C" fn _plugin_apply_settings(instance: *mut std::os::raw::c_void, json: *const std::os::raw::c_char) {
+
+        unsafe extern "C" fn _plugin_apply_settings(
+            instance: *mut std::os::raw::c_void,
+            json: *const std::os::raw::c_char,
+        ) {
             let plugin = &mut *(instance as *mut $plugin_type);
             if !json.is_null() {
                 if let Ok(c_str) = std::ffi::CStr::from_ptr(json).to_str() {
@@ -155,14 +170,16 @@ pub trait TalismanPlugin: Default {
     // Runtime
     fn c_id(&self) -> *const c_char;
     fn c_name(&self) -> *const c_char;
-    
+
     fn is_enabled(&self) -> bool;
     fn set_enabled(&mut self, enabled: bool);
-    
+
     fn poll_signal(&mut self, buffer: &mut SignalBuffer) -> bool;
     fn consume_signal(&mut self, input: &SignalBuffer) -> Option<SignalBuffer>;
-    
+
     // Settings
-    fn settings_schema() -> Option<String> { None }
+    fn settings_schema() -> Option<String> {
+        None
+    }
     fn apply_settings(&mut self, _json: &str) {}
 }

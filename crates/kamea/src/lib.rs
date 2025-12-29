@@ -1,8 +1,8 @@
-use talisman_plugin_helper::{
-    export_plugin, TalismanPlugin, SignalBuffer, SignalType, SignalValue,
-};
-pub use talisman_core::KameaGrid;
 use nannou::prelude::*;
+pub use talisman_core::KameaGrid;
+use talisman_plugin_helper::{
+    export_plugin, SignalBuffer, SignalType, SignalValue, TalismanPlugin,
+};
 
 use nannou::wgpu; // Access nannou's re-exported wgpu
 
@@ -11,10 +11,10 @@ mod tile;
 use tile::KameaTile;
 
 struct GpuState {
-    device: *const wgpu::Device, 
+    device: *const wgpu::Device,
     queue: *const wgpu::Queue,
     renderer: nannou::draw::Renderer,
-    nannou_texture: wgpu::Texture, 
+    nannou_texture: wgpu::Texture,
     view: wgpu::TextureView, // Store the view to keep it alive
     width: u32,
     height: u32,
@@ -42,10 +42,18 @@ impl Default for KameaPlugin {
 }
 
 impl TalismanPlugin for KameaPlugin {
-    fn name() -> &'static str { "kamea" }
-    fn version() -> &'static str { "0.1.0" }
-    fn description() -> &'static str { "Generative Sigil Visualizer" }
-    fn author() -> &'static str { "Talisman" }
+    fn name() -> &'static str {
+        "kamea"
+    }
+    fn version() -> &'static str {
+        "0.1.0"
+    }
+    fn description() -> &'static str {
+        "Generative Sigil Visualizer"
+    }
+    fn author() -> &'static str {
+        "Talisman"
+    }
 
     fn c_id(&self) -> *const std::os::raw::c_char {
         b"kamea\0".as_ptr() as *const _
@@ -78,7 +86,7 @@ impl TalismanPlugin for KameaPlugin {
 
             let draw = Draw::new();
             let rect = Rect::from_w_h(gpu.width as f32, gpu.height as f32);
-            
+
             let ctx = talisman_core::RenderContext {
                 time: std::time::Instant::now(),
                 frame_count: 0,
@@ -86,58 +94,56 @@ impl TalismanPlugin for KameaPlugin {
                 is_maximized: false,
                 tile_settings: None,
             };
-            
+
             tile.render_monitor(&draw, rect, &ctx);
 
             unsafe {
                 let device = &*gpu.device;
                 let queue = &*gpu.queue;
-                
+
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("kamea_encoder"),
                 });
-                
-                gpu.renderer.render_to_texture(
-                    device,
-                    &mut encoder,
-                    &draw,
-                    &gpu.nannou_texture,
-                );
-                
+
+                gpu.renderer
+                    .render_to_texture(device, &mut encoder, &draw, &gpu.nannou_texture);
+
                 queue.submit(Some(encoder.finish()));
             }
 
             if !self.sent_texture {
                 let id = 0xCAFE_BABE;
-                
+
                 buffer.signal_type = SignalType::Texture as u32;
                 // nannou_texture.view() returns a Builder.
                 // We stored the built view in gpu.view (Nannou wrapper).
                 // We must send the pointer to the INNER wgpu::TextureView (Arc)
                 // so the host can clone the Arc.
-                // CAUTION: plugin `gpu.view` owns the inner Arc. 
+                // CAUTION: plugin `gpu.view` owns the inner Arc.
                 // Host `clone` bumps ref count.
                 // `gpu.view.inner()` returns &wgpu::TextureView.
                 let raw_view = gpu.view.inner();
-                
-                buffer.value = SignalValue { ptr: raw_view as *const _ as *mut _ };
+
+                buffer.value = SignalValue {
+                    ptr: raw_view as *const _ as *mut _,
+                };
                 buffer.size = id;
                 buffer.param = ((gpu.width as u64) << 32) | (gpu.height as u64);
-                
+
                 self.sent_texture = true;
                 return true;
             }
         }
-        
+
         false
     }
-    
+
     fn consume_signal(&mut self, input: &SignalBuffer) -> Option<SignalBuffer> {
         if input.signal_type == SignalType::GpuContext as u32 {
             unsafe {
                 let device_ptr = input.value.ptr as *const wgpu::Device;
                 let queue_ptr = input.param as *const wgpu::Queue;
-                
+
                 if !device_ptr.is_null() && !queue_ptr.is_null() {
                     self.init_gpu(device_ptr, queue_ptr);
                 }
@@ -166,30 +172,29 @@ impl TalismanPlugin for KameaPlugin {
 impl KameaPlugin {
     unsafe fn init_gpu(&mut self, device_ptr: *const wgpu::Device, queue_ptr: *const wgpu::Queue) {
         let device = &*device_ptr;
-        
+
         let width = 512;
         let height = 512;
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let sample_count = 1;
-        
+
         let nannou_texture = wgpu::TextureBuilder::new()
             .size([width, height])
             .format(format)
             .sample_count(sample_count)
             .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
             .build(device);
-            
+
         let view = nannou_texture.view().build();
-        
-        let renderer = nannou::draw::RendererBuilder::new()
-            .build(
-                device,
-                [width, height],
-                1.0, 
-                sample_count,
-                format,
-            );
-            
+
+        let renderer = nannou::draw::RendererBuilder::new().build(
+            device,
+            [width, height],
+            1.0,
+            sample_count,
+            format,
+        );
+
         self.gpu_state = Some(GpuState {
             device: device_ptr,
             queue: queue_ptr,

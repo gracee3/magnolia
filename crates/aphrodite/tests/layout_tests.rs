@@ -1,5 +1,5 @@
-use aphrodite::layout::{load_wheel_definition_from_json, WheelAssembler};
 use aphrodite::ephemeris::{LayerPositions, PlanetPosition};
+use aphrodite::layout::{load_wheel_definition_from_json, WheelAssembler};
 use std::collections::HashMap;
 
 #[test]
@@ -22,14 +22,17 @@ fn test_load_wheel_definition_valid() {
       ]
     }
     "#;
-    
+
     let result = load_wheel_definition_from_json(json);
     assert!(result.is_ok());
     let wheel = result.unwrap();
     assert_eq!(wheel.wheel.name, "Test Wheel");
     assert_eq!(wheel.wheel.rings.len(), 1);
     assert_eq!(wheel.wheel.rings[0].slug, "ring_signs");
-    assert_eq!(wheel.wheel.rings[0].ring_type, aphrodite::layout::types::RingType::Signs);
+    assert_eq!(
+        wheel.wheel.rings[0].ring_type,
+        aphrodite::layout::types::RingType::Signs
+    );
 }
 
 #[test]
@@ -59,7 +62,7 @@ fn test_load_wheel_definition_with_multiple_rings() {
       ]
     }
     "#;
-    
+
     let result = load_wheel_definition_from_json(json);
     assert!(result.is_ok());
     let wheel = result.unwrap();
@@ -79,7 +82,7 @@ fn test_load_wheel_definition_invalid_json() {
       "name": "Test Wheel"
     }
     "#;
-    
+
     let result = load_wheel_definition_from_json(json);
     assert!(result.is_err());
 }
@@ -92,7 +95,7 @@ fn test_load_wheel_definition_missing_rings() {
       "rings": []
     }
     "#;
-    
+
     let result = load_wheel_definition_from_json(json);
     assert!(result.is_err());
 }
@@ -115,7 +118,7 @@ fn test_load_wheel_definition_invalid_ring_type() {
       ]
     }
     "#;
-    
+
     let result = load_wheel_definition_from_json(json);
     assert!(result.is_err());
 }
@@ -138,18 +141,14 @@ fn test_wheel_assembler_build_static_zodiac() {
       ]
     }
     "#;
-    
+
     let wheel_def = load_wheel_definition_from_json(json).unwrap();
     let positions_by_layer: HashMap<String, LayerPositions> = HashMap::new();
     let aspect_sets: HashMap<String, aphrodite::aspects::types::AspectSet> = HashMap::new();
-    
-    let wheel = WheelAssembler::build_wheel(
-        &wheel_def.wheel,
-        &positions_by_layer,
-        &aspect_sets,
-        None,
-    );
-    
+
+    let wheel =
+        WheelAssembler::build_wheel(&wheel_def.wheel, &positions_by_layer, &aspect_sets, None);
+
     assert_eq!(wheel.name, "Zodiac Wheel");
     assert_eq!(wheel.rings.len(), 1);
     // Static zodiac should have 12 sign items
@@ -174,40 +173,44 @@ fn test_wheel_assembler_build_with_planets() {
       ]
     }
     "#;
-    
+
     let wheel_def = load_wheel_definition_from_json(json).unwrap();
-    
+
     let mut planets = HashMap::new();
-    planets.insert("sun".to_string(), PlanetPosition {
-        lon: 100.0,
-        lat: 0.0,
-        speed_lon: 1.0,
-        retrograde: false,
-    });
-    planets.insert("moon".to_string(), PlanetPosition {
-        lon: 200.0,
-        lat: 0.0,
-        speed_lon: 13.0,
-        retrograde: false,
-    });
-    
-    let mut positions_by_layer = HashMap::new();
-    positions_by_layer.insert("natal".to_string(), LayerPositions {
-        planets,
-        houses: None,
-    });
-    
-    let aspect_sets: HashMap<String, aphrodite::aspects::types::AspectSet> = HashMap::new();
-    
-    let wheel = WheelAssembler::build_wheel(
-        &wheel_def.wheel,
-        &positions_by_layer,
-        &aspect_sets,
-        None,
+    planets.insert(
+        "sun".to_string(),
+        PlanetPosition {
+            lon: 100.0,
+            lat: 0.0,
+            speed_lon: 1.0,
+            retrograde: false,
+        },
     );
-    
+    planets.insert(
+        "moon".to_string(),
+        PlanetPosition {
+            lon: 200.0,
+            lat: 0.0,
+            speed_lon: 13.0,
+            retrograde: false,
+        },
+    );
+
+    let mut positions_by_layer = HashMap::new();
+    positions_by_layer.insert(
+        "natal".to_string(),
+        LayerPositions {
+            planets,
+            houses: None,
+        },
+    );
+
+    let aspect_sets: HashMap<String, aphrodite::aspects::types::AspectSet> = HashMap::new();
+
+    let wheel =
+        WheelAssembler::build_wheel(&wheel_def.wheel, &positions_by_layer, &aspect_sets, None);
+
     assert_eq!(wheel.rings.len(), 1);
     // Should have 2 planet items
     assert_eq!(wheel.rings[0].items.len(), 2);
 }
-

@@ -1,11 +1,11 @@
 //! Nakshatra utilities for Vedic astrology.
-//! 
+//!
 //! Nakshatras are 27 lunar mansions, each spanning 13°20' (360/27 degrees).
 //! Each nakshatra is divided into 4 padas (quarters).
 
+use crate::ephemeris::types::LayerPositions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::ephemeris::types::LayerPositions;
 
 pub const NAKSHATRA_SEGMENT_SIZE: f64 = 360.0 / 27.0;
 pub const PADA_SIZE: f64 = NAKSHATRA_SEGMENT_SIZE / 4.0;
@@ -111,19 +111,19 @@ pub fn normalize_degrees(value: f64) -> f64 {
 }
 
 /// Return metadata for the nakshatra containing the given longitude.
-/// 
+///
 /// Returns a struct containing id, name, lord, index, start/end degrees,
 /// within-nakshatra offset, pada number, and pada fraction.
 pub fn get_nakshatra_for_longitude(longitude: f64) -> NakshatraMetadata {
     let lon = normalize_degrees(longitude);
     let index = (lon / NAKSHATRA_SEGMENT_SIZE) as usize % NAKSHATRA_TABLE.len();
     let entry = &NAKSHATRA_TABLE[index];
-    
+
     let offset = lon - entry.start;
     let pada = (offset / PADA_SIZE) as i32 + 1;
     let pada_offset = offset - ((pada - 1) as f64 * PADA_SIZE);
     let pada_fraction = pada_offset / PADA_SIZE;
-    
+
     NakshatraMetadata {
         base: entry.clone(),
         offset,
@@ -155,20 +155,20 @@ pub fn annotate_layer_nakshatras(
     object_filter: Option<&Vec<String>>,
 ) -> HashMap<String, NakshatraPlacement> {
     let mut placements: HashMap<String, NakshatraPlacement> = HashMap::new();
-    
+
     let planets = &layer_positions.planets;
     let target_ids: Vec<&String> = if let Some(filter) = object_filter {
         planets.keys().filter(|id| filter.contains(id)).collect()
     } else {
         planets.keys().collect()
     };
-    
+
     for obj_id in target_ids {
         if let Some(planet) = planets.get(obj_id) {
             placements.insert(obj_id.clone(), build_placement(obj_id.clone(), planet.lon));
         }
     }
-    
+
     if include_angles {
         if let Some(houses) = &layer_positions.houses {
             for (angle_id, lon) in &houses.angles {
@@ -176,14 +176,14 @@ pub fn annotate_layer_nakshatras(
             }
         }
     }
-    
+
     placements
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_normalize_degrees() {
         assert_eq!(normalize_degrees(0.0), 0.0);
@@ -192,17 +192,16 @@ mod tests {
         assert_eq!(normalize_degrees(-10.0), 350.0);
         assert_eq!(normalize_degrees(370.0), 10.0);
     }
-    
+
     #[test]
     fn test_get_nakshatra_for_longitude() {
         let meta = get_nakshatra_for_longitude(0.0);
         assert_eq!(meta.base.id, "ashwini");
         assert_eq!(meta.base.lord, "ketu");
         assert_eq!(meta.pada, 1);
-        
+
         let meta2 = get_nakshatra_for_longitude(13.33);
         assert_eq!(meta2.base.id, "ashwini");
         assert!(meta2.pada >= 1 && meta2.pada <= 4);
     }
 }
-

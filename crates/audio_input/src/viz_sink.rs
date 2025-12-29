@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 
-use talisman_core::{Sink, ModuleSchema, Port, PortDirection, DataType, Signal};
+use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
 
 fn now_micros() -> u64 {
     SystemTime::now()
@@ -66,7 +66,10 @@ impl Sink for AudioVizSink {
             return Ok(None);
         }
 
-        let Signal::Audio { timestamp_us, data, .. } = signal else {
+        let Signal::Audio {
+            timestamp_us, data, ..
+        } = signal
+        else {
             return Ok(None);
         };
 

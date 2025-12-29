@@ -68,7 +68,11 @@ pub enum ModalState {
     /// Tile maximized/control view (tile_id)
     Maximized { tile_id: String },
     /// Add tile picker (in layout mode)
-    AddTilePicker { cursor_col: usize, cursor_row: usize, selected_idx: usize },
+    AddTilePicker {
+        cursor_col: usize,
+        cursor_row: usize,
+        selected_idx: usize,
+    },
 }
 
 /// Modal stack for hierarchical modal management
@@ -108,7 +112,9 @@ impl ModalStack {
 
     /// Check if patch bay is open
     pub fn is_patch_bay_open(&self) -> bool {
-        self.stack.iter().any(|m| matches!(m, ModalState::PatchBay(_)))
+        self.stack
+            .iter()
+            .any(|m| matches!(m, ModalState::PatchBay(_)))
     }
 
     /// Get mutable reference to active patch bay state
@@ -133,7 +139,9 @@ impl ModalStack {
 
     /// Check if global settings is open
     pub fn is_global_settings_open(&self) -> bool {
-        self.stack.iter().any(|m| matches!(m, ModalState::GlobalSettings(_)))
+        self.stack
+            .iter()
+            .any(|m| matches!(m, ModalState::GlobalSettings(_)))
     }
 
     /// Get mutable reference to active global settings state
@@ -158,7 +166,9 @@ impl ModalStack {
 
     /// Check if layout manager is open
     pub fn is_layout_manager_open(&self) -> bool {
-        self.stack.iter().any(|m| matches!(m, ModalState::LayoutManager))
+        self.stack
+            .iter()
+            .any(|m| matches!(m, ModalState::LayoutManager))
     }
 
     /// Check if a tile is maximized
@@ -171,12 +181,15 @@ impl ModalStack {
         None
     }
 
-
-
     /// Check if add tile picker is open
     pub fn get_add_tile_picker(&self) -> Option<(usize, usize, usize)> {
         for modal in self.stack.iter().rev() {
-            if let ModalState::AddTilePicker { cursor_col, cursor_row, selected_idx } = modal {
+            if let ModalState::AddTilePicker {
+                cursor_col,
+                cursor_row,
+                selected_idx,
+            } = modal
+            {
                 return Some((*cursor_col, *cursor_row, *selected_idx));
             }
         }
@@ -184,7 +197,11 @@ impl ModalStack {
     }
 
     pub fn open_add_tile_picker(&mut self, col: usize, row: usize) {
-        self.push(ModalState::AddTilePicker { cursor_col: col, cursor_row: row, selected_idx: 0 });
+        self.push(ModalState::AddTilePicker {
+            cursor_col: col,
+            cursor_row: row,
+            selected_idx: 0,
+        });
     }
 
     pub fn move_add_tile_picker_selection(&mut self, delta: i32, len: usize) {
@@ -202,7 +219,11 @@ impl ModalStack {
 
     /// Close a specific modal type (removes first match from top)
     pub fn close(&mut self, modal: &ModalState) {
-        if let Some(pos) = self.stack.iter().rposition(|m| std::mem::discriminant(m) == std::mem::discriminant(modal)) {
+        if let Some(pos) = self
+            .stack
+            .iter()
+            .rposition(|m| std::mem::discriminant(m) == std::mem::discriminant(modal))
+        {
             self.stack.remove(pos);
         }
     }

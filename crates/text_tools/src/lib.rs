@@ -2,8 +2,8 @@
 //!
 //! Provides text processing modules for the Talisman system.
 
-mod sinks;
 mod save_file;
+mod sinks;
 
-pub use sinks::{WordCountSink, DevowelizerSink};
-pub use save_file::{SaveFileSink, OutputFormat};
+pub use save_file::{OutputFormat, SaveFileSink};
+pub use sinks::{DevowelizerSink, WordCountSink};

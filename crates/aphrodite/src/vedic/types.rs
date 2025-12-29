@@ -1,11 +1,11 @@
 //! Vedic astrology types and integration structures.
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use crate::vedic::dashas::VimshottariResponse;
 use crate::vedic::nakshatra::NakshatraPlacement;
 use crate::vedic::vargas::VargaLayer;
 use crate::vedic::yogas::Yoga;
-use crate::vedic::dashas::VimshottariResponse;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NakshatraLayer {
@@ -30,4 +30,3 @@ pub struct VedicPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dashas: Option<VimshottariResponse>,
 }
-

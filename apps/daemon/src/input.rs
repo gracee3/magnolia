@@ -3,9 +3,9 @@
 //! Centralized keyboard-first navigation system for Talisman.
 //! Arrow keys work in all modes, ESC cascades through navigation hierarchy.
 
-use talisman_core::{LayoutConfig, TileConfig};
-use nannou::prelude::Key;
 use crate::tiles::TileRegistry;
+use nannou::prelude::Key;
+use talisman_core::{LayoutConfig, TileConfig};
 
 /// Top-level input mode
 #[derive(Debug, Clone, PartialEq)]
@@ -151,7 +151,6 @@ impl KeyboardNav {
         layout: &mut LayoutConfig,
         registry: &TileRegistry,
     ) -> Option<AppAction> {
-        
         // 1. Global Shortcuts (Ctrl+)
         if ctrl {
             match key {
@@ -164,16 +163,16 @@ impl KeyboardNav {
                         }
                     }
                     return None;
-                },
+                }
                 _ => return None,
             }
         }
 
         // 2. Tile-Specific Keybinds
         if self.has_selection() {
-             if self.dispatch_tile_keybind(key, layout, registry) {
-                 return None; 
-             }
+            if self.dispatch_tile_keybind(key, layout, registry) {
+                return None;
+            }
         }
 
         // 3. Navigation & Mode specific handling
@@ -187,7 +186,7 @@ impl KeyboardNav {
                     Key::Right => Direction::Right,
                     _ => unreachable!(),
                 };
-                
+
                 match self.mode {
                     InputMode::Normal | InputMode::Patch => {
                         // Smart tile-to-tile navigation
@@ -195,71 +194,71 @@ impl KeyboardNav {
                             log::debug!("Navigated to tile: {}", tile_id);
                         } else {
                             // No tile found, deselect
-                             self.deselect();
-                             log::debug!("No adjacent tile in that direction");
+                            self.deselect();
+                            log::debug!("No adjacent tile in that direction");
                         }
-                    },
+                    }
                     InputMode::Layout => {
-                         self.handle_layout_arrows(direction, layout);
-                    },
+                        self.handle_layout_arrows(direction, layout);
+                    }
                 }
-            },
-            
+            }
+
             // === E - Settings / Edit / Layout Mode ===
             Key::E => {
                 match self.mode {
                     InputMode::Normal => {
-                         if let Some(tile_id) = self.selected_tile_id() {
-                             return Some(AppAction::OpenTileSettings { tile_id: tile_id.to_string() });
-                         } else {
-                             self.enter_layout_mode();
-                             log::info!("Entered layout mode");
-                         }
-                    },
+                        if let Some(tile_id) = self.selected_tile_id() {
+                            return Some(AppAction::OpenTileSettings {
+                                tile_id: tile_id.to_string(),
+                            });
+                        } else {
+                            self.enter_layout_mode();
+                            log::info!("Entered layout mode");
+                        }
+                    }
                     InputMode::Layout => {
                         if self.has_selection() {
                             if self.enter_resize_mode(layout) {
                                 log::info!("Entered resize mode");
                             }
                         }
-                    },
+                    }
                     InputMode::Patch => {
                         // Port selection deferred
                     }
                 }
-            },
+            }
 
             // === P - Patch Mode ===
-            Key::P => {
-                match self.mode {
-                    InputMode::Normal => {
-                        self.enter_patch_mode();
-                        return Some(AppAction::OpenPatchBay); 
-                    },
-                    InputMode::Patch => {
-                         self.exit_patch_mode();
-                    },
-                    InputMode::Layout => {
-                        self.exit_layout_mode();
-                        self.enter_patch_mode();
-                    }
+            Key::P => match self.mode {
+                InputMode::Normal => {
+                    self.enter_patch_mode();
+                    return Some(AppAction::OpenPatchBay);
+                }
+                InputMode::Patch => {
+                    self.exit_patch_mode();
+                }
+                InputMode::Layout => {
+                    self.exit_layout_mode();
+                    self.enter_patch_mode();
                 }
             },
 
             // === SPACE - Move/Resize Toggle ===
             Key::Space => {
                 if self.mode == InputMode::Layout {
-                     match &self.layout_state {
+                    match &self.layout_state {
                         LayoutSubState::Resize { .. } => {
-                             self.enter_move_mode(layout);
-                        },
+                            self.enter_move_mode(layout);
+                        }
                         LayoutSubState::Move { .. } => {
-                             self.enter_resize_mode(layout);
-                        },
+                            self.enter_resize_mode(layout);
+                        }
                         _ => {}
-                     }
+                    }
                 }
-            },
+            }
 
             // === ENTER - Confirm / Select ===
             Key::Return => {
@@ -272,24 +271,24 @@ impl KeyboardNav {
                         } else {
                             return Some(AppAction::ToggleMaximize);
                         }
-                    },
+                    }
                     InputMode::Layout => {
                         match &self.layout_state {
-                             LayoutSubState::Resize { .. } | LayoutSubState::Move { .. } => {
-                                 self.exit_resize_move_mode();
-                                 return Some(AppAction::SaveLayout);
-                             },
-                             LayoutSubState::Navigation => {
-                                 if self.select_tile_at_cursor(layout).is_none() {
-                                     // Empty cell: open add-tile picker at cursor
-                                     let (col, row) = self.cursor;
-                                     return Some(AppAction::OpenAddTilePicker { col, row });
-                                 }
-                             }
+                            LayoutSubState::Resize { .. } | LayoutSubState::Move { .. } => {
+                                self.exit_resize_move_mode();
+                                return Some(AppAction::SaveLayout);
+                            }
+                            LayoutSubState::Navigation => {
+                                if self.select_tile_at_cursor(layout).is_none() {
+                                    // Empty cell: open add-tile picker at cursor
+                                    let (col, row) = self.cursor;
+                                    return Some(AppAction::OpenAddTilePicker { col, row });
+                                }
+                            }
                         }
                     }
                 }
-            },
+            }
 
             // === ESCAPE - Back / Cancel ===
             Key::Escape => {
@@ -297,48 +296,50 @@ impl KeyboardNav {
                 match result {
                     EscapeResult::ExitedSubMode => {
                         if let Some(bounds) = self.get_original_bounds() {
-                             if let Some(tile_id) = self.selected_tile_id() {
-                                 if let Some(tile) = layout.tiles.iter_mut().find(|t| t.id == tile_id) {
-                                     tile.col = bounds.0;
-                                     tile.row = bounds.1;
-                                     tile.colspan = Some(bounds.2);
-                                     tile.rowspan = Some(bounds.3);
-                                 }
-                             }
+                            if let Some(tile_id) = self.selected_tile_id() {
+                                if let Some(tile) =
+                                    layout.tiles.iter_mut().find(|t| t.id == tile_id)
+                                {
+                                    tile.col = bounds.0;
+                                    tile.row = bounds.1;
+                                    tile.colspan = Some(bounds.2);
+                                    tile.rowspan = Some(bounds.3);
+                                }
+                            }
                         }
-                    },
-                     _ => {}
+                    }
+                    _ => {}
                 }
-            },
+            }
 
             // === G - Global Settings ===
             Key::G => {
                 if self.mode == InputMode::Normal {
                     return Some(AppAction::OpenGlobalSettings);
                 }
-            },
+            }
 
             // === L - Layout Mode Toggle ===
             Key::L => {
                 // Shift+L -> Open Layout Manager Modal
                 if shift {
-                     return Some(AppAction::OpenLayoutManager);
+                    return Some(AppAction::OpenLayoutManager);
                 }
 
                 match self.mode {
                     InputMode::Normal => {
                         self.enter_layout_mode();
                         log::info!("Entered layout mode via L key");
-                    },
+                    }
                     InputMode::Layout => {
                         self.exit_layout_mode();
                         log::info!("Exited layout mode via L key");
-                    },
+                    }
                     InputMode::Patch => {
                         // L does nothing in patch mode
                     }
                 }
-            },
+            }
 
             // === D / Delete - Delete selected tile (Layout mode only) ===
             Key::D | Key::Delete | Key::Back => {
@@ -351,7 +352,7 @@ impl KeyboardNav {
                         return Some(AppAction::SaveLayout);
                     }
                 }
-            },
+            }
 
             // === A - Add tile (Layout mode only) ===
             Key::A => {
@@ -360,12 +361,12 @@ impl KeyboardNav {
                     let (col, row) = self.cursor;
                     return Some(AppAction::OpenAddTilePicker { col, row });
                 }
-            },
+            }
 
             // === Tab - Cycle through tiles ===
             Key::Tab => {
                 self.cycle_tile_selection(layout, true);
-            },
+            }
 
             _ => {}
         }
@@ -375,10 +376,10 @@ impl KeyboardNav {
 
     /// Internal helper to dispatch tile-specific keybinds
     fn dispatch_tile_keybind(
-        &mut self, 
-        key: Key, 
-        layout: &LayoutConfig, 
-        registry: &TileRegistry
+        &mut self,
+        key: Key,
+        layout: &LayoutConfig,
+        registry: &TileRegistry,
     ) -> bool {
         if let Some(tile_id) = self.selected_tile_id() {
             if let Some(tile_config) = layout.tiles.iter().find(|t| t.id == tile_id) {
@@ -387,7 +388,12 @@ impl KeyboardNav {
                     let key_str = format!("{:?}", key).to_lowercase();
                     for (action, bound_key) in keybinds {
                         if bound_key.to_lowercase() == key_str {
-                            log::info!("Executing keybind: {} -> {} on tile {}", bound_key, action, tile_id);
+                            log::info!(
+                                "Executing keybind: {} -> {} on tile {}",
+                                bound_key,
+                                action,
+                                tile_id
+                            );
                             return registry.execute_action(&tile_config.module, action);
                         }
                     }
@@ -402,31 +408,34 @@ impl KeyboardNav {
         let before_tiles = layout.tiles.clone();
 
         // Clone state to avoid holding borrow on self
-        let state = self.layout_state.clone(); 
-        
+        let state = self.layout_state.clone();
+
         match state {
             LayoutSubState::Resize { tile_id, .. } => {
                 let (delta_colspan, delta_rowspan) = Self::resize_direction(direction);
                 // Find tile index to mutate
                 if let Some(idx) = layout.tiles.iter().position(|t| t.id == tile_id) {
-                     let tile = &mut layout.tiles[idx];
-                     let current_colspan = tile.colspan.unwrap_or(1);
-                     let current_rowspan = tile.rowspan.unwrap_or(1);
+                    let tile = &mut layout.tiles[idx];
+                    let current_colspan = tile.colspan.unwrap_or(1);
+                    let current_rowspan = tile.rowspan.unwrap_or(1);
 
-                     // Apply resize
-                     let new_colspan = (current_colspan as i32 + delta_colspan).max(1) as usize;
-                     let new_rowspan = (current_rowspan as i32 + delta_rowspan).max(1) as usize;
-                     
-                     tile.colspan = Some(new_colspan);
-                     tile.rowspan = Some(new_rowspan);
+                    // Apply resize
+                    let new_colspan = (current_colspan as i32 + delta_colspan).max(1) as usize;
+                    let new_rowspan = (current_rowspan as i32 + delta_rowspan).max(1) as usize;
 
-					// Enforce no-overlap policy by resolving conflicts immediately.
-					if let Err(e) = layout.resolve_conflicts(Some(&tile_id)) {
-						log::warn!("Layout conflict resolution failed (reverting resize): {}", e);
-						layout.tiles = before_tiles;
-					}
+                    tile.colspan = Some(new_colspan);
+                    tile.rowspan = Some(new_rowspan);
+
+                    // Enforce no-overlap policy by resolving conflicts immediately.
+                    if let Err(e) = layout.resolve_conflicts(Some(&tile_id)) {
+                        log::warn!(
+                            "Layout conflict resolution failed (reverting resize): {}",
+                            e
+                        );
+                        layout.tiles = before_tiles;
+                    }
                 }
-            },
+            }
             LayoutSubState::Move { tile_id, .. } => {
                 self.navigate(direction);
                 let (new_col, new_row) = self.cursor;
@@ -436,23 +445,22 @@ impl KeyboardNav {
                     tile.row = new_row;
                 }
 
-				// Enforce no-overlap policy by resolving conflicts immediately.
-				if let Err(e) = layout.resolve_conflicts(Some(&tile_id)) {
-					log::warn!("Layout conflict resolution failed (reverting move): {}", e);
-					layout.tiles = before_tiles;
-				}
-            },
+                // Enforce no-overlap policy by resolving conflicts immediately.
+                if let Err(e) = layout.resolve_conflicts(Some(&tile_id)) {
+                    log::warn!("Layout conflict resolution failed (reverting move): {}", e);
+                    layout.tiles = before_tiles;
+                }
+            }
             LayoutSubState::Navigation => {
                 self.navigate(direction);
                 if let Some(_tile_id) = self.select_tile_at_cursor(layout) {
-                     // select_tile_at_cursor updates selection state
+                    // select_tile_at_cursor updates selection state
                 } else {
                     self.deselect();
                 }
             }
         }
     }
-
 
     /// Navigate cursor in direction, clamped to grid bounds
     pub fn navigate(&mut self, direction: Direction) {
@@ -467,23 +475,31 @@ impl KeyboardNav {
 
     /// Navigate to adjacent tile in the given direction using smart adjacency detection
     /// Returns the tile ID if navigation successful, None otherwise
-    pub fn navigate_to_adjacent_tile(&mut self, direction: Direction, layout: &LayoutConfig) -> Option<String> {
+    pub fn navigate_to_adjacent_tile(
+        &mut self,
+        direction: Direction,
+        layout: &LayoutConfig,
+    ) -> Option<String> {
         // Get current tile if any
         let current_tile = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1);
-        
+
         if let Some(current) = current_tile {
             // Find the best adjacent tile in the specified direction
             if let Some(adjacent) = self.find_adjacent_tile(current, direction, layout) {
                 // Move cursor to the adjacent tile's position
                 self.cursor = (adjacent.col, adjacent.row);
-                self.selection = SelectionState::TileSelected { tile_id: adjacent.id.clone() };
+                self.selection = SelectionState::TileSelected {
+                    tile_id: adjacent.id.clone(),
+                };
                 return Some(adjacent.id.clone());
             } else {
                 // No adjacent tile found, try moving cursor anyway
                 self.navigate(direction);
                 if let Some(tile) = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1) {
                     if tile.id != current.id {
-                        self.selection = SelectionState::TileSelected { tile_id: tile.id.clone() };
+                        self.selection = SelectionState::TileSelected {
+                            tile_id: tile.id.clone(),
+                        };
                         return Some(tile.id.clone());
                     }
                 }
@@ -492,11 +508,13 @@ impl KeyboardNav {
             // No current tile, just move cursor and select whatever is there
             self.navigate(direction);
             if let Some(tile) = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1) {
-                self.selection = SelectionState::TileSelected { tile_id: tile.id.clone() };
+                self.selection = SelectionState::TileSelected {
+                    tile_id: tile.id.clone(),
+                };
                 return Some(tile.id.clone());
             }
         }
-        
+
         None
     }
 
@@ -541,7 +559,7 @@ impl KeyboardNav {
                     } else {
                         (false, 0)
                     }
-                },
+                }
                 Direction::Down => {
                     // Tile must be directly below
                     if cur_row + cur_rowspan == tile_row {
@@ -556,7 +574,7 @@ impl KeyboardNav {
                     } else {
                         (false, 0)
                     }
-                },
+                }
                 Direction::Left => {
                     // Tile must be directly to the left
                     if tile_col + tile_colspan == cur_col {
@@ -571,7 +589,7 @@ impl KeyboardNav {
                     } else {
                         (false, 0)
                     }
-                },
+                }
                 Direction::Right => {
                     // Tile must be directly to the right
                     if cur_col + cur_colspan == tile_col {
@@ -586,7 +604,7 @@ impl KeyboardNav {
                     } else {
                         (false, 0)
                     }
-                },
+                }
             };
 
             if is_adjacent && overlap > best_overlap {
@@ -602,14 +620,14 @@ impl KeyboardNav {
     pub fn select_tile_at_cursor(&mut self, layout: &LayoutConfig) -> Option<String> {
         if let Some(tile) = Self::get_tile_at_cell(layout, self.cursor.0, self.cursor.1) {
             let tile_id = tile.id.clone();
-            self.selection = SelectionState::TileSelected { tile_id: tile_id.clone() };
+            self.selection = SelectionState::TileSelected {
+                tile_id: tile_id.clone(),
+            };
             Some(tile_id)
         } else {
             None
         }
     }
-
-
 
     /// Deselect current tile, remembering it for potential re-select
     pub fn deselect(&mut self) {
@@ -662,16 +680,22 @@ impl KeyboardNav {
                 if forward {
                     (idx + 1) % sorted_tiles.len()
                 } else {
-                    if idx == 0 { sorted_tiles.len() - 1 } else { idx - 1 }
+                    if idx == 0 {
+                        sorted_tiles.len() - 1
+                    } else {
+                        idx - 1
+                    }
                 }
-            },
+            }
             None => 0, // Start at first tile if nothing selected
         };
 
         // Select the next tile
         let next_tile = sorted_tiles[next_idx];
         self.cursor = (next_tile.col, next_tile.row);
-        self.selection = SelectionState::TileSelected { tile_id: next_tile.id.clone() };
+        self.selection = SelectionState::TileSelected {
+            tile_id: next_tile.id.clone(),
+        };
         log::debug!("Tab navigation: selected tile {}", next_tile.id);
     }
 
@@ -721,9 +745,10 @@ impl KeyboardNav {
         // Can enter move mode from resize mode or tile selected
         // Extract data first to avoid borrow conflict
         let resize_data = match &self.layout_state {
-            LayoutSubState::Resize { tile_id, original_bounds } => {
-                Some((tile_id.clone(), *original_bounds))
-            }
+            LayoutSubState::Resize {
+                tile_id,
+                original_bounds,
+            } => Some((tile_id.clone(), *original_bounds)),
             _ => None,
         };
 
@@ -734,7 +759,7 @@ impl KeyboardNav {
             };
             return true;
         }
-            
+
         // If not in resize mode, check selection
         if let SelectionState::TileSelected { tile_id } = &self.selection {
             let tile_id = tile_id.clone();
@@ -751,7 +776,7 @@ impl KeyboardNav {
                 return true;
             }
         }
-        
+
         false
     }
 
@@ -762,9 +787,9 @@ impl KeyboardNav {
             LayoutSubState::Move { tile_id, .. } => Some(tile_id.clone()),
             _ => None,
         };
-        
+
         self.layout_state = LayoutSubState::Navigation;
-        
+
         if let Some(id) = tile_id {
             self.selection = SelectionState::TileSelected { tile_id: id };
         }
@@ -783,8 +808,12 @@ impl KeyboardNav {
     /// Get original bounds if in resize/move mode
     pub fn get_original_bounds(&self) -> Option<(usize, usize, usize, usize)> {
         match &self.layout_state {
-            LayoutSubState::Resize { original_bounds, .. } => Some(*original_bounds),
-            LayoutSubState::Move { original_bounds, .. } => Some(*original_bounds),
+            LayoutSubState::Resize {
+                original_bounds, ..
+            } => Some(*original_bounds),
+            LayoutSubState::Move {
+                original_bounds, ..
+            } => Some(*original_bounds),
             _ => None,
         }
     }
@@ -817,23 +846,21 @@ impl KeyboardNav {
                     EscapeResult::NoAction
                 }
             }
-            InputMode::Layout => {
-                match &self.layout_state {
-                    LayoutSubState::Resize { .. } | LayoutSubState::Move { .. } => {
-                        self.exit_resize_move_mode();
-                        EscapeResult::ExitedSubMode
-                    }
-                    LayoutSubState::Navigation => {
-                        if self.has_selection() {
-                            self.deselect();
-                            EscapeResult::Deselected
-                        } else {
-                            self.exit_layout_mode();
-                            EscapeResult::ExitedMode
-                        }
+            InputMode::Layout => match &self.layout_state {
+                LayoutSubState::Resize { .. } | LayoutSubState::Move { .. } => {
+                    self.exit_resize_move_mode();
+                    EscapeResult::ExitedSubMode
+                }
+                LayoutSubState::Navigation => {
+                    if self.has_selection() {
+                        self.deselect();
+                        EscapeResult::Deselected
+                    } else {
+                        self.exit_layout_mode();
+                        EscapeResult::ExitedMode
                     }
                 }
-            }
+            },
             InputMode::Patch => {
                 if self.has_selection() {
                     self.deselect();
@@ -868,20 +895,20 @@ mod tests {
     fn test_navigation() {
         let mut nav = KeyboardNav::new();
         nav.set_grid_size(4, 4);
-        
+
         assert_eq!(nav.cursor, (0, 0));
-        
+
         nav.navigate(Direction::Right);
         assert_eq!(nav.cursor, (1, 0));
-        
+
         nav.navigate(Direction::Down);
         assert_eq!(nav.cursor, (1, 1));
-        
+
         // Test clamping at edges
         nav.cursor = (3, 3);
         nav.navigate(Direction::Right);
         assert_eq!(nav.cursor, (3, 3));
-        
+
         nav.navigate(Direction::Down);
         assert_eq!(nav.cursor, (3, 3));
     }
@@ -889,15 +916,17 @@ mod tests {
     #[test]
     fn test_selection() {
         let mut nav = KeyboardNav::new();
-        
+
         assert!(!nav.has_selection());
         assert!(nav.selected_tile_id().is_none());
-        
+
         // Manual internal selection
-        nav.selection = SelectionState::TileSelected { tile_id: "test_tile".to_string() };
+        nav.selection = SelectionState::TileSelected {
+            tile_id: "test_tile".to_string(),
+        };
         assert!(nav.has_selection());
         assert_eq!(nav.selected_tile_id(), Some("test_tile"));
-        
+
         nav.deselect();
         assert!(!nav.has_selection());
         assert_eq!(nav.last_selected, Some("test_tile".to_string()));
@@ -906,18 +935,16 @@ mod tests {
     #[test]
     fn test_mode_transitions() {
         let mut nav = KeyboardNav::new();
-        
+
         assert_eq!(nav.mode, InputMode::Normal);
-        
+
         nav.enter_layout_mode();
         assert_eq!(nav.mode, InputMode::Layout);
-        
+
         nav.exit_layout_mode();
         assert_eq!(nav.mode, InputMode::Normal);
-        
+
         nav.enter_patch_mode();
         assert_eq!(nav.mode, InputMode::Patch);
     }
 }
-
-

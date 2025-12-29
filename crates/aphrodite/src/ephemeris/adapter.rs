@@ -5,8 +5,8 @@ use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
-use thiserror::Error;
 use swisseph::swe::{calc_ut, julday, revjul};
+use thiserror::Error;
 
 // Note: swisseph crate API - these constants and functions should be available
 // If the crate API differs, adjust accordingly
@@ -19,7 +19,10 @@ pub enum EphemerisError {
     #[error("Invalid house system: {system}. Valid systems: {valid:?}")]
     InvalidHouseSystem { system: String, valid: Vec<String> },
     #[error("Invalid ayanamsa: {ayanamsa}. Valid ayanamsas: {valid:?}")]
-    InvalidAyanamsa { ayanamsa: String, valid: Vec<String> },
+    InvalidAyanamsa {
+        ayanamsa: String,
+        valid: Vec<String>,
+    },
     #[error("Failed to calculate position for {planet_id} at {datetime}: {message}")]
     CalculationFailed {
         planet_id: String,
@@ -63,17 +66,17 @@ const HOUSE_SYSTEMS: &[(&str, u8)] = &[
 /// Ayanamsa mapping - using Swiss Ephemeris constants
 /// These values match the Swiss Ephemeris library constants
 const AYANAMSAS: &[(&str, i32)] = &[
-    ("lahiri", 1),      // SIDM_LAHIRI
-    ("chitrapaksha", 1), // SIDM_LAHIRI (same as Lahiri)
-    ("fagan_bradley", 2), // SIDM_FAGAN_BRADLEY
-    ("de_luce", 3),     // SIDM_DELUCE
-    ("raman", 4),       // SIDM_RAMAN
-    ("krishnamurti", 5), // SIDM_KRISHNAMURTI
-    ("yukteshwar", 6),  // SIDM_YUKTESHWAR
-    ("djwhal_khul", 7), // SIDM_DJWHAL_KHUL
-    ("true_citra", 8),  // SIDM_TRUE_CITRA
-    ("true_revati", 9), // SIDM_TRUE_REVATI
-    ("aryabhata", 10),  // SIDM_ARYABHATA
+    ("lahiri", 1),              // SIDM_LAHIRI
+    ("chitrapaksha", 1),        // SIDM_LAHIRI (same as Lahiri)
+    ("fagan_bradley", 2),       // SIDM_FAGAN_BRADLEY
+    ("de_luce", 3),             // SIDM_DELUCE
+    ("raman", 4),               // SIDM_RAMAN
+    ("krishnamurti", 5),        // SIDM_KRISHNAMURTI
+    ("yukteshwar", 6),          // SIDM_YUKTESHWAR
+    ("djwhal_khul", 7),         // SIDM_DJWHAL_KHUL
+    ("true_citra", 8),          // SIDM_TRUE_CITRA
+    ("true_revati", 9),         // SIDM_TRUE_REVATI
+    ("aryabhata", 10),          // SIDM_ARYABHATA
     ("aryabhata_mean_sun", 11), // SIDM_ARYABHATA_MSUN
 ];
 
@@ -186,12 +189,13 @@ impl SwissEphemerisAdapter {
             })?;
 
         // Calculate planet position using swisseph crate
-        let result = calc_ut(jd, planet_code as u32, flags as u32)
-            .map_err(|e| EphemerisError::CalculationFailed {
+        let result = calc_ut(jd, planet_code as u32, flags as u32).map_err(|e| {
+            EphemerisError::CalculationFailed {
                 planet_id: planet_id.to_string(),
                 datetime: julian_day_to_datetime(jd),
                 message: format!("Swiss Ephemeris error: {}", e),
-            })?;
+            }
+        })?;
 
         let result_array = result.out;
         let longitude = result_array[0] % 360.0;
@@ -222,20 +226,29 @@ impl SwissEphemerisAdapter {
         // Since HouseSystemKind is private, use houses_ex from swe module
         use swisseph::swe::houses_ex;
         let (c, a) = houses_ex(jd, flags, lat, lon, house_system_byte as i32);
-        
+
         // Convert arrays to Cusp and AscMc structs
-        use swisseph::{Cusp, AscMc};
+        use swisseph::{AscMc, Cusp};
         let cusps = Cusp::from_array(c);
         let ascmc = AscMc::from_array(a);
 
         // Extract house cusps - Cusp struct has fields: first, second, third, etc.
         let mut cusps_dict = HashMap::new();
         let cusp_values = [
-            cusps.first, cusps.second, cusps.third, cusps.fourth,
-            cusps.fifth, cusps.sixth, cusps.seventh, cusps.eighth,
-            cusps.ninth, cusps.tenth, cusps.eleventh, cusps.twelfth,
+            cusps.first,
+            cusps.second,
+            cusps.third,
+            cusps.fourth,
+            cusps.fifth,
+            cusps.sixth,
+            cusps.seventh,
+            cusps.eighth,
+            cusps.ninth,
+            cusps.tenth,
+            cusps.eleventh,
+            cusps.twelfth,
         ];
-        
+
         for (i, &cusp) in cusp_values.iter().enumerate() {
             cusps_dict.insert((i + 1).to_string(), cusp % 360.0);
         }
@@ -337,7 +350,9 @@ fn get_house_system_byte(house_system: &str) -> Result<u8, EphemerisError> {
         .map(|(_, byte)| *byte)
         .ok_or_else(|| EphemerisError::InvalidHouseSystem {
             system: house_system.to_string(),
-            valid: HOUSE_SYSTEMS.iter().map(|(name, _)| name.to_string()).collect(),
+            valid: HOUSE_SYSTEMS
+                .iter()
+                .map(|(name, _)| name.to_string())
+                .collect(),
         })
 }
-

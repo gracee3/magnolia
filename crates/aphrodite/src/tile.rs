@@ -3,10 +3,10 @@
 //! Monitor mode: Shows current sun/moon positions
 //! Control mode: Full astrological wheel chart with planets, houses, and signs
 
+use chrono::{FixedOffset, TimeZone, Utc};
 use nannou::prelude::*;
-use talisman_ui::{FontId, draw_text, TextAlignment};
-use chrono::{Utc, TimeZone, FixedOffset};
-use talisman_core::{TileRenderer, RenderContext, BindableAction};
+use talisman_core::{BindableAction, RenderContext, TileRenderer};
+use talisman_ui::{draw_text, FontId, TextAlignment};
 
 /// Transit mode for bi-wheel chart
 #[derive(Debug, Clone, Default)]
@@ -19,25 +19,24 @@ pub enum TransitMode {
     // Future: Fixed(DateTime<Utc>) for user-specified transit time
 }
 
-use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation, LayerPositions};
-use crate::chart::{RadixChart, TransitChart, ChartSettings, ChartData, ChartAnimation};
-
+use crate::chart::{ChartAnimation, ChartData, ChartSettings, RadixChart, TransitChart};
+use crate::ephemeris::{EphemerisSettings, GeoLocation, LayerPositions, SwissEphemerisAdapter};
 
 pub struct AstroTile {
     // Ephemeris state
     adapter: Option<SwissEphemerisAdapter>,
     eph_settings: EphemerisSettings,
-    
+
     // Natal (radix) chart - hardcoded for now
     natal_location: GeoLocation,
     natal_datetime: chrono::DateTime<Utc>,
     radix_positions: Option<LayerPositions>,
-    
+
     // Transit layer (bi-wheel)
     transit_mode: TransitMode,
     transit_positions: Option<LayerPositions>,
     transit_animation: ChartAnimation,
-    
+
     // Display state
     sun_longitude: f64,
     moon_longitude: f64,
@@ -51,7 +50,7 @@ pub struct AstroTile {
 impl AstroTile {
     pub fn new() -> Self {
         let adapter = SwissEphemerisAdapter::new(None).ok();
-        
+
         let eph_settings = EphemerisSettings {
             zodiac_type: "tropical".to_string(),
             ayanamsa: None,
@@ -69,15 +68,18 @@ impl AstroTile {
                 "pluto".to_string(),
             ],
         };
-        
+
         // Hardcoded: Emmy - 11/21/1985 03:09am Columbia SC
         // Columbia SC: lat 34.0007, lon -81.0348
         // EST = UTC-5
-        let natal_location = GeoLocation { lat: 34.0007, lon: -81.0348 };
+        let natal_location = GeoLocation {
+            lat: 34.0007,
+            lon: -81.0348,
+        };
         let est = FixedOffset::west_opt(5 * 3600).unwrap();
         let natal_local = est.with_ymd_and_hms(1985, 11, 21, 3, 9, 0).unwrap();
         let natal_datetime = natal_local.with_timezone(&Utc);
-        
+
         let mut tile = Self {
             adapter,
             eph_settings,
@@ -95,16 +97,22 @@ impl AstroTile {
             show_degrees: true,
             show_moon: true,
         };
-        
+
         tile.refresh_ephemeris();
         tile
     }
-    
+
     fn refresh_ephemeris(&mut self) {
-        let Some(adapter) = self.adapter.as_mut() else { return; };
-        
+        let Some(adapter) = self.adapter.as_mut() else {
+            return;
+        };
+
         // Calculate RADIX (natal) positions at birth time
-        match adapter.calc_positions(self.natal_datetime, Some(self.natal_location.clone()), &self.eph_settings) {
+        match adapter.calc_positions(
+            self.natal_datetime,
+            Some(self.natal_location.clone()),
+            &self.eph_settings,
+        ) {
             Ok(pos) => {
                 self.sun_longitude = pos.planets.get("sun").map(|p| p.lon).unwrap_or(0.0);
                 self.moon_longitude = pos.planets.get("moon").map(|p| p.lon).unwrap_or(0.0);
@@ -116,7 +124,7 @@ impl AstroTile {
                 // Keep last known positions on error
             }
         }
-        
+
         // Calculate TRANSIT positions based on mode
         match &self.transit_mode {
             TransitMode::None => {
@@ -125,7 +133,11 @@ impl AstroTile {
             TransitMode::Now => {
                 let now = Utc::now();
                 // Transit uses same location as natal for house overlay
-                match adapter.calc_positions(now, Some(self.natal_location.clone()), &self.eph_settings) {
+                match adapter.calc_positions(
+                    now,
+                    Some(self.natal_location.clone()),
+                    &self.eph_settings,
+                ) {
                     Ok(pos) => {
                         self.transit_positions = Some(pos);
                     }
@@ -134,18 +146,31 @@ impl AstroTile {
             }
         }
     }
-    
+
     fn longitude_to_sign(longitude: f64) -> String {
         let signs = [
-            "Aries ♈", "Taurus ♉", "Gemini ♊", "Cancer ♋",
-            "Leo ♌", "Virgo ♍", "Libra ♎", "Scorpio ♏",
-            "Sagittarius ♐", "Capricorn ♑", "Aquarius ♒", "Pisces ♓"
+            "Aries ♈",
+            "Taurus ♉",
+            "Gemini ♊",
+            "Cancer ♋",
+            "Leo ♌",
+            "Virgo ♍",
+            "Libra ♎",
+            "Scorpio ♏",
+            "Sagittarius ♐",
+            "Capricorn ♑",
+            "Aquarius ♒",
+            "Pisces ♓",
         ];
-        let normalized = if longitude < 0.0 { longitude + 360.0 } else { longitude };
+        let normalized = if longitude < 0.0 {
+            longitude + 360.0
+        } else {
+            longitude
+        };
         let index = ((normalized / 30.0).floor() as usize) % 12;
         signs[index].to_string()
     }
-    
+
     // fn build_spec removed
 }
 
@@ -159,20 +184,20 @@ impl TileRenderer for AstroTile {
     fn id(&self) -> &str {
         "astro"
     }
-    
+
     fn name(&self) -> &str {
         "Astrology"
     }
-    
+
     fn update(&mut self) {
         // Tick transit animation if active
         self.transit_animation.update();
-        
+
         // Update ephemeris every 10 seconds
         if self.last_update.elapsed().as_secs() >= 10 {
             self.refresh_ephemeris();
             self.last_update = std::time::Instant::now();
-            
+
             // Start animation to new transit positions
             if let Some(t_pos) = &self.transit_positions {
                 let t_data: ChartData = t_pos.into();
@@ -180,17 +205,17 @@ impl TileRenderer for AstroTile {
             }
         }
     }
-    
+
     fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
         // Background
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
             .color(srgba(0.02, 0.02, 0.08, 0.9));
-        
+
         let line_height = rect.h() / 4.0;
         let font_size = (line_height * 0.6).min(24.0) as u32;
-        
+
         // Sun line
         let sun_text = if self.show_degrees {
             format!("☉ Sun: {:.1}° {}", self.sun_longitude, self.sun_sign)
@@ -206,7 +231,7 @@ impl TileRenderer for AstroTile {
             srgb(1.0, 0.8, 0.2),
             TextAlignment::Center,
         );
-        
+
         // Moon line
         if self.show_moon {
             let moon_text = if self.show_degrees {
@@ -224,7 +249,7 @@ impl TileRenderer for AstroTile {
                 TextAlignment::Center,
             );
         }
-        
+
         // Label
         draw_text(
             draw,
@@ -236,7 +261,7 @@ impl TileRenderer for AstroTile {
             TextAlignment::Center,
         );
     }
-    
+
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Draw the full astrological chart in maximized mode
         let Some(positions) = &self.radix_positions else {
@@ -255,31 +280,31 @@ impl TileRenderer for AstroTile {
 
         // Convert radix data
         let data: ChartData = positions.into();
-        
+
         // Setup Chart
         // TODO: Load settings from tile configuration or user prefs
         let settings = ChartSettings::default();
-        
+
         let min_dim = rect.w().min(rect.h());
         let radius = min_dim / 2.0 - settings.margin;
-        
+
         // Calculate chart shift (rotation so Asc is at 9 o'clock)
         let shift = if !data.cusps.is_empty() {
             180.0 - (data.cusps[0] + settings.shift_in_degrees)
         } else {
             0.0
         };
-        
+
         // Create Radix Chart
         let radix = RadixChart::new(rect.x(), rect.y(), radius, &data, &settings);
-        
+
         // Draw Layers
         radix.draw_bg(draw);
         radix.draw_universe(draw);
         radix.draw_cusps(draw);
         radix.draw_axis(draw);
         radix.draw_points(draw);
-        
+
         // Draw transit overlay if available (with animation)
         if let Some(t_pos) = &self.transit_positions {
             let t_data_raw: ChartData = t_pos.into();
@@ -289,16 +314,14 @@ impl TileRenderer for AstroTile {
             } else {
                 t_data_raw
             };
-            let transit = TransitChart::new(
-                rect.x(), rect.y(), radius, shift, &t_data, &settings
-            );
+            let transit = TransitChart::new(rect.x(), rect.y(), radius, shift, &t_data, &settings);
             transit.draw_cusps(draw);
             transit.draw_points(draw);
         }
-        
+
         false
     }
-    
+
     fn settings_schema(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "type": "object",
@@ -314,7 +337,7 @@ impl TileRenderer for AstroTile {
             }
         }))
     }
-    
+
     fn apply_settings(&mut self, settings: &serde_json::Value) {
         if let Some(d) = settings.get("show_degrees").and_then(|v| v.as_bool()) {
             self.show_degrees = d;
@@ -323,14 +346,14 @@ impl TileRenderer for AstroTile {
             self.show_moon = m;
         }
     }
-    
+
     fn get_settings(&self) -> serde_json::Value {
         serde_json::json!({
             "show_degrees": self.show_degrees,
             "show_moon": self.show_moon
         })
     }
-    
+
     fn bindable_actions(&self) -> Vec<BindableAction> {
         vec![
             BindableAction::new("toggle_degrees", "Toggle Degrees", true),
@@ -338,7 +361,7 @@ impl TileRenderer for AstroTile {
             BindableAction::new("refresh", "Refresh Positions", false),
         ]
     }
-    
+
     fn execute_action(&mut self, action: &str) -> bool {
         match action {
             "toggle_degrees" => {
@@ -357,12 +380,11 @@ impl TileRenderer for AstroTile {
             _ => false,
         }
     }
-    
+
     fn get_display_text(&self) -> Option<String> {
         Some(format!(
             "Sun: {:.1}° {} | Moon: {:.1}° {}",
-            self.sun_longitude, self.sun_sign,
-            self.moon_longitude, self.moon_sign
+            self.sun_longitude, self.sun_sign, self.moon_longitude, self.moon_sign
         ))
     }
 }

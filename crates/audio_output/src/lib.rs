@@ -1,6 +1,6 @@
+mod settings;
 #[cfg(feature = "tile-rendering")]
 pub mod tile;
-mod settings;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::{error, info, warn};
 
-use talisman_core::{Sink, ModuleSchema, Port, PortDirection, DataType, Signal};
+use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
 use talisman_signals::ring_buffer::{self, RingBufferSender};
 
 pub use settings::AudioOutputSettings;
@@ -63,7 +63,10 @@ struct AudioOutputInner {
 }
 
 impl AudioOutputSink {
-    pub fn new(id: &str, settings: Arc<AudioOutputSettings>) -> anyhow::Result<(Self, Arc<AudioOutputState>)> {
+    pub fn new(
+        id: &str,
+        settings: Arc<AudioOutputSettings>,
+    ) -> anyhow::Result<(Self, Arc<AudioOutputState>)> {
         let state = Arc::new(AudioOutputState::default());
 
         let (inner, devices) = Self::build_stream(&settings)?;
@@ -81,26 +84,24 @@ impl AudioOutputSink {
         ))
     }
 
-    fn build_stream(settings: &AudioOutputSettings) -> anyhow::Result<(AudioOutputInner, Vec<String>)> {
+    fn build_stream(
+        settings: &AudioOutputSettings,
+    ) -> anyhow::Result<(AudioOutputInner, Vec<String>)> {
         let (tx, rx) = ring_buffer::channel::<f32>(OUTPUT_CAPACITY);
 
         let host = cpal::default_host();
         let available = host
             .output_devices()
-            .map(|devices| {
-                devices
-                    .filter_map(|d| d.name().ok())
-                    .collect::<Vec<_>>()
-            })
+            .map(|devices| devices.filter_map(|d| d.name().ok()).collect::<Vec<_>>())
             .unwrap_or_default();
 
         let selected = settings.selected();
         let device = if selected == "Default" {
             host.default_output_device()
         } else {
-            host.output_devices()
-                .ok()
-                .and_then(|mut devices| devices.find(|d| d.name().ok().as_deref() == Some(&selected)))
+            host.output_devices().ok().and_then(|mut devices| {
+                devices.find(|d| d.name().ok().as_deref() == Some(&selected))
+            })
         }
         .ok_or_else(|| anyhow::anyhow!("No output device"))?;
 
@@ -127,9 +128,7 @@ impl AudioOutputSink {
         stream.play()?;
         info!(
             "AudioOutputSink initialized. SR: {}, Ch: {}, Device: {}",
-            sample_rate,
-            channels,
-            selected
+            sample_rate, channels, selected
         );
 
         Ok((
@@ -192,7 +191,8 @@ impl Sink for AudioOutputSink {
             channels,
             timestamp_us,
             data,
-        } = signal else {
+        } = signal
+        else {
             return Ok(None);
         };
 
@@ -201,10 +201,7 @@ impl Sink for AudioOutputSink {
             if !inner.warned_mismatch.swap(true, Ordering::Relaxed) {
                 warn!(
                     "AudioOutputSink: format mismatch ({}Hz/{}ch) != output ({}Hz/{}ch)",
-                    sample_rate,
-                    channels,
-                    inner.sample_rate,
-                    inner.channels
+                    sample_rate, channels, inner.sample_rate, inner.channels
                 );
             }
             return Ok(None);

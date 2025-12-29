@@ -1,6 +1,9 @@
-use tokio::sync::mpsc;
+use crate::{
+    ExecutionModel, ModuleRuntime, ModuleSchema, Priority, Processor, RoutedSignal, Signal, Sink,
+    Source,
+};
 use async_trait::async_trait;
-use crate::{Signal, ModuleSchema, Source, Sink, Processor, ModuleRuntime, ExecutionModel, Priority, RoutedSignal};
+use tokio::sync::mpsc;
 
 /// Adapter to run a Source as a ModuleRuntime
 pub struct SourceAdapter<S: Source + 'static> {
@@ -20,31 +23,31 @@ impl<S: Source + 'static> ModuleRuntime for SourceAdapter<S> {
     fn id(&self) -> &str {
         &self.schema.id
     }
-    
+
     fn name(&self) -> &str {
         self.source.name()
     }
-    
+
     fn schema(&self) -> ModuleSchema {
         self.schema.clone()
     }
-    
+
     fn execution_model(&self) -> ExecutionModel {
         ExecutionModel::Async
     }
-    
+
     fn priority(&self) -> Priority {
         Priority::Normal
     }
-    
+
     fn is_enabled(&self) -> bool {
         self.source.is_enabled()
     }
-    
+
     fn set_enabled(&mut self, enabled: bool) {
         self.source.set_enabled(enabled);
     }
-    
+
     async fn run(&mut self, _inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<RoutedSignal>) {
         // Sources don't receive signals, they only emit
         // Clean async/await now that run() is async!
@@ -87,39 +90,43 @@ impl<S: Sink + 'static> ModuleRuntime for SinkAdapter<S> {
     fn id(&self) -> &str {
         &self.schema.id
     }
-    
+
     fn name(&self) -> &str {
         self.sink.name()
     }
-    
+
     fn schema(&self) -> ModuleSchema {
         self.schema.clone()
     }
-    
+
     fn execution_model(&self) -> ExecutionModel {
         ExecutionModel::Async
     }
-    
+
     fn priority(&self) -> Priority {
         Priority::Normal
     }
-    
+
     fn is_enabled(&self) -> bool {
         self.sink.is_enabled()
     }
-    
+
     fn set_enabled(&mut self, enabled: bool) {
         self.sink.set_enabled(enabled);
     }
-    
-    async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, _outbox: mpsc::Sender<RoutedSignal>) {
+
+    async fn run(
+        &mut self,
+        mut inbox: mpsc::Receiver<Signal>,
+        _outbox: mpsc::Sender<RoutedSignal>,
+    ) {
         // Sinks consume signals but don't emit (except via internal channels)
         // Clean async/await - no more runtime nesting!
         while let Some(signal) = inbox.recv().await {
             if !self.is_enabled() {
                 continue;
             }
-            
+
             if let Err(e) = self.sink.consume(signal).await {
                 log::error!("Sink {} error: {}", self.name(), e);
             }
@@ -146,37 +153,37 @@ impl<P: Processor + 'static> ModuleRuntime for ProcessorAdapter<P> {
     fn id(&self) -> &str {
         &self.schema.id
     }
-    
+
     fn name(&self) -> &str {
         self.processor.name()
     }
-    
+
     fn schema(&self) -> ModuleSchema {
         self.schema.clone()
     }
-    
+
     fn execution_model(&self) -> ExecutionModel {
         ExecutionModel::Async
     }
-    
+
     fn priority(&self) -> Priority {
         Priority::Normal
     }
-    
+
     fn is_enabled(&self) -> bool {
         self.processor.is_enabled()
     }
-    
+
     fn set_enabled(&mut self, enabled: bool) {
         self.processor.set_enabled(enabled);
     }
-    
+
     async fn run(&mut self, mut inbox: mpsc::Receiver<Signal>, outbox: mpsc::Sender<RoutedSignal>) {
         while let Some(signal) = inbox.recv().await {
             if !self.is_enabled() {
                 continue;
             }
-            
+
             match self.processor.process(signal).await {
                 Ok(Some(output)) => {
                     let routed = RoutedSignal {

@@ -195,9 +195,7 @@ pub fn build_planet_items(
         let lon = planet_pos.lon;
         let sign_index = get_sign_index(lon);
         let sign_degree = get_sign_degree(lon);
-        let house_index = houses
-            .as_ref()
-            .and_then(|h| get_house_index(lon, &h.cusps));
+        let house_index = houses.as_ref().and_then(|h| get_house_index(lon, &h.cusps));
 
         items.push(PlanetRingItem {
             id: format!("{}_{}", slug, planet_id),
@@ -249,4 +247,3 @@ pub fn build_planet_items(
 
     items
 }
-
