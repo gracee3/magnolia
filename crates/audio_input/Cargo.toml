@@ -11,7 +11,6 @@ tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:rustfft"]
 crate-type = ["rlib"]
 
 [dependencies]
-cpal = "0.15"
 talisman_signals = { path = "../talisman-signals" }
 talisman_core = { path = "../../core" }
 talisman-ui = { path = "../talisman-ui", features = ["tile-rendering"] }
@@ -28,3 +27,9 @@ rustfft = { version = "6.2", optional = true }
 
 # Removed: talisman-plugin-helper, talisman-core (to avoid circular deps if possible, though host uses core)
 # We rely on talisman-module-api and talisman-signals for shared types.
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.9.2"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+cpal = "0.15"

@@ -1,64 +1,56 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use log::{error, info};
+use log::{info, warn};
 
 use crate::AudioInputSettings;
+use crate::backend::{default_backend, AudioInputBackend, BackendStream};
+use crate::settings::AudioDeviceEntry;
 use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source};
-use talisman_signals::ring_buffer::{self, RingBufferReceiver, RingBufferSender};
+use talisman_signals::ring_buffer::{self, RingBufferReceiver};
 
 const DEFAULT_CAPACITY: usize = 16384;
 const DEFAULT_FRAME_SAMPLES: usize = 1024;
-
-struct SendStream {
-    _stream: cpal::Stream,
-}
-unsafe impl Send for SendStream {}
-unsafe impl Sync for SendStream {}
-
-fn now_micros() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as u64
-}
 
 /// Audio input source using CPAL, emitting buffered Audio signals.
 pub struct AudioInputSource {
     id: String,
     enabled: bool,
-    stream: Option<SendStream>,
-    sender: Option<RingBufferSender<f32>>,
+    stream: Option<BackendStream>,
     receiver: RingBufferReceiver<f32>,
     sample_rate: u32,
     channels: u16,
     frame_samples: usize,
     last_capture_us: Arc<AtomicU64>,
     settings: Arc<AudioInputSettings>,
+    backend: Mutex<Box<dyn AudioInputBackend>>,
 }
 
 impl AudioInputSource {
     pub fn new(id: &str, settings: Arc<AudioInputSettings>) -> anyhow::Result<Self> {
-        let (tx, rx) = ring_buffer::channel::<f32>(DEFAULT_CAPACITY);
         let last_capture_us = Arc::new(AtomicU64::new(0));
+        let backend = default_backend()?;
 
         let mut source = Self {
             id: id.to_string(),
             enabled: true,
             stream: None,
-            sender: Some(tx),
-            receiver: rx,
+            receiver: ring_buffer::channel::<f32>(DEFAULT_CAPACITY).1,
             sample_rate: 44100,
             channels: 2,
             frame_samples: DEFAULT_FRAME_SAMPLES,
             last_capture_us,
             settings,
+            backend: Mutex::new(backend),
         };
 
-        source.initialize()?;
+        if let Err(e) = source.initialize() {
+            // Keep the module alive so the user can retry via settings UI.
+            source.settings.set_last_error(Some(e.to_string()));
+        }
         Ok(source)
     }
 
@@ -67,58 +59,49 @@ impl AudioInputSource {
             return Ok(());
         }
 
-        let host = cpal::default_host();
-        let available = host
-            .input_devices()
-            .map(|devices| devices.filter_map(|d| d.name().ok()).collect::<Vec<_>>())
-            .unwrap_or_default();
-        self.settings.set_devices(available);
+        // Refresh device list in settings (best-effort).
+        match self
+            .backend
+            .lock()
+            .map_err(|_| anyhow::anyhow!("AudioInputSource backend lock poisoned"))?
+            .refresh_devices()
+        {
+            Ok(devs) => {
+                let entries = devs
+                    .into_iter()
+                    .map(|d| AudioDeviceEntry { id: d.id, name: d.name })
+                    .collect::<Vec<_>>();
+                self.settings.set_devices(entries);
+            }
+            Err(e) => {
+                warn!("AudioInputSource: failed to refresh devices: {e}");
+            }
+        }
 
         let selected = self.settings.selected();
-        let device = if selected == "Default" {
-            host.default_input_device()
-        } else {
-            host.input_devices().ok().and_then(|mut devices| {
-                devices.find(|d| d.name().ok().as_deref() == Some(&selected))
-            })
-        }
-        .ok_or_else(|| anyhow::anyhow!("No input device"))?;
 
-        let config = device.default_input_config()?;
-        let sample_rate = config.sample_rate().0;
-        let channels = config.channels();
-
-        let tx = self
-            .sender
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("No sender available"))?;
+        // Re-create ring buffer channel each initialization so we always have a valid producer handle.
+        let (tx, rx) = ring_buffer::channel::<f32>(DEFAULT_CAPACITY);
+        self.receiver = rx;
         let capture_us = self.last_capture_us.clone();
 
-        let err_fn = |err| error!("cpal input error: {}", err);
+        let (stream, fmt, resolved_name) = self
+            .backend
+            .lock()
+            .map_err(|_| anyhow::anyhow!("AudioInputSource backend lock poisoned"))?
+            .start(&selected, tx, capture_us)?;
 
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &config.into(),
-                move |data: &[f32], _| {
-                    capture_us.store(now_micros(), Ordering::Relaxed);
-                    for &sample in data {
-                        let _ = tx.try_send(sample);
-                    }
-                },
-                err_fn,
-                None,
-            )?,
-            _ => return Err(anyhow::anyhow!("Only F32 supported for now")),
-        };
+        self.settings.set_last_error(None);
+        self.settings.set_active_device(Some(resolved_name.clone()));
+        self.settings.set_format(fmt.sample_rate, fmt.channels);
 
-        stream.play()?;
         info!(
             "AudioInputSource initialized. SR: {}, Ch: {}, Device: {}",
-            sample_rate, channels, selected
+            fmt.sample_rate, fmt.channels, resolved_name
         );
-        self.stream = Some(SendStream { _stream: stream });
-        self.sample_rate = sample_rate;
-        self.channels = channels;
+        self.stream = Some(stream);
+        self.sample_rate = fmt.sample_rate;
+        self.channels = fmt.channels;
         Ok(())
     }
 }
@@ -133,7 +116,7 @@ impl Source for AudioInputSource {
         ModuleSchema {
             id: self.id.clone(),
             name: "Audio Input".to_string(),
-            description: "Captures audio from default input device via CPAL".to_string(),
+            description: "Captures audio from the system input device (PipeWire on Linux, CPAL elsewhere)".to_string(),
             ports: vec![Port {
                 id: "audio_out".to_string(),
                 label: "Audio Out".to_string(),

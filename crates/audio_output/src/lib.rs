@@ -1,27 +1,26 @@
 mod settings;
 #[cfg(feature = "tile-rendering")]
 pub mod tile;
+mod backend;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use log::{error, info, warn};
+use log::{info, warn};
 
 use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
 use talisman_signals::ring_buffer::{self, RingBufferSender};
+use crate::backend::{default_backend, AudioOutputBackend, BackendStream};
 
 pub use settings::AudioOutputSettings;
+use settings::AudioDeviceEntry;
 
 const OUTPUT_CAPACITY: usize = 32768;
-
-struct SendStream {
-    _stream: cpal::Stream,
-}
-unsafe impl Send for SendStream {}
-unsafe impl Sync for SendStream {}
 
 fn now_micros() -> u64 {
     SystemTime::now()
@@ -49,17 +48,25 @@ impl AudioOutputState {
 pub struct AudioOutputSink {
     id: String,
     enabled: bool,
-    inner: Mutex<AudioOutputInner>,
+    inner: Arc<Mutex<AudioOutputInner>>,
     state: Arc<AudioOutputState>,
     settings: Arc<AudioOutputSettings>,
+    backend: Arc<Mutex<Box<dyn AudioOutputBackend>>>,
+    rebuild_thread: Mutex<Option<RebuildThread>>,
+}
+
+struct RebuildThread {
+    stop_tx: mpsc::Sender<()>,
+    join: Option<thread::JoinHandle<()>>,
 }
 
 struct AudioOutputInner {
-    _stream: Option<SendStream>,
+    _stream: Option<BackendStream>,
     sender: RingBufferSender<f32>,
     sample_rate: u32,
     channels: u16,
     warned_mismatch: AtomicBool,
+    resolved_device: String,
 }
 
 impl AudioOutputSink {
@@ -69,78 +76,143 @@ impl AudioOutputSink {
     ) -> anyhow::Result<(Self, Arc<AudioOutputState>)> {
         let state = Arc::new(AudioOutputState::default());
 
-        let (inner, devices) = Self::build_stream(&settings)?;
+        let mut backend = default_backend()?;
+        let (inner, devices) = match Self::build_stream(&settings, backend.as_mut()) {
+            Ok(v) => v,
+            Err(e) => {
+                // Keep the module alive so the user can fix devices / backend and retry.
+                settings.set_last_error(Some(e.to_string()));
+                (
+                    AudioOutputInner {
+                        _stream: None,
+                        sender: ring_buffer::channel::<f32>(OUTPUT_CAPACITY).0,
+                        sample_rate: 0,
+                        channels: 0,
+                        warned_mismatch: AtomicBool::new(false),
+                        resolved_device: "Unavailable".to_string(),
+                    },
+                    vec![],
+                )
+            }
+        };
         settings.set_devices(devices);
 
-        Ok((
-            Self {
-                id: id.to_string(),
-                enabled: true,
-                inner: Mutex::new(inner),
-                state: state.clone(),
-                settings,
-            },
-            state,
-        ))
+        let inner = Arc::new(Mutex::new(inner));
+        let backend = Arc::new(Mutex::new(backend));
+
+        let sink = Self {
+            id: id.to_string(),
+            enabled: true,
+            inner: inner.clone(),
+            state: state.clone(),
+            settings: settings.clone(),
+            backend: backend.clone(),
+            rebuild_thread: Mutex::new(None),
+        };
+
+        sink.start_rebuild_thread();
+
+        Ok((sink, state))
     }
 
     fn build_stream(
         settings: &AudioOutputSettings,
-    ) -> anyhow::Result<(AudioOutputInner, Vec<String>)> {
+        backend: &mut dyn AudioOutputBackend,
+    ) -> anyhow::Result<(AudioOutputInner, Vec<AudioDeviceEntry>)> {
         let (tx, rx) = ring_buffer::channel::<f32>(OUTPUT_CAPACITY);
 
-        let host = cpal::default_host();
-        let available = host
-            .output_devices()
-            .map(|devices| devices.filter_map(|d| d.name().ok()).collect::<Vec<_>>())
-            .unwrap_or_default();
+        let available = backend.refresh_devices().unwrap_or_default();
+        let device_entries = available
+            .iter()
+            .map(|d| AudioDeviceEntry {
+                id: d.id.clone(),
+                name: d.name.clone(),
+            })
+            .collect::<Vec<_>>();
 
         let selected = settings.selected();
-        let device = if selected == "Default" {
-            host.default_output_device()
-        } else {
-            host.output_devices().ok().and_then(|mut devices| {
-                devices.find(|d| d.name().ok().as_deref() == Some(&selected))
-            })
-        }
-        .ok_or_else(|| anyhow::anyhow!("No output device"))?;
-
-        let config = device.default_output_config()?;
-        let sample_rate = config.sample_rate().0;
-        let channels = config.channels();
-
-        let err_fn = |err| error!("cpal output error: {}", err);
-
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_output_stream(
-                &config.into(),
-                move |data: &mut [f32], _| {
-                    for sample in data {
-                        *sample = rx.try_recv().unwrap_or(0.0);
-                    }
-                },
-                err_fn,
-                None,
-            )?,
-            _ => return Err(anyhow::anyhow!("Only F32 supported for now")),
-        };
-
-        stream.play()?;
+        let (stream, fmt, resolved_name) = backend.start(&selected, rx)?;
         info!(
             "AudioOutputSink initialized. SR: {}, Ch: {}, Device: {}",
-            sample_rate, channels, selected
+            fmt.sample_rate, fmt.channels, resolved_name
         );
+
+        settings.set_last_error(None);
+        settings.set_active_device(Some(resolved_name.clone()));
+        settings.set_format(fmt.sample_rate, fmt.channels);
 
         Ok((
             AudioOutputInner {
-                _stream: Some(SendStream { _stream: stream }),
+                _stream: Some(stream),
                 sender: tx,
-                sample_rate,
-                channels,
+                sample_rate: fmt.sample_rate,
+                channels: fmt.channels,
                 warned_mismatch: AtomicBool::new(false),
+                resolved_device: resolved_name,
             },
-            available,
+            device_entries,
         ))
+    }
+}
+
+impl AudioOutputSink {
+    fn start_rebuild_thread(&self) {
+        // Background thread that can rebuild the stream even when no audio is flowing
+        // (important for device selection to work while disconnected).
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let settings = self.settings.clone();
+        let inner = self.inner.clone();
+        let backend = self.backend.clone();
+
+        let join = thread::spawn(move || loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            if settings.take_pending() {
+                let mut backend_guard = match backend.lock() {
+                    Ok(g) => g,
+                    Err(_) => {
+                        settings.set_last_error(Some("AudioOutput backend lock poisoned".to_string()));
+                        thread::sleep(Duration::from_millis(200));
+                        continue;
+                    }
+                };
+
+                match AudioOutputSink::build_stream(&settings, backend_guard.as_mut()) {
+                    Ok((next, devices)) => {
+                        if let Ok(mut inner_guard) = inner.lock() {
+                            *inner_guard = next;
+                        }
+                        settings.set_devices(devices);
+                    }
+                    Err(e) => {
+                        settings.set_last_error(Some(e.to_string()));
+                    }
+                }
+            }
+
+            thread::sleep(Duration::from_millis(200));
+        });
+
+        if let Ok(mut guard) = self.rebuild_thread.lock() {
+            *guard = Some(RebuildThread {
+                stop_tx,
+                join: Some(join),
+            });
+        }
+    }
+}
+
+impl Drop for AudioOutputSink {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.rebuild_thread.lock() {
+            if let Some(t) = guard.take() {
+                let _ = t.stop_tx.send(());
+                if let Some(j) = t.join {
+                    let _ = j.join();
+                }
+            }
+        }
     }
 }
 
@@ -154,7 +226,7 @@ impl Sink for AudioOutputSink {
         ModuleSchema {
             id: self.id.clone(),
             name: "Audio Output".to_string(),
-            description: "Plays audio buffers via CPAL output".to_string(),
+            description: "Plays audio buffers to the system output device (PipeWire on Linux, CPAL elsewhere)".to_string(),
             ports: vec![Port {
                 id: "audio_in".to_string(),
                 label: "Audio In".to_string(),
@@ -178,13 +250,7 @@ impl Sink for AudioOutputSink {
             return Ok(None);
         }
 
-        if self.settings.take_pending() {
-            if let Ok(mut inner) = self.inner.lock() {
-                let (next, devices) = Self::build_stream(&self.settings)?;
-                *inner = next;
-                self.settings.set_devices(devices);
-            }
-        }
+        // Stream rebuilds are handled by a background thread to avoid needing incoming audio.
 
         let Signal::Audio {
             sample_rate,

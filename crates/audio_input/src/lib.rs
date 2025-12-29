@@ -1,5 +1,6 @@
 #[cfg(feature = "tile-rendering")]
 mod input_tile;
+mod backend;
 mod settings;
 mod source;
 #[cfg(feature = "tile-rendering")]
