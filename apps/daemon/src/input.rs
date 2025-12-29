@@ -89,6 +89,8 @@ pub enum AppAction {
     OpenPatchBay,
     /// Open settings for a specific tile (effectively maximizing it)
     OpenTileSettings { tile_id: String },
+    /// Open the layout manager modal
+    OpenLayoutManager,
     /// Toggle maximizing the currently selected tile
     ToggleMaximize,
 }
@@ -144,13 +146,14 @@ impl KeyboardNav {
     pub fn handle_key(
         &mut self,
         key: Key,
-        ctrl_pressed: bool,
+        ctrl: bool,
+        shift: bool,
         layout: &mut LayoutConfig,
         registry: &TileRegistry,
     ) -> Option<AppAction> {
         
         // 1. Global Shortcuts (Ctrl+)
-        if ctrl_pressed {
+        if ctrl {
             match key {
                 Key::Q => return Some(AppAction::QuitApp),
                 Key::C => {
@@ -317,6 +320,11 @@ impl KeyboardNav {
 
             // === L - Layout Mode Toggle ===
             Key::L => {
+                // Shift+L -> Open Layout Manager Modal
+                if shift {
+                     return Some(AppAction::OpenLayoutManager);
+                }
+
                 match self.mode {
                     InputMode::Normal => {
                         self.enter_layout_mode();
