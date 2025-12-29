@@ -1,0 +1,113 @@
+# Astronomicon.ttf
+# ASCII-encoded astrology symbol font
+# Mapping: semantic_name -> single ASCII character in the font
+
+#######################################
+# PLANETS
+#######################################
+[planets]
+sun     = "Q"   # ☉
+moon    = "R"   # ☽
+mercury = "S"   # ☿
+venus   = "T"   # ♀
+mars    = "U"   # ♂
+jupiter = "V"   # ♃
+saturn  = "W"   # ♄
+uranus  = "X"   # ♅
+neptune = "Y"   # ♆
+pluto   = "Z"   # ♇
+
+#######################################
+# ASTEROIDS / DWARF PLANETS / POINTS
+#######################################
+[asteroids]
+chiron  = "]"   # ⚷
+ceres   = "\\"  # ⚳
+pallas  = "["   # ⚴
+juno    = "^"   # ⚵
+vesta   = "_"   # ⚶
+
+#######################################
+# LUNAR NODES & LILITH
+#######################################
+[nodes]
+north_node = "h"   # ☊
+south_node = "j"   # ☋
+true_node  = "h"   # alias (same glyph)
+mean_node  = "j"   # alias (same glyph)
+
+[lilith]
+black_moon = "i"   # ⚸
+
+#######################################
+# ZODIAC SIGNS
+#######################################
+[signs]
+aries       = "A"   # ♈
+taurus      = "B"   # ♉
+gemini      = "C"   # ♊
+cancer      = "D"   # ♋
+leo         = "E"   # ♌
+virgo       = "F"   # ♍
+libra       = "G"   # ♎
+scorpio     = "H"   # ♏
+sagittarius = "I"   # ♐
+capricorn   = "J"   # ♑
+aquarius    = "K"   # ♒
+pisces      = "L"   # ♓
+
+#######################################
+# HOUSES (single-glyph numbers)
+#######################################
+# NOTE: 10/11/12 are *not* two-digit numbers;
+# they are dedicated glyphs in this font.
+[houses]
+h1  = "1"
+h2  = "2"
+h3  = "3"
+h4  = "4"
+h5  = "5"
+h6  = "6"
+h7  = "7"
+h8  = "8"
+h9  = "9"
+h10 = ":"   # 10
+h11 = ";"   # 11
+h12 = "<"   # 12
+
+#######################################
+# ANGLES
+#######################################
+[angles]
+ac = "d"    # Ascendant
+dc = "g"    # Descendant
+mc = "e"    # Midheaven
+ic = "f"    # Imum Coeli
+
+#######################################
+# LOTS & SPECIAL POINTS
+#######################################
+[lots]
+part_of_fortune = "k"   # ⊗-like PoF glyph
+vertex          = "l"   # Vertex-style cross/circle glyph
+anti_vertex     = "m"   # Opposite of Vertex
+
+#######################################
+# ASPECT SYMBOLS (optional but present)
+#######################################
+[aspects]
+conjunction = "n"   # ☌
+opposition  = "o"   # ☍
+trine       = "p"   # △
+square      = "q"   # □
+sextile     = "r"   # ⚹
+quincunx   = "s"   # ⚻
+
+#######################################
+# ALIASES (quality-of-life)
+#######################################
+[aliases]
+asc  = "d"
+as   = "d"
+midheaven = "e"
+imum      = "f"

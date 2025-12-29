@@ -36,6 +36,11 @@ nannou = { version = "0.19", optional = true }
 [dev-dependencies]
 criterion = "0.5"
 
+[build-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+ttf-parser = "0.20"
+
 [[bench]]
 name = "ephemeris_bench"
 harness = false
@@ -43,4 +48,3 @@ harness = false
 [[bench]]
 name = "aspect_bench"
 harness = false
-
