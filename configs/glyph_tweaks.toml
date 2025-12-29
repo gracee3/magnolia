@@ -1,0 +1,19 @@
+# Glyph Tweaks Configuration
+# Units:
+# dx, dy: translation (relative to glyph size, but currently in local coords)
+# sx, sy: scale factors (1.0 = default)
+# rot_deg: rotation in degrees
+
+[saturn]
+dx = 0.00
+dy = 0.00
+sx = 1.00
+sy = 1.00
+rot_deg = 0.0
+
+[sun]
+dx = 0.00
+dy = 0.00
+sx = 1.00
+sy = 1.00
+rot_deg = 0.0

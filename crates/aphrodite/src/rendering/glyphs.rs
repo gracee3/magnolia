@@ -61,15 +61,16 @@ impl FromStr for Glyph {
 }
 
 #[cfg(feature = "tile-rendering")]
-mod glyph_paths {
+#[cfg(feature = "tile-rendering")]
+pub mod glyph_paths {
     include!(concat!(env!("OUT_DIR"), "/glyph_paths.rs"));
 }
 
 #[cfg(feature = "tile-rendering")]
-use glyph_paths::{GlyphBounds, GlyphOp};
+pub use glyph_paths::{GlyphBounds, GlyphOp};
 
 #[cfg(feature = "tile-rendering")]
-fn glyph_ops_bounds(glyph: Glyph) -> Option<(&'static [GlyphOp], GlyphBounds)> {
+pub fn glyph_ops_bounds(glyph: Glyph) -> Option<(&'static [GlyphOp], GlyphBounds)> {
     match glyph {
         Glyph::Sun => Some((glyph_paths::SUN_OPS, glyph_paths::SUN_BOUNDS)),
         Glyph::Moon => Some((glyph_paths::MOON_OPS, glyph_paths::MOON_BOUNDS)),

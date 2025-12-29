@@ -32,6 +32,7 @@ regex = "1"
 # Optional rendering dependencies
 nannou = { version = "0.19", optional = true }
 # nannou_egui removed
+toml = "0.8"
 
 [dev-dependencies]
 criterion = "0.5"
