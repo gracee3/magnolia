@@ -4,15 +4,22 @@
 //! Control mode: Full astrological wheel chart with planets, houses, and signs
 
 use nannou::prelude::*;
-// use nannou_egui::egui removed
-use chrono::Utc;
+use chrono::{Utc, TimeZone, FixedOffset};
 use talisman_core::{TileRenderer, RenderContext, BindableAction};
-use std::collections::HashMap;
+
+/// Transit mode for bi-wheel chart
+#[derive(Debug, Clone, Default)]
+pub enum TransitMode {
+    /// No transit overlay (radix only)
+    #[default]
+    None,
+    /// Transit at current time (auto-updates)
+    Now,
+    // Future: Fixed(DateTime<Utc>) for user-specified transit time
+}
 
 use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation, LayerPositions};
-use crate::layout::{load_wheel_definition_from_json, WheelAssembler};
-use crate::rendering::{ChartSpecGenerator, ChartSpec};
-use crate::rendering::primitives::{Shape, Color as PrimColor, Point as PrimPoint};
+use crate::chart::{RadixChart, TransitChart, ChartSettings, ChartData, ChartAnimation};
 
 const DEFAULT_WHEEL_JSON: &str = r#"
 {
@@ -53,8 +60,16 @@ pub struct AstroTile {
     // Ephemeris state
     adapter: Option<SwissEphemerisAdapter>,
     eph_settings: EphemerisSettings,
-    location: Option<GeoLocation>,
-    last_positions: Option<LayerPositions>,
+    
+    // Natal (radix) chart - hardcoded for now
+    natal_location: GeoLocation,
+    natal_datetime: chrono::DateTime<Utc>,
+    radix_positions: Option<LayerPositions>,
+    
+    // Transit layer (bi-wheel)
+    transit_mode: TransitMode,
+    transit_positions: Option<LayerPositions>,
+    transit_animation: ChartAnimation,
     
     // Display state
     sun_longitude: f64,
@@ -88,11 +103,23 @@ impl AstroTile {
             ],
         };
         
+        // Hardcoded: Emmy - 11/21/1985 03:09am Columbia SC
+        // Columbia SC: lat 34.0007, lon -81.0348
+        // EST = UTC-5
+        let natal_location = GeoLocation { lat: 34.0007, lon: -81.0348 };
+        let est = FixedOffset::west_opt(5 * 3600).unwrap();
+        let natal_local = est.with_ymd_and_hms(1985, 11, 21, 3, 9, 0).unwrap();
+        let natal_datetime = natal_local.with_timezone(&Utc);
+        
         let mut tile = Self {
             adapter,
             eph_settings,
-            location: Some(GeoLocation { lat: 51.48, lon: 0.0 }), // Greenwich default
-            last_positions: None,
+            natal_location,
+            natal_datetime,
+            radix_positions: None,
+            transit_mode: TransitMode::Now,
+            transit_positions: None,
+            transit_animation: ChartAnimation::new(),
             sun_longitude: 0.0,
             moon_longitude: 0.0,
             sun_sign: String::new(),
@@ -107,19 +134,36 @@ impl AstroTile {
     }
     
     fn refresh_ephemeris(&mut self) {
-        let now = Utc::now();
         let Some(adapter) = self.adapter.as_mut() else { return; };
         
-        match adapter.calc_positions(now, self.location.clone(), &self.eph_settings) {
+        // Calculate RADIX (natal) positions at birth time
+        match adapter.calc_positions(self.natal_datetime, Some(self.natal_location.clone()), &self.eph_settings) {
             Ok(pos) => {
                 self.sun_longitude = pos.planets.get("sun").map(|p| p.lon).unwrap_or(0.0);
                 self.moon_longitude = pos.planets.get("moon").map(|p| p.lon).unwrap_or(0.0);
                 self.sun_sign = Self::longitude_to_sign(self.sun_longitude);
                 self.moon_sign = Self::longitude_to_sign(self.moon_longitude);
-                self.last_positions = Some(pos);
+                self.radix_positions = Some(pos);
             }
             Err(_) => {
                 // Keep last known positions on error
+            }
+        }
+        
+        // Calculate TRANSIT positions based on mode
+        match &self.transit_mode {
+            TransitMode::None => {
+                self.transit_positions = None;
+            }
+            TransitMode::Now => {
+                let now = Utc::now();
+                // Transit uses same location as natal for house overlay
+                match adapter.calc_positions(now, Some(self.natal_location.clone()), &self.eph_settings) {
+                    Ok(pos) => {
+                        self.transit_positions = Some(pos);
+                    }
+                    Err(_) => {}
+                }
             }
         }
     }
@@ -135,176 +179,12 @@ impl AstroTile {
         signs[index].to_string()
     }
     
-    fn build_spec(&self, w: f32, h: f32) -> Option<ChartSpec> {
-        let positions = self.last_positions.as_ref()?;
-        
-        let wheel_def = match load_wheel_definition_from_json(DEFAULT_WHEEL_JSON) {
-            Ok(def) => def,
-            Err(_) => return None,
-        };
-        
-        let mut positions_by_layer = HashMap::new();
-        positions_by_layer.insert("now".to_string(), positions.clone());
-        
-        let empty_aspects: HashMap<String, crate::aspects::types::AspectSet> = HashMap::new();
-        
-        let wheel = WheelAssembler::build_wheel(
-            &wheel_def.wheel,
-            &positions_by_layer,
-            &empty_aspects,
-            Some(&self.eph_settings.include_objects),
-        );
-        
-        let gen = ChartSpecGenerator::new();
-        Some(gen.generate(&wheel, &empty_aspects, w, h))
-    }
+    // fn build_spec removed
 }
 
 impl Default for AstroTile {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// === Nannou Drawing Bridge ===
-
-/// Convert aphrodite Color to nannou Srgba
-fn to_srgba(c: PrimColor) -> Srgba {
-    srgba(
-        c.r as f32 / 255.0,
-        c.g as f32 / 255.0,
-        c.b as f32 / 255.0,
-        c.a as f32 / 255.0,
-    )
-}
-
-/// Map ChartSpec point to nannou Rect coordinates
-/// ChartSpec uses top-left origin with y-down; nannou uses center origin with y-up
-fn map_point(spec: &ChartSpec, rect: Rect, p: PrimPoint) -> Point2 {
-    // Convert from spec's coordinate system (0,0 = top-left, y-down) to nannou (center-origin, y-up)
-    let x_offset = p.x - spec.width / 2.0;
-    let y_offset = (spec.height / 2.0) - p.y; // Flip y-axis
-    pt2(rect.x() + x_offset, rect.y() + y_offset)
-}
-
-/// Generate polygon points for a ring segment (arc-based)
-fn ring_segment_points(
-    center: Point2,
-    r_in: f32,
-    r_out: f32,
-    start_deg: f32,
-    end_deg: f32,
-    steps: usize,
-) -> Vec<Point2> {
-    let a0 = start_deg;
-    let mut a1 = end_deg;
-    if a1 < a0 {
-        a1 += 360.0;
-    }
-    
-    let steps = steps.max(6);
-    let mut outer = Vec::with_capacity(steps + 1);
-    let mut inner = Vec::with_capacity(steps + 1);
-    
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let a_deg = a0 + (a1 - a0) * t;
-        // ChartSpec uses 0° = top, clockwise; convert to math angle (0° = right, CCW)
-        let a_rad = (90.0 - a_deg).to_radians();
-        
-        outer.push(pt2(center.x + r_out * a_rad.cos(), center.y + r_out * a_rad.sin()));
-        inner.push(pt2(center.x + r_in * a_rad.cos(), center.y + r_in * a_rad.sin()));
-    }
-    
-    // Close the polygon: outer arc -> inner arc (reversed)
-    inner.reverse();
-    outer.extend(inner);
-    outer
-}
-
-/// Draw a ChartSpec to nannou Draw
-fn draw_spec(draw: &Draw, rect: Rect, spec: &ChartSpec) {
-    // Background
-    draw.rect()
-        .xy(rect.xy())
-        .wh(rect.wh())
-        .color(to_srgba(spec.background_color));
-    
-    for shape in &spec.shapes {
-        match shape {
-            Shape::Circle { center, radius, fill, stroke: _ } => {
-                let c = map_point(spec, rect, *center);
-                if let Some(f) = fill {
-                    draw.ellipse()
-                        .xy(c)
-                        .radius(*radius)
-                        .color(to_srgba(*f));
-                }
-            }
-            Shape::Line { from, to, stroke } => {
-                draw.line()
-                    .points(map_point(spec, rect, *from), map_point(spec, rect, *to))
-                    .weight(stroke.width)
-                    .color(to_srgba(stroke.color));
-            }
-            Shape::Text { position, content, size, color, .. } => {
-                draw.text(content)
-                    .xy(map_point(spec, rect, *position))
-                    .font_size((*size).max(8.0) as u32)
-                    .color(to_srgba(*color));
-            }
-            Shape::SignSegment {
-                center,
-                start_angle,
-                end_angle,
-                radius_inner,
-                radius_outer,
-                fill,
-                ..
-            } => {
-                let c = map_point(spec, rect, *center);
-                let pts = ring_segment_points(c, *radius_inner, *radius_outer, *start_angle, *end_angle, 48);
-                if !pts.is_empty() {
-                    draw.polygon()
-                        .points(pts)
-                        .color(to_srgba(*fill));
-                }
-            }
-            Shape::PlanetGlyph {
-                center,
-                planet_id,
-                size,
-                color,
-                retrograde: _,
-            } => {
-                let c = map_point(spec, rect, *center);
-                // Planet glyph mapping
-                let glyph = match planet_id.as_str() {
-                    "sun" => "☉",
-                    "moon" => "☽",
-                    "mercury" => "☿",
-                    "venus" => "♀",
-                    "mars" => "♂",
-                    "jupiter" => "♃",
-                    "saturn" => "♄",
-                    "uranus" => "♅",
-                    "neptune" => "♆",
-                    "pluto" => "♇",
-                    "asc" => "ASC",
-                    "mc" => "MC",
-                    "ic" => "IC",
-                    "dc" => "DC",
-                    _ => planet_id,
-                };
-                draw.text(glyph)
-                    .xy(c)
-                    .font_size((*size).max(10.0) as u32)
-                    .color(to_srgba(*color));
-            }
-            _ => {
-                // Other shapes (Arc, Path, HouseSegment, AspectLine) can be added later
-            }
-        }
     }
 }
 
@@ -318,10 +198,19 @@ impl TileRenderer for AstroTile {
     }
     
     fn update(&mut self) {
-        // Update every 10 seconds
+        // Tick transit animation if active
+        self.transit_animation.update();
+        
+        // Update ephemeris every 10 seconds
         if self.last_update.elapsed().as_secs() >= 10 {
             self.refresh_ephemeris();
             self.last_update = std::time::Instant::now();
+            
+            // Start animation to new transit positions
+            if let Some(t_pos) = &self.transit_positions {
+                let t_data: ChartData = t_pos.into();
+                self.transit_animation.animate_to(&t_data);
+            }
         }
     }
     
@@ -368,18 +257,53 @@ impl TileRenderer for AstroTile {
     
     fn render_controls(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) -> bool {
         // Draw the full astrological chart in maximized mode
-        if let Some(spec) = self.build_spec(rect.w(), rect.h()) {
-            draw_spec(draw, rect, &spec);
+        let Some(positions) = &self.radix_positions else {
+            draw.rect().xy(rect.xy()).wh(rect.wh()).color(BLACK);
+            draw.text("No data").xy(rect.xy()).color(WHITE);
+            return false;
+        };
+
+        // Convert radix data
+        let data: ChartData = positions.into();
+        
+        // Setup Chart
+        // TODO: Load settings from tile configuration or user prefs
+        let settings = ChartSettings::default();
+        
+        let min_dim = rect.w().min(rect.h());
+        let radius = min_dim / 2.0 - settings.margin;
+        
+        // Calculate chart shift (rotation so Asc is at 9 o'clock)
+        let shift = if !data.cusps.is_empty() {
+            180.0 - (data.cusps[0] + settings.shift_in_degrees)
         } else {
-            // Fallback if chart generation fails
-            draw.rect()
-                .xy(rect.xy())
-                .wh(rect.wh())
-                .color(BLACK);
-            draw.text("No ephemeris data available")
-                .xy(rect.xy())
-                .color(WHITE)
-                .font_size(16);
+            0.0
+        };
+        
+        // Create Radix Chart
+        let radix = RadixChart::new(rect.x(), rect.y(), radius, &data, &settings);
+        
+        // Draw Layers
+        radix.draw_bg(draw);
+        radix.draw_universe(draw);
+        radix.draw_cusps(draw);
+        radix.draw_axis(draw);
+        radix.draw_points(draw);
+        
+        // Draw transit overlay if available (with animation)
+        if let Some(t_pos) = &self.transit_positions {
+            let t_data_raw: ChartData = t_pos.into();
+            // Use animated positions for smooth transitions
+            let t_data = if self.transit_animation.is_animating() {
+                self.transit_animation.build_animated_data(&t_data_raw)
+            } else {
+                t_data_raw
+            };
+            let transit = TransitChart::new(
+                rect.x(), rect.y(), radius, shift, &t_data, &settings
+            );
+            transit.draw_cusps(draw);
+            transit.draw_points(draw);
         }
         
         false
