@@ -27,7 +27,7 @@ mod theme;
 use layout::Layout;
 use tiles::{TileRegistry, RenderContext};
 use input::{KeyboardNav, AppAction};
-use ui::modals::{ModalStack, ModalState};
+use ui::modals::{ModalStack, ModalState, PatchBayModalState};
 use ui::fullscreen_modal::ModalAnim;
 
 
@@ -602,6 +602,10 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
             model.is_closing = true;
             return;
         }
+        if let Some(mut state) = model.modal_stack.get_patch_bay_state_mut() {
+            ui::patch_bay::handle_key(key, &mut state, &mut model.patch_bay);
+            return;
+        }
         // Pop any other modal from stack
         if model.modal_stack.pop().is_some() {
             return;
@@ -712,7 +716,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
             },
             AppAction::OpenPatchBay => {
                 if !model.modal_stack.is_patch_bay_open() {
-                    model.modal_stack.push(ModalState::PatchBay);
+                    model.modal_stack.push(ModalState::PatchBay(PatchBayModalState::default()));
                 }
             },
             AppAction::OpenTileSettings { tile_id } => {
@@ -919,7 +923,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     if maximized_tile.is_none() {
         let mode_text = match model.keyboard_nav.mode {
             input::InputMode::Normal => "NORMAL",
-            input::InputMode::Layout => match &model.keyboard_nav.layout_state {
+            input::InputMode::Layout => match model.keyboard_nav.layout_state {
                 input::LayoutSubState::Navigation => "LAYOUT",
                 input::LayoutSubState::Resize { .. } => "RESIZE",
                 input::LayoutSubState::Move { .. } => "MOVE",
@@ -968,9 +972,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let win_rect = app.window_rect();
     if model.modal_stack.is_global_settings_open() {
         draw_fullscreen_overlay(&draw, win_rect, "GLOBAL SETTINGS");
-    } else if model.modal_stack.is_patch_bay_open() {
-         draw_fullscreen_overlay(&draw, win_rect, "PATCH BAY");
-    } else if model.modal_stack.is_layout_manager_open() {
+    } else if let Some(state) = model.modal_stack.get_patch_bay_state() {
+         let anim = ModalAnim { factor: 1.0, closing: false }; // TODO: Integrated animation state
+         ui::patch_bay::render(&draw, win_rect, state, &anim, &model.patch_bay);
+    }
+ else if model.modal_stack.is_layout_manager_open() {
          draw_fullscreen_overlay(&draw, win_rect, "LAYOUT MANAGER");
     }
 

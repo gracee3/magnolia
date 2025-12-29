@@ -1,10 +1,44 @@
-use std::vec::Vec;
+use crate::ui::controls::FocusModel;
+
+pub type ModuleId = String;
+pub type PortId = String;
+
+/// Navigation panes in Patch Bay
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchBayPane {
+    Modules,
+    Ports,
+    Patches,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatchBayModalState {
+    pub focus_pane: PatchBayPane,
+    pub modules_focus: FocusModel,
+    pub ports_focus: FocusModel,
+    pub patches_focus: FocusModel,
+    pub staged_source: Option<(ModuleId, PortId)>,
+    pub selected_module: usize,
+}
+
+impl Default for PatchBayModalState {
+    fn default() -> Self {
+        Self {
+            focus_pane: PatchBayPane::Modules,
+            modules_focus: FocusModel::default(),
+            ports_focus: FocusModel::default(),
+            patches_focus: FocusModel::default(),
+            staged_source: None,
+            selected_module: 0,
+        }
+    }
+}
 
 /// Modal types for the unified modal stack
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModalState {
     /// Patch Bay modal
-    PatchBay,
+    PatchBay(PatchBayModalState),
     /// Global settings modal
     GlobalSettings,
     /// Layout manager modal
@@ -47,7 +81,27 @@ impl ModalStack {
 
     /// Check if patch bay is open
     pub fn is_patch_bay_open(&self) -> bool {
-        self.stack.iter().any(|m| matches!(m, ModalState::PatchBay))
+        self.stack.iter().any(|m| matches!(m, ModalState::PatchBay(_)))
+    }
+
+    /// Get mutable reference to active patch bay state
+    pub fn get_patch_bay_state_mut(&mut self) -> Option<&mut PatchBayModalState> {
+        for modal in self.stack.iter_mut().rev() {
+            if let ModalState::PatchBay(state) = modal {
+                return Some(state);
+            }
+        }
+        None
+    }
+
+    /// Get immutable reference to active patch bay state
+    pub fn get_patch_bay_state(&self) -> Option<&PatchBayModalState> {
+        for modal in self.stack.iter().rev() {
+            if let ModalState::PatchBay(state) = modal {
+                return Some(state);
+            }
+        }
+        None
     }
 
     /// Check if global settings is open

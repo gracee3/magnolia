@@ -123,4 +123,375 @@ pub fn row_stack(container: Rect, count: usize) -> Vec<Rect> {
     rects
 }
 
+// === SHARED INTERACTION MODELS ===
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FocusModel {
+    pub focused: usize,      // which row/item is focused
+    pub editing: bool,       // whether the current control is in edit mode
+    pub scroll: f32,         // optional for long forms/lists
+}
+
+impl Default for FocusModel {
+    fn default() -> Self {
+        Self {
+            focused: 0,
+            editing: false,
+            scroll: 0.0,
+        }
+    }
+}
+
+impl FocusModel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    pub fn clamp(&mut self, len: usize) {
+        if len == 0 {
+            self.focused = 0;
+        } else if self.focused >= len {
+            self.focused = len - 1;
+        }
+    }
+}
+
+/// Normalized navigation input (abstracts over keys)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UiNav {
+    Up, Down, Left, Right,
+    Enter, Escape,
+    PageUp, PageDown,
+    Tab, BackTab,
+}
+
+#[derive(Debug, Clone)]
+pub struct UiInput {
+    pub nav: Option<UiNav>,
+    pub shift: bool,
+    pub ctrl: bool,
+}
+
+impl UiInput {
+    pub fn from_key(key: Key, ctrl: bool, shift: bool) -> Self {
+        let nav = match key {
+            Key::Up => Some(UiNav::Up),
+            Key::Down => Some(UiNav::Down),
+            Key::Left => Some(UiNav::Left),
+            Key::Right => Some(UiNav::Right),
+            Key::Return | Key::Space => Some(UiNav::Enter),
+            Key::Escape => Some(UiNav::Escape),
+            Key::PageUp => Some(UiNav::PageUp),
+            Key::PageDown => Some(UiNav::PageDown),
+            Key::Tab => if shift { Some(UiNav::BackTab) } else { Some(UiNav::Tab) },
+            _ => None,
+        };
+        Self { nav, shift, ctrl }
+    }
+}
+
+/// Standard response from an interactive control
+pub struct UiResponse {
+    pub changed: bool,
+    pub activated: bool,
+}
+
+// === FORM BUILDER ===
+
+pub struct Form<'a> {
+    pub focus: &'a mut FocusModel,
+    pub row_count: usize,
+    pub rect: Rect,
+}
+
+impl<'a> Form<'a> {
+    pub fn begin(focus: &'a mut FocusModel, rect: Rect) -> Self {
+        Self {
+            focus,
+            row_count: 0,
+            rect,
+        }
+    }
+    
+    /// Handle standard form navigation (Up/Down)
+    pub fn nav(&mut self, input: &UiInput) {
+        if self.focus.editing {
+            return; // Don't change rows while editing
+        }
+        
+        if let Some(nav) = &input.nav {
+            match nav {
+                UiNav::Up => {
+                    self.focus.focused = self.focus.focused.saturating_sub(1);
+                }
+                UiNav::Down => {
+                    self.focus.focused = self.focus.focused + 1; // Clamped by caller or clamp() later
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    fn next_row_rect(&mut self) -> (usize, Rect) {
+        let i = self.row_count;
+        // Simple linear stack from top
+        let y = self.rect.top() - ROW_H / 2.0 - (i as f32) * (ROW_H + ROW_GAP);
+        let r = Rect::from_x_y_w_h(self.rect.x(), y, self.rect.w(), ROW_H);
+        self.row_count += 1;
+        (i, r)
+    }
+    
+    // --- Interactive Widgets ---
+
+    pub fn toggle_row(
+        &mut self,
+        draw: &Draw,
+        label: &str,
+        value: &mut bool,
+        input: &UiInput,
+    ) -> UiResponse {
+        let (idx, rect) = self.next_row_rect();
+        let focused = self.focus.focused == idx;
+        let mut resp = UiResponse { changed: false, activated: false };
+        
+        // Render
+        draw_toggle_row(draw, rect, label, *value, focused, UiStyle::default());
+        
+        // Input
+        if focused {
+            if let Some(UiNav::Enter) | Some(UiNav::Left) | Some(UiNav::Right) = input.nav {
+                *value = !*value;
+                resp.changed = true;
+                resp.activated = true;
+            }
+        }
+        
+        resp
+    }
+
+    pub fn stepper_row<T: ToString + PartialEq>(
+        &mut self,
+        draw: &Draw,
+        label: &str,
+        value: &mut T,
+        input: &UiInput,
+        prev_fn: impl FnOnce(&mut T),
+        next_fn: impl FnOnce(&mut T),
+    ) -> UiResponse {
+        let (idx, rect) = self.next_row_rect();
+        let focused = self.focus.focused == idx;
+        let mut resp = UiResponse { changed: false, activated: false };
+        let old_str = value.to_string();
+
+        // Render
+        draw_stepper_row(draw, rect, label, &old_str, focused, UiStyle::default());
+        
+        // Input
+        if focused {
+            if let Some(nav) = &input.nav {
+                match nav {
+                    UiNav::Left => {
+                        prev_fn(value);
+                        if value.to_string() != old_str { resp.changed = true; }
+                    },
+                    UiNav::Right => {
+                        next_fn(value);
+                        if value.to_string() != old_str { resp.changed = true; }
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        resp
+    }
+    
+    pub fn slider_row(
+        &mut self,
+        draw: &Draw,
+        label: &str,
+        value: &mut f32,
+        min: f32,
+        max: f32,
+        input: &UiInput,
+    ) -> UiResponse {
+        let (idx, rect) = self.next_row_rect();
+        let focused = self.focus.focused == idx;
+        let mut resp = UiResponse { changed: false, activated: false };
+        
+        // Logic: Left/Right defaults to 10% step (coarse).
+        // If Shift is held (fine), 1% step? Or just use fixed steps?
+        // User requested: Left/Right adjusts.
+        
+        if focused {
+            let range = max - min;
+            let step = if input.shift { range * 0.01 } else { range * 0.1 };
+            
+            if let Some(nav) = &input.nav {
+                match nav {
+                    UiNav::Left => {
+                        *value = (*value - step).max(min);
+                        resp.changed = true;
+                    }
+                    UiNav::Right => {
+                        *value = (*value + step).min(max);
+                        resp.changed = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        // Render manually since we don't have draw_slider_row yet
+        row_bg(draw, rect, focused, UiStyle::default());
+        
+        draw.text(label)
+            .xy(pt2(rect.left() + LABEL_X_PAD, rect.y()))
+            .color(rgba(0.85, 0.85, 0.88, 1.0))
+            .font_size(14)
+            .left_justify();
+            
+        // Bar
+        let bar_w = rect.w() * 0.4;
+        let bar_h = 4.0;
+        let bar_x = rect.right() - VALUE_X_PAD - bar_w / 2.0;
+        let norm = (*value - min) / (max - min);
+        
+        // Track
+        draw.rect()
+            .x_y(bar_x, rect.y())
+            .w_h(bar_w, bar_h)
+            .color(rgba(0.3, 0.3, 0.35, 1.0));
+            
+        // Fill
+        let fill_w = bar_w * norm;
+        draw.rect()
+            .x_y(bar_x - bar_w/2.0 + fill_w/2.0, rect.y())
+            .w_h(fill_w, bar_h)
+            .color(rgba(0.0, 1.0, 1.0, 1.0));
+            
+        // Knob
+        if focused {
+             draw.ellipse()
+                .x_y(bar_x - bar_w/2.0 + fill_w, rect.y())
+                .radius(4.0)
+                .color(WHITE);
+        }
+        
+        resp
+    }
+}
+
+// === LIST BUILDER ===
+
+pub struct List<'a> {
+    pub focus: &'a FocusModel,
+    pub rect: Rect,
+    pub len: usize,
+    pub item_h: f32,
+    pub title: Option<&'a str>,
+}
+
+impl<'a> List<'a> {
+    pub fn new(focus: &'a FocusModel, rect: Rect, len: usize, item_h: f32) -> Self {
+        Self { focus, rect, len, item_h, title: None }
+    }
+    
+    pub fn with_title(mut self, title: &'a str) -> Self {
+        self.title = Some(title);
+        self
+    }
+    
+    /// Static helper for navigation logic (modifies focus)
+    pub fn handle_nav(focus: &mut FocusModel, len: usize, input: &UiInput) -> Option<usize> {
+        focus.clamp(len);
+        
+        // Return Some(index) if Activated (Enter)
+        if let Some(nav) = &input.nav {
+            match nav {
+                UiNav::Up => {
+                    focus.focused = focus.focused.saturating_sub(1);
+                }
+                UiNav::Down => {
+                   focus.focused = (focus.focused + 1).min(len.saturating_sub(1));
+                }
+                UiNav::Enter => {
+                    return Some(focus.focused);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    
+    pub fn render<F>(&self, draw: &Draw, mut render_item: F) 
+    where F: FnMut(usize, bool, Rect) 
+    {
+        // Draw title if present
+        let mut list_rect = self.rect;
+        if let Some(title) = self.title {
+             draw_heading(draw, pt2(list_rect.x(), list_rect.top() - 15.0), title, UiStyle::default());
+             list_rect = Rect::from_corners(
+                pt2(list_rect.left(), list_rect.bottom()),
+                pt2(list_rect.right(), list_rect.top() - 30.0),
+             );
+        }
+        
+        // Background
+        draw.rect()
+            .xy(list_rect.xy())
+            .wh(list_rect.wh())
+            .color(rgba(0.03, 0.03, 0.04, 0.8))
+            .stroke(rgba(0.2, 0.2, 0.25, 1.0))
+            .stroke_weight(1.0);
+            
+        if self.len == 0 {
+            draw.text("No items")
+                .xy(list_rect.xy())
+                .color(GREY)
+                .font_size(12);
+            return;
+        }
+
+        // Clip to list rect for scrolling?
+        // Nannou doesn't do scissoring easily in immediate mode without custom render pipeline work or manually culling.
+        // We will manually cull.
+        
+        let visible_count = (list_rect.h() / self.item_h).floor() as usize;
+        let start_idx = if self.focus.focused >= visible_count {
+             self.focus.focused.saturating_sub(visible_count / 2) // Center focus if possible
+        } else {
+             0
+        };
+        // Clamp start_idx to ensure we show as many items as possible
+        let start_idx = start_idx.min(self.len.saturating_sub(visible_count).max(0));
+        
+        let end_idx = (start_idx + visible_count).min(self.len);
+        
+        for i in start_idx..end_idx {
+            // Layout ref: relative to list top
+            let offset_y = (i - start_idx) as f32 * self.item_h;
+            let y = list_rect.top() - self.item_h / 2.0 - offset_y;
+            let item_rect = Rect::from_x_y_w_h(list_rect.x(), y, list_rect.w() - 4.0, self.item_h - 2.0);
+            
+            render_item(i, i == self.focus.focused, item_rect);
+        }
+        
+        // Scrollbar if needed
+        if self.len > visible_count {
+             let scroll_w = 4.0;
+             let scroll_h = list_rect.h() * (visible_count as f32 / self.len as f32);
+             let scroll_track_h = list_rect.h();
+             let scroll_y_pct = start_idx as f32 / (self.len - visible_count) as f32;
+             let scroll_y = list_rect.top() - scroll_h/2.0 - (scroll_track_h - scroll_h) * scroll_y_pct;
+             
+             draw.rect()
+                .x_y(list_rect.right() - 4.0, scroll_y)
+                .w_h(scroll_w, scroll_h)
+                .color(rgba(0.5, 0.5, 0.5, 0.5));
+        }
+    }
+}
+
+
 
