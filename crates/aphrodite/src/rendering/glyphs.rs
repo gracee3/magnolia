@@ -148,15 +148,27 @@ fn build_path_fit(ops: &[GlyphOp], bounds: GlyphBounds, rect: Rect) -> Path {
                 open = true;
             }
             GlyphOp::L(x, y) => {
+                if !open {
+                    builder.begin(lpoint(x * s + tx, y * s + ty));
+                    open = true;
+                }
                 builder.line_to(lpoint(x * s + tx, y * s + ty));
             }
             GlyphOp::Q(x1, y1, x, y) => {
+                if !open {
+                    builder.begin(lpoint(x * s + tx, y * s + ty));
+                    open = true;
+                }
                 builder.quadratic_bezier_to(
                     lpoint(x1 * s + tx, y1 * s + ty),
                     lpoint(x * s + tx, y * s + ty),
                 );
             }
             GlyphOp::C(x1, y1, x2, y2, x, y) => {
+                if !open {
+                    builder.begin(lpoint(x * s + tx, y * s + ty));
+                    open = true;
+                }
                 builder.cubic_bezier_to(
                     lpoint(x1 * s + tx, y1 * s + ty),
                     lpoint(x2 * s + tx, y2 * s + ty),
@@ -164,9 +176,10 @@ fn build_path_fit(ops: &[GlyphOp], bounds: GlyphBounds, rect: Rect) -> Path {
                 );
             }
             GlyphOp::Z => {
-                builder.close();
-                builder.end(true);
-                open = false;
+                if open {
+                    builder.end(true);
+                    open = false;
+                }
             }
         }
     }
