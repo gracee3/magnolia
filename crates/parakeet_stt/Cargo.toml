@@ -1,0 +1,14 @@
+[package]
+name = "parakeet_stt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+hound = "3.5"
+
+# Pull Parakeet's existing Rust bindings + feature extractor via the sibling repo.
+features = { path = "../../../parakeet/rust/features" }
+parakeet_trt = { path = "../../../parakeet/rust/parakeet_trt" }
+
+
