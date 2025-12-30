@@ -12,6 +12,7 @@
 pub mod schema_tile;
 pub use schema_tile::SchemaTile;
 pub mod clock;
+pub mod system_monitor;
 pub mod compositor;
 
 // Re-export main types from talisman_core
@@ -29,6 +30,7 @@ pub fn create_default_registry() -> TileRegistry {
 
     // Register local system tiles
     registry.register(clock::ClockTile::new());
+    registry.register(system_monitor::SystemMonitorTile::new());
 
     registry
 }
