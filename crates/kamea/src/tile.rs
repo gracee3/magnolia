@@ -6,9 +6,13 @@
 //! Monitor mode: Displays the current sigil
 //! Control mode: Settings for grid size, colors, stroke weight
 
-use crate::generator::{generate_path, SigilConfig};
+#[cfg(feature = "tile-rendering")]
+use crate::generator::generate_path;
+#[cfg(feature = "tile-rendering")]
+use crate::generator::SigilConfig;
 #[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
+#[cfg(feature = "tile-rendering")]
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "tile-rendering")]
@@ -20,10 +24,15 @@ pub struct KameaTile {
     current_text: Arc<Mutex<String>>,
     #[cfg(feature = "tile-rendering")]
     path_points: Vec<Point2>,
+    #[cfg(feature = "tile-rendering")]
     config: SigilConfig,
+    #[cfg(feature = "tile-rendering")]
     last_text_hash: [u8; 32],
+    #[cfg(feature = "tile-rendering")]
     show_grid_dots: bool,
+    #[cfg(feature = "tile-rendering")]
     glow_intensity: f32,
+    #[cfg(feature = "tile-rendering")]
     path_color: (f32, f32, f32), // RGB 0-1
 }
 
@@ -33,15 +42,20 @@ impl KameaTile {
             current_text: Arc::new(Mutex::new(String::new())),
             #[cfg(feature = "tile-rendering")]
             path_points: Vec::new(),
+            #[cfg(feature = "tile-rendering")]
             config: SigilConfig {
                 spacing: 40.0,
                 stroke_weight: 2.0,
                 grid_rows: 4,
                 grid_cols: 4,
             },
+            #[cfg(feature = "tile-rendering")]
             last_text_hash: [0u8; 32],
+            #[cfg(feature = "tile-rendering")]
             show_grid_dots: true,
+            #[cfg(feature = "tile-rendering")]
             glow_intensity: 0.2,
+            #[cfg(feature = "tile-rendering")]
             path_color: (0.0, 1.0, 1.0), // Cyan default
         }
     }
@@ -53,6 +67,7 @@ impl KameaTile {
         }
     }
 
+    #[cfg(feature = "tile-rendering")]
     fn regenerate_path(&mut self, text: &str) {
         // Hash the text
         let mut hasher = Sha256::new();
@@ -62,22 +77,16 @@ impl KameaTile {
         seed.copy_from_slice(&result);
 
         // Check if we need to regenerate
-        #[cfg(feature = "tile-rendering")]
-        {
-            if seed == self.last_text_hash && !self.path_points.is_empty() {
-                return;
-            }
+        if seed == self.last_text_hash && !self.path_points.is_empty() {
+            return;
         }
         self.last_text_hash = seed;
 
         // Generate the path with current config
-        #[cfg(feature = "tile-rendering")]
-        {
-            self.path_points = generate_path(seed, self.config)
-                .into_iter()
-                .map(|(x, y)| pt2(x, y))
-                .collect();
-        }
+        self.path_points = generate_path(seed, self.config)
+            .into_iter()
+            .map(|(x, y)| pt2(x, y))
+            .collect();
     }
 
     #[cfg(feature = "tile-rendering")]
@@ -346,13 +355,14 @@ impl TileRenderer for KameaTile {
             self.show_grid_dots = dots;
         }
         if let Some(color) = settings.get("path_color").and_then(|v| v.as_array()) {
-            if color.len() >= 3 {
-                self.path_color = (
-                    color[0].as_f64().unwrap_or(0.0) as f32,
-                    color[1].as_f64().unwrap_or(1.0) as f32,
-                    color[2].as_f64().unwrap_or(1.0) as f32,
-                );
-            }
+                #[cfg(feature = "tile-rendering")]
+                {
+                    self.path_color = (
+                        color[0].as_f64().unwrap_or(0.0) as f32,
+                        color[1].as_f64().unwrap_or(1.0) as f32,
+                        color[2].as_f64().unwrap_or(1.0) as f32,
+                    );
+                }
         }
     }
 
@@ -378,7 +388,10 @@ impl TileRenderer for KameaTile {
     fn execute_action(&mut self, action: &str) -> bool {
         match action {
             "toggle_dots" => {
-                self.show_grid_dots = !self.show_grid_dots;
+                #[cfg(feature = "tile-rendering")]
+                {
+                    self.show_grid_dots = !self.show_grid_dots;
+                }
                 true
             }
             "increase_grid" => {

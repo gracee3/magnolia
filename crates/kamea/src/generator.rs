@@ -1,6 +1,9 @@
+#[cfg(feature = "tile-rendering")]
 use rand::{Rng, SeedableRng};
+#[cfg(feature = "tile-rendering")]
 use rand_chacha::ChaCha20Rng;
 
+#[cfg(feature = "tile-rendering")]
 #[derive(Debug, Clone, Copy)]
 pub struct SigilConfig {
     pub spacing: f32,
@@ -9,6 +12,7 @@ pub struct SigilConfig {
     pub grid_cols: usize,
 }
 
+#[cfg(feature = "tile-rendering")]
 pub fn generate_path(seed: [u8; 32], config: SigilConfig) -> Vec<(f32, f32)> {
     let mut rng = ChaCha20Rng::from_seed(seed);
     let mut points = Vec::new();
@@ -64,6 +68,7 @@ pub fn generate_path(seed: [u8; 32], config: SigilConfig) -> Vec<(f32, f32)> {
     points
 }
 
+#[cfg(feature = "tile-rendering")]
 fn grid_to_world(grid_pos: (usize, usize), config: SigilConfig) -> (f32, f32) {
     // Centering the grid
     let output_x = (grid_pos.0 as f32 - (config.grid_cols as f32 - 1.0) / 2.0) * config.spacing;

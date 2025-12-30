@@ -3,13 +3,13 @@
 //! Monitor mode: Text-based summary of CPU, RAM, and GPU
 //! Control mode: Detailed line graphs for all metrics
 
-use super::{BindableAction, RenderContext, TileRenderer};
+use super::{RenderContext, TileRenderer};
 use nannou::prelude::*;
-use serde::{Deserialize, Serialize};
+// use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use std::fs;
-use sysinfo::{CpuRefreshKind, MemoryRefreshKind, System, Networks, Disks};
+use sysinfo::{System, Networks, Disks};
 use nvml_wrapper::Nvml;
 use talisman_ui::{draw_text, FontId, TextAlignment};
 
@@ -19,7 +19,7 @@ const REFRESH_INTERVAL: Duration = Duration::from_millis(1000); // 1Hz
 pub struct SystemMonitorTile {
     sys: System,
     networks: Networks,
-    disks: Disks,
+    _disks: Disks,
     nvml: Option<Nvml>,
     intel_gpu_path: Option<String>,
     
@@ -65,7 +65,7 @@ impl SystemMonitorTile {
         Self {
             sys,
             networks,
-            disks,
+            _disks: disks,
             nvml,
             intel_gpu_path,
             last_refresh: Instant::now() - REFRESH_INTERVAL,
@@ -86,8 +86,7 @@ impl SystemMonitorTile {
     fn refresh_metrics(&mut self) {
         self.sys.refresh_cpu_all();
         self.sys.refresh_memory();
-        self.networks.refresh_list();
-        self.networks.refresh(false);
+        self.networks.refresh(true);
         
         // CPU
         self.current_cpu = self.sys.global_cpu_usage();

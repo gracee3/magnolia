@@ -33,6 +33,7 @@ struct KameaPlugin {
     #[cfg(feature = "tile-rendering")]
     gpu_state: Option<GpuState>,
     enabled: bool,
+    #[cfg(feature = "tile-rendering")]
     sent_texture: bool,
 }
 
@@ -43,6 +44,7 @@ impl Default for KameaPlugin {
             #[cfg(feature = "tile-rendering")]
             gpu_state: None,
             enabled: true,
+            #[cfg(feature = "tile-rendering")]
             sent_texture: false,
         }
     }
