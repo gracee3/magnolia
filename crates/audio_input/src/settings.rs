@@ -11,6 +11,8 @@ pub struct AudioInputSettings {
     sample_rate: AtomicU32,
     channels: AtomicU32,
     is_muted: AtomicBool,
+    frame_samples: AtomicU32,
+    max_batch_wait_ms: AtomicU32,
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +32,8 @@ impl AudioInputSettings {
             sample_rate: AtomicU32::new(0),
             channels: AtomicU32::new(0),
             is_muted: AtomicBool::new(true),
+            frame_samples: AtomicU32::new(256),
+            max_batch_wait_ms: AtomicU32::new(3),
         })
     }
 
@@ -102,5 +106,19 @@ impl AudioInputSettings {
 
     pub fn set_muted(&self, muted: bool) {
         self.is_muted.store(muted, Ordering::Relaxed);
+    }
+
+    pub fn set_power_knobs(&self, frame_samples: u32, max_batch_wait_ms: u32) {
+        self.frame_samples.store(frame_samples, Ordering::Relaxed);
+        self.max_batch_wait_ms
+            .store(max_batch_wait_ms, Ordering::Relaxed);
+    }
+
+    pub fn frame_samples(&self) -> u32 {
+        self.frame_samples.load(Ordering::Relaxed)
+    }
+
+    pub fn max_batch_wait_ms(&self) -> u32 {
+        self.max_batch_wait_ms.load(Ordering::Relaxed)
     }
 }

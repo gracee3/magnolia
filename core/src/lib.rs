@@ -97,6 +97,14 @@ impl KameaGrid {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub enum PowerProfile {
+    #[default]
+    Normal,
+    LowPower,
+    BatteryBackground,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutConfig {
     /// Symbolic Kamea grid size (optional, overrides columns/rows when set)
@@ -111,6 +119,8 @@ pub struct LayoutConfig {
     pub patches: Vec<Patch>,
     #[serde(default)]
     pub is_sleeping: bool,
+    #[serde(default)]
+    pub power_profile: PowerProfile,
 }
 
 impl LayoutConfig {

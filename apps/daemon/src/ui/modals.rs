@@ -1,4 +1,5 @@
 use crate::ui::controls::FocusModel;
+use talisman_core::PowerProfile;
 
 pub type ModuleId = String;
 pub type PortId = String;
@@ -42,6 +43,7 @@ pub struct GlobalSettingsState {
     pub sample_rate: usize,
     pub show_debug_stats: bool,
     pub theme_hue: f32,
+    pub power_profile: PowerProfile,
 }
 
 impl Default for GlobalSettingsState {
@@ -52,6 +54,7 @@ impl Default for GlobalSettingsState {
             sample_rate: 48000,
             show_debug_stats: false,
             theme_hue: 0.5,
+            power_profile: PowerProfile::Normal,
         }
     }
 }

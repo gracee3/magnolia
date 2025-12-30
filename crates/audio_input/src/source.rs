@@ -14,10 +14,6 @@ use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source}
 use talisman_signals::ring_buffer::{self, RingBufferReceiver};
 
 const DEFAULT_CAPACITY: usize = 16384;
-// 1024 @ 48kHz is ~21.3ms of inherent buffering. 256 is ~5.3ms.
-const DEFAULT_FRAME_SAMPLES: usize = 256;
-// Don't wait forever to fill a frame; emit partial frames to reduce end-to-end latency.
-const MAX_BATCH_WAIT: Duration = Duration::from_millis(3);
 
 /// Audio input source using CPAL, emitting buffered Audio signals.
 pub struct AudioInputSource {
@@ -27,7 +23,6 @@ pub struct AudioInputSource {
     receiver: RingBufferReceiver<f32>,
     sample_rate: u32,
     channels: u16,
-    frame_samples: usize,
     last_capture_us: Arc<AtomicU64>,
     settings: Arc<AudioInputSettings>,
     backend: Mutex<Box<dyn AudioInputBackend>>,
@@ -45,7 +40,6 @@ impl AudioInputSource {
             receiver: ring_buffer::channel::<f32>(DEFAULT_CAPACITY).1,
             sample_rate: 44100,
             channels: 2,
-            frame_samples: DEFAULT_FRAME_SAMPLES,
             last_capture_us,
             settings,
             backend: Mutex::new(backend),
@@ -152,10 +146,13 @@ impl Source for AudioInputSource {
             return Some(Signal::Pulse);
         }
 
-        let target_samples = self.frame_samples * self.channels as usize;
+        let frame_samples = self.settings.frame_samples() as usize;
+        let max_batch_wait = Duration::from_millis(self.settings.max_batch_wait_ms() as u64);
+
+        let target_samples = frame_samples * self.channels as usize;
         let mut data = Vec::with_capacity(target_samples);
 
-        let deadline = Instant::now() + MAX_BATCH_WAIT;
+        let deadline = Instant::now() + max_batch_wait;
         while data.len() < target_samples {
             if let Some(sample) = self.receiver.try_recv() {
                 data.push(sample);

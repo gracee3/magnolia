@@ -11,6 +11,7 @@ rows = [
     "1fr",
 ]
 is_sleeping = false
+power_profile = "Normal"
 
 [[tiles]]
 id = "audio_viz"
@@ -27,12 +28,12 @@ sensitivity = 1.0
 vis_type = "SpectrumBars"
 
 [tiles.settings.keybinds]
-mute = "m"
+dec_sens = "minus"
 freeze = "f"
+mute = "m"
 next_vis = "v"
 next_theme = "c"
 inc_sens = "equals"
-dec_sens = "minus"
 
 [[tiles]]
 id = "audio_output"

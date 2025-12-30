@@ -512,7 +512,7 @@ impl TileRenderer for AudioVisTile {
         true
     }
 
-    fn render_monitor(&self, draw: &Draw, rect: Rect, _ctx: &RenderContext) {
+    fn render_monitor(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) {
         draw.rect()
             .xy(rect.xy())
             .wh(rect.wh())
@@ -523,6 +523,19 @@ impl TileRenderer for AudioVisTile {
         let color = self.get_color(avg_amp);
 
         let content_rect = rect.pad(5.0);
+
+        use talisman_core::PowerProfile;
+        let max_scope_points = match ctx.power_profile {
+            PowerProfile::Normal => MAX_SCOPE_POINTS,
+            PowerProfile::LowPower => MAX_SCOPE_POINTS / 2,
+            PowerProfile::BatteryBackground => MAX_SCOPE_POINTS / 4,
+        };
+
+        let max_lissajous_points = match ctx.power_profile {
+            PowerProfile::Normal => MAX_LISSAJOUS_POINTS,
+            PowerProfile::LowPower => MAX_LISSAJOUS_POINTS / 2,
+            PowerProfile::BatteryBackground => MAX_LISSAJOUS_POINTS / 4,
+        };
 
         match self.vis_type {
             VisualizationType::Oscilloscope => {
@@ -535,8 +548,8 @@ impl TileRenderer for AudioVisTile {
 
                     let n_l = self.left_buffer.len().max(1);
                     let n_r = self.right_buffer.len().max(1);
-                    let step_l = (n_l / MAX_SCOPE_POINTS).max(1);
-                    let step_r = (n_r / MAX_SCOPE_POINTS).max(1);
+                    let step_l = (n_l / max_scope_points).max(1);
+                    let step_r = (n_r / max_scope_points).max(1);
                     let start_l = self.left_start();
                     let start_r = self.right_start();
 
@@ -555,14 +568,20 @@ impl TileRenderer for AudioVisTile {
                     }
 
                     if !left_points.is_empty() {
-                        draw.polyline().weight(1.5).points(left_points).color(srgba(0.2, 0.6, 1.0, 0.9));
+                        draw.polyline()
+                            .weight(1.5)
+                            .points(left_points)
+                            .color(srgba(0.2, 0.6, 1.0, 0.9));
                     }
                     if !right_points.is_empty() {
-                        draw.polyline().weight(1.5).points(right_points).color(srgba(1.0, 0.3, 0.3, 0.9));
+                        draw.polyline()
+                            .weight(1.5)
+                            .points(right_points)
+                            .color(srgba(1.0, 0.3, 0.3, 0.9));
                     }
                 } else {
                     let n = buffer.len().max(1);
-                    let step = (n / MAX_SCOPE_POINTS).max(1);
+                    let step = (n / max_scope_points).max(1);
                     let start = self.mono_start();
                     let mut points: Vec<Point2> = Vec::with_capacity(n / step + 1);
                     for i in (0..n).step_by(step) {
@@ -582,13 +601,22 @@ impl TileRenderer for AudioVisTile {
                 if spectrum.is_empty() {
                     return;
                 }
-                
+
                 // Use a logarithmic distribution for better frequency representation
-                let num_display_bins = if self.vis_type == VisualizationType::SpectrumBars {
+                let mut num_display_bins = if self.vis_type == VisualizationType::SpectrumBars {
                     32
                 } else {
                     96
                 };
+
+                // Reduce bins in lower power modes
+                num_display_bins = match ctx.power_profile {
+                    PowerProfile::Normal => num_display_bins,
+                    PowerProfile::LowPower => num_display_bins * 2 / 3,
+                    PowerProfile::BatteryBackground => num_display_bins / 2,
+                };
+                num_display_bins = num_display_bins.max(8);
+
                 let mut display_spectrum = vec![0.0; num_display_bins];
                 
                 let n = spectrum.len();
@@ -653,7 +681,7 @@ impl TileRenderer for AudioVisTile {
             }
             VisualizationType::Lissajous => {
                 let n = self.left_buffer.len().min(self.right_buffer.len()).max(1);
-                let step = (n / MAX_LISSAJOUS_POINTS).max(1);
+                let step = (n / max_lissajous_points).max(1);
                 let start_l = self.left_start();
                 let start_r = self.right_start();
                 let mut points: Vec<Point2> = Vec::with_capacity(n / step + 1);
