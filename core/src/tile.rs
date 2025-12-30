@@ -50,6 +50,7 @@ pub struct RenderContext<'a> {
     pub frame_count: u64,
     pub is_selected: bool,
     pub is_maximized: bool,
+    pub power_profile: crate::PowerProfile,
     /// Per-tile settings from config (read-only access during render)
     pub tile_settings: Option<&'a serde_json::Value>,
 }
@@ -61,6 +62,7 @@ impl<'a> RenderContext<'a> {
             frame_count: 0,
             is_selected: false,
             is_maximized: false,
+            power_profile: crate::PowerProfile::Normal,
             tile_settings: None,
         }
     }
@@ -259,6 +261,35 @@ impl TileRegistry {
         for tile in self.tiles.values() {
             if let Ok(mut t) = tile.write() {
                 t.update();
+            }
+        }
+    }
+
+    /// Update all tiles with power-aware throttling
+    pub fn update_all_with_power(&self, profile: crate::PowerProfile, frame_count: u64) {
+        for tile in self.tiles.values() {
+            if let Ok(mut t) = tile.write() {
+                let should_update = match profile {
+                    crate::PowerProfile::Normal => true,
+                    crate::PowerProfile::LowPower => {
+                        if t.prefers_gpu() {
+                            frame_count % 2 == 0
+                        } else {
+                            true
+                        }
+                    }
+                    crate::PowerProfile::BatteryBackground => {
+                        if t.prefers_gpu() {
+                            frame_count % 8 == 0
+                        } else {
+                            true
+                        }
+                    }
+                };
+
+                if should_update {
+                    t.update();
+                }
             }
         }
     }

@@ -48,6 +48,12 @@ pub fn render(draw: &Draw, rect: Rect, state: &GlobalSettingsState, anim: &Modal
     form.slider_row(draw, "Theme Hue", state.theme_hue, 0.0, 1.0);
 
     form.toggle_row(draw, "Show Debug Stats", state.show_debug_stats);
+
+    form.stepper_row(
+        draw,
+        "Power Profile",
+        &format!("{:?}", state.power_profile),
+    );
 }
 
 pub fn handle_key(key: Key, state: &mut GlobalSettingsState) -> bool {
@@ -63,7 +69,7 @@ pub fn handle_key(key: Key, state: &mut GlobalSettingsState) -> bool {
     if let Some(nav) = &input.nav {
         match nav {
             UiNav::Up => state.focus.focused = state.focus.focused.saturating_sub(1),
-            UiNav::Down => state.focus.focused = (state.focus.focused + 1).min(3), // 4 rows (0-3)
+            UiNav::Down => state.focus.focused = (state.focus.focused + 1).min(4), // 5 rows (0-4)
             _ => {}
         }
     }
@@ -123,6 +129,27 @@ pub fn handle_key(key: Key, state: &mut GlobalSettingsState) -> bool {
                 // Show Debug Stats
                 if let Some(UiNav::Enter) | Some(UiNav::Left) | Some(UiNav::Right) = input.nav {
                     state.show_debug_stats = !state.show_debug_stats;
+                }
+            }
+            4 => {
+                // Power Profile
+                use talisman_core::PowerProfile;
+                match nav {
+                    UiNav::Left => {
+                        state.power_profile = match state.power_profile {
+                            PowerProfile::Normal => PowerProfile::BatteryBackground,
+                            PowerProfile::LowPower => PowerProfile::Normal,
+                            PowerProfile::BatteryBackground => PowerProfile::LowPower,
+                        }
+                    }
+                    UiNav::Right => {
+                        state.power_profile = match state.power_profile {
+                            PowerProfile::Normal => PowerProfile::LowPower,
+                            PowerProfile::LowPower => PowerProfile::BatteryBackground,
+                            PowerProfile::BatteryBackground => PowerProfile::Normal,
+                        }
+                    }
+                    _ => {}
                 }
             }
             _ => {}

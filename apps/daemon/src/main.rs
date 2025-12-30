@@ -70,6 +70,9 @@ struct Model {
     // Keyboard Navigation (keyboard-first UI)
     keyboard_nav: KeyboardNav,
 
+    // Shared Settings Handles
+    audio_input_settings: std::sync::Arc<AudioInputSettings>,
+
     // Modal animation states (for fullscreen modals)
     modal_anims: std::collections::HashMap<ModalAnimKey, ModalAnim>,
 }
@@ -362,6 +365,7 @@ fn model(app: &App) -> Model {
         start_time: std::time::Instant::now(),
         frame_count: 0,
         keyboard_nav: KeyboardNav::new(),
+        audio_input_settings: audio_input_settings.clone(),
         modal_anims: std::collections::HashMap::new(),
     };
 
@@ -488,7 +492,9 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
     update_modal_anims(model);
 
     // Update tile registry (extends to new tiles with render_monitor/render_controls)
-    model.tile_registry.update_all();
+    model
+        .tile_registry
+        .update_all_with_power(model.layout.config.power_profile, model.frame_count);
     model.frame_count += 1;
 
     // (Audio tiles update independently; module runtime handles audio pipeline)
@@ -656,6 +662,21 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
             return;
         }
         if key == Key::Escape {
+            // Apply changes back to config
+            model.layout.config.power_profile = state.power_profile;
+            model.layout.save();
+
+            // Apply power profile to audio knobs
+            use talisman_core::PowerProfile;
+            let (frame_samples, max_wait_ms) = match state.power_profile {
+                PowerProfile::Normal => (256, 3),
+                PowerProfile::LowPower => (512, 6),
+                PowerProfile::BatteryBackground => (1024, 12),
+            };
+            model
+                .audio_input_settings
+                .set_power_knobs(frame_samples, max_wait_ms);
+
             model.modal_stack.pop();
             return;
         }
@@ -777,9 +798,11 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
                 }
             }
             AppAction::OpenGlobalSettings => {
-                model.modal_stack.push(ModalState::GlobalSettings(
-                    ui::modals::GlobalSettingsState::default(),
-                ));
+                let mut state = ui::modals::GlobalSettingsState::default();
+                // Load current values from config
+                state.power_profile = model.layout.config.power_profile;
+                // (Other settings could be loaded here too if they were persisted)
+                model.modal_stack.push(ModalState::GlobalSettings(state));
             }
 
             AppAction::OpenAddTilePicker { col, row } => {
@@ -961,6 +984,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     frame_count: model.frame_count,
                     is_selected,
                     is_maximized: false,
+                    power_profile: model.layout.config.power_profile,
                     tile_settings: Some(&tile.settings.config),
                 };
 
@@ -1007,6 +1031,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     frame_count: model.frame_count,
                     is_selected: true,
                     is_maximized: true,
+                    power_profile: model.layout.config.power_profile,
                     tile_settings: Some(&tile.settings.config),
                 };
 

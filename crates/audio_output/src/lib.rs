@@ -66,7 +66,6 @@ struct AudioOutputInner {
     sample_rate: u32,
     channels: u16,
     warned_mismatch: AtomicBool,
-    resolved_device: String,
 }
 
 impl AudioOutputSink {
@@ -89,7 +88,6 @@ impl AudioOutputSink {
                         sample_rate: 0,
                         channels: 0,
                         warned_mismatch: AtomicBool::new(false),
-                        resolved_device: "Unavailable".to_string(),
                     },
                     vec![],
                 )
@@ -148,7 +146,6 @@ impl AudioOutputSink {
                 sample_rate: fmt.sample_rate,
                 channels: fmt.channels,
                 warned_mismatch: AtomicBool::new(false),
-                resolved_device: resolved_name,
             },
             device_entries,
         ))
