@@ -1,6 +1,6 @@
 //! Input Mode & Keyboard Navigation
 //!
-//! Centralized keyboard-first navigation system for Talisman.
+//! Centralized keyboard-first navigation system for Magnolia.
 //! Arrow keys work in all modes, ESC cascades through navigation hierarchy.
 
 use crate::tiles::TileRegistry;

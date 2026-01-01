@@ -6,7 +6,7 @@ pub use talisman_plugin_abi::{
 
 use std::os::raw::c_char;
 
-/// Macro to export the necessary C-ABI symbols for a Talisman plugin.
+/// Macro to export the necessary C-ABI symbols for a Magnolia plugin.
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty) => {

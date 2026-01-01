@@ -1,14 +1,14 @@
 //! Tile Rendering System
 //!
 //! This module provides the `TileRenderer` trait and supporting types for
-//! creating visual tiles in the Talisman daemon.
+//! creating visual tiles in the Magnolia daemon.
 //!
 //! ## Feature Flag
 //! This module is only available when the `tile-rendering` feature is enabled.
 //! Module crates that wish to provide visual tiles should enable this feature:
 //!
 //! ```toml
-//! [dependencies.talisman_core]
+//! [dependencies.magnolia_core]
 //! path = "../../core"
 //! features = ["tile-rendering"]
 //! ```

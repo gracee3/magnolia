@@ -146,7 +146,7 @@ fn model(app: &App) -> Model {
         .mouse_pressed(mouse_pressed)
         .mouse_moved(mouse_moved)
         .size(900, 600)
-        .title("TALISMAN // DIGITAL LAB")
+        .title("MAGNOLIA // DIGITAL LAB")
         .build()
         .unwrap();
 

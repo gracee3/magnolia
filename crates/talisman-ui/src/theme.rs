@@ -1,4 +1,4 @@
-//! Talisman Theme Constants
+//! Magnolia Theme Constants
 //!
 //! Centralized visual styling for the dark/cyan reactive aesthetic.
 

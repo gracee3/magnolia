@@ -1,4 +1,4 @@
-# Cargo configuration for talisman workspace
+# Cargo configuration for magnolia workspace
 
 # Build alias that filters out the noise dependency warning
 [alias]

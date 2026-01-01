@@ -53,7 +53,7 @@ impl TalismanPlugin for LogosPlugin {
         "Stdin Text Source"
     }
     fn author() -> &'static str {
-        "Talisman"
+        "Magnolia"
     }
 
     fn c_id(&self) -> *const std::os::raw::c_char {

@@ -1,12 +1,12 @@
-# TALISMAN // AGENT HAND-OFF
+# MAGNOLIA // AGENT HAND-OFF
 
 ## 1. Project Overview
-**Talisman** is a high-performance, modular microkernel for real-time signal processing, astrological data retrieval, and generative ritual geometry. It uses a "Patch Bay" architecture with a dynamic plugin system to decouple data sources from visual sinks.
+**Magnolia** is a high-performance, modular microkernel for real-time signal processing, astrological data retrieval, and generative ritual geometry. It uses a "Patch Bay" architecture with a dynamic plugin system to decouple data sources from visual sinks.
 
 ## 2. System Architecture (The Patch Bay)
 The core logic resides in an asynchronous orchestrator using **Tokio** channels and dynamically loaded modules.
 
-- **Signals (`talisman_core::Signal`)**: A unified enum that flows through the system.
+- **Signals (`magnolia_core::Signal`)**: A unified enum that flows through the system.
   - `Text(String)`: Raw user input.
   - `Intent(String)`: Sanitized/Processed intent.
   - `Astrology(String)`: Real-time planetary state.
@@ -15,8 +15,8 @@ The core logic resides in an asynchronous orchestrator using **Tokio** channels 
 - **Modules**: `Source`, `Sink`, or `Processor` types that can be loaded statically or dynamically.
 
 ## 3. Crate Breakdown
-- **`talisman_core`**: The backbone. Defines core traits, `ModuleHost`, `PluginManager`, and `Signal` types.
-- **`crates/talisman-plugin-abi`**: Stable C ABI definition for cross-language/version dynamic plugins.
+- **`magnolia_core`**: The backbone. Defines core traits, `ModuleHost`, `PluginManager`, and `Signal` types.
+- **`crates/magnolia-plugin-abi`**: Stable C ABI definition for cross-language/version dynamic plugins.
 - **`crates/aphrodite`**: Wraps the Swiss Ephemeris. Provides high-precision astrological "Salting".
 - **`crates/logos`**: Handles the ingestion of intent.
 - **`crates/kamea`**: Generates grid-based geometry (Sigils).
@@ -85,7 +85,7 @@ keybinds = { mute = "m", freeze = "f", next_vis = "n" }
 
 ## 5. Key Features for Developers
 - **Dynamic Plugin System**:
-  - Load `.so`/`.dll` plugins at runtime from `./plugins` or `~/.talisman/plugins`.
+  - Load `.so`/`.dll` plugins at runtime from `./plugins` or `~/.magnolia/plugins`.
   - **Hot-Reloading**: Plugins auto-reload on file change during development.
   - **Sandboxing**: Linux plugins restricted via `seccomp-bpf`.
   - **Signing**: Optional Ed25519 signature verification.

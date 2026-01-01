@@ -1,6 +1,6 @@
 //! Tile System - Unified tile rendering and management
 //!
-//! This module re-exports the TileRenderer trait from talisman_core
+//! This module re-exports the TileRenderer trait from magnolia_core
 //! and tile implementations from their respective crates.
 //!
 //! ## Architecture
@@ -15,7 +15,7 @@ pub mod clock;
 pub mod system_monitor;
 pub mod compositor;
 
-// Re-export main types from talisman_core
+// Re-export main types from magnolia_core
 pub use talisman_core::{
     render_error_overlay, BindableAction, RenderContext, TileRegistry, TileRenderer,
 };

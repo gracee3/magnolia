@@ -1,6 +1,6 @@
-# Talisman Plugin ABI
+# Magnolia Plugin ABI
 
-A stable C ABI for Talisman plugins, enabling cross-version compatibility and dynamic loading.
+A stable C ABI for Magnolia plugins, enabling cross-version compatibility and dynamic loading.
 
 ## ABI Version
 
@@ -15,10 +15,10 @@ Breaking changes require incrementing the version. Plugins built with an older A
 - `ModuleRuntimeVTable` function signatures
 - `SignalBuffer` struct layout
 - `SignalType` enum values (0-7)
-- Symbol names (`talisman_plugin_*`)
+- Symbol names (`magnolia_plugin_*`)
 
 ### Extensible (Backwards Compatible)
-- New optional symbol exports (e.g., `talisman_plugin_get_schema`)
+- New optional symbol exports (e.g., `magnolia_plugin_get_schema`)
 - New `SignalType` variants (numbering continues from 8+)
 - New fields at END of `#[repr(C)]` structs
 
@@ -34,20 +34,20 @@ Every plugin must export these symbols:
 
 ```c
 // Plugin manifest
-PluginManifest talisman_plugin_manifest(void);
+PluginManifest magnolia_plugin_manifest(void);
 
 // Instance creation/destruction
-void* talisman_plugin_create(void);
+void* magnolia_plugin_create(void);
 
 // VTable for runtime callbacks  
-const ModuleRuntimeVTable* talisman_plugin_get_vtable(void);
+const ModuleRuntimeVTable* magnolia_plugin_get_vtable(void);
 ```
 
 ## Optional Exports
 
 ```c
 // Schema for port discovery (ABI v2+)
-const ModuleSchemaAbi* talisman_plugin_get_schema(void);
+const ModuleSchemaAbi* magnolia_plugin_get_schema(void);
 ```
 
 ## Example Plugin

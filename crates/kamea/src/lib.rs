@@ -61,7 +61,7 @@ impl TalismanPlugin for KameaPlugin {
         "Generative Sigil Visualizer"
     }
     fn author() -> &'static str {
-        "Talisman"
+        "Magnolia"
     }
 
     fn c_id(&self) -> *const std::os::raw::c_char {

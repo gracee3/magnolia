@@ -23,7 +23,7 @@ target/
 .DS_Store
 Thumbs.db
 
-# Talisman Configs (Keep secrets out)
+# Magnolia Configs (Keep secrets out)
 # configs/*.toml
 
 # Built plugin artifacts

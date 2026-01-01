@@ -1,6 +1,6 @@
-# Talisman
+# Magnolia
 
-Talisman is a cybernetic practice suite for digital introspection and chaos magic, built on a high-performance modular microkernel.
+Magnolia is a cybernetic practice suite for digital introspection and chaos magic, built on a high-performance modular microkernel.
 
 It is a "Cybernetic Spirit" forged from three components:
 1.  **Aphrodite** (Time) - Astrological Data
@@ -20,8 +20,8 @@ The **Daemon** is the vessel that binds them, orchestrating data flow through a 
 ## Structure
 
 - **Core**
-    - `talisman_core`: The kernel, defining `Signal`, `ModuleRuntime`, and `PluginManager`.
-    - `talisman-plugin-abi`: Stable C interface for plugins.
+    - `magnolia_core`: The kernel, defining `Signal`, `ModuleRuntime`, and `PluginManager`.
+    - `magnolia-plugin-abi`: Stable C interface for plugins.
 
 - **Crates**
     - `aphrodite`: Time & Astrology logic.
@@ -47,7 +47,7 @@ The **Daemon** is the vessel that binds them, orchestrating data flow through a 
 
 ## Keyboard Controls
 
-Talisman is keyboard-first with smart tile navigation:
+Magnolia is keyboard-first with smart tile navigation:
 
 | Key | Normal Mode | Layout Mode |
 |-----|-------------|-------------|
@@ -63,4 +63,4 @@ Talisman is keyboard-first with smart tile navigation:
 
 - **Layout**: `configs/layout.toml` controls the visual grid.
 - **Security**: 
-  - `~/.talisman/trusted_keys.txt`: Add Ed25519 public keys to verify signed plugins.
+  - `~/.magnolia/trusted_keys.txt`: Add Ed25519 public keys to verify signed plugins.

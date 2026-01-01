@@ -99,7 +99,7 @@ impl TalismanPlugin for AphroditePlugin {
         "Astrological Clock"
     }
     fn author() -> &'static str {
-        "Talisman"
+        "Magnolia"
     }
 
     fn c_id(&self) -> *const std::os::raw::c_char {

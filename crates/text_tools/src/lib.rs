@@ -1,6 +1,6 @@
 //! Text Tools - Text processing sinks
 //!
-//! Provides text processing modules for the Talisman system.
+//! Provides text processing modules for the Magnolia system.
 
 mod save_file;
 mod sinks;

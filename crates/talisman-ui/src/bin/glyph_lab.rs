@@ -39,7 +39,7 @@ struct Model {
 
 fn model(app: &App) -> Model {
     app.new_window()
-        .title("Talisman Glyph Lab")
+        .title("Magnolia Glyph Lab")
         .size(1600, 1000)
         .key_pressed(key_pressed)
         .view(view)
