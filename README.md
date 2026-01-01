@@ -1,13 +1,6 @@
 # Magnolia
 
-Magnolia is a cybernetic practice suite for digital introspection and chaos magic, built on a high-performance modular microkernel.
-
-It is a "Cybernetic Spirit" forged from three components:
-1.  **Aphrodite** (Time) - Astrological Data
-2.  **Logos** (Intent) - Input Processing
-3.  **Kamea** (Geometry) - Sigil Generation
-
-The **Daemon** is the vessel that binds them, orchestrating data flow through a dynamic Patch Bay.
+Magnolia is a foundational connectivity layer for modular signal-processing systems. It provides a high-performance microkernel and a patch-bay style runtime that decouples data sources, processors, and sinks.
 
 ## Key Features
 
@@ -15,7 +8,7 @@ The **Daemon** is the vessel that binds them, orchestrating data flow through a 
 - **Dynamic Plugins**: Load modules (`.so`/`.dll`) at runtime with hot-reloading support.
 - **Low-Latency Audio**: Lock-free SPSC ring buffers for real-time DSP.
 - **Secure**: Sandboxing (Linux) and Ed25519 signature verification for plugins.
-- **Visuals**: Nannou-based generative visuals with transparent overlays.
+- **Visualization Host**: Nannou-based visual runtime with configurable overlays.
 
 ## Structure
 
@@ -24,10 +17,9 @@ The **Daemon** is the vessel that binds them, orchestrating data flow through a 
     - `magnolia-plugin-abi`: Stable C interface for plugins.
 
 - **Crates**
-    - `aphrodite`: Time & Astrology logic.
-    - `logos`: Input, Intent, & Hashing logic.
-    - `kamea`: Geometry & Grid logic.
     - `audio_input`: Real-time audio source.
+    - `audio_output`: Real-time audio sink.
+    - `audio_dsp`: Audio processing utilities.
     - `text_tools`: Text analysis sinks.
 
 - **Apps**
