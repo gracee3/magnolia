@@ -195,7 +195,7 @@ impl AudioInputBackend for PipeWireInputBackend {
                 *pw::keys::MEDIA_ROLE => "Music",
             };
 
-            let stream = match pw::stream::StreamBox::new(&core, "talisman-audio-input", props) {
+            let stream = match pw::stream::StreamBox::new(&core, "magnolia-audio-input", props) {
                 Ok(v) => v,
                 Err(e) => {
                     log::error!("PipeWire input: failed to create stream: {e}");

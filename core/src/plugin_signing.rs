@@ -18,9 +18,9 @@ impl PluginVerifier {
     fn load_trusted_keys() -> Vec<VerifyingKey> {
         let mut keys = Vec::new();
 
-        // Load from ~/.talisman/trusted_keys.txt
+        // Load from ~/.magnolia/trusted_keys.txt
         if let Some(home) = dirs::home_dir() {
-            let key_file = home.join(".talisman/trusted_keys.txt");
+            let key_file = home.join(".magnolia/trusted_keys.txt");
             if let Ok(content) = std::fs::read_to_string(&key_file) {
                 for (line_num, line) in content.lines().enumerate() {
                     let line = line.trim();

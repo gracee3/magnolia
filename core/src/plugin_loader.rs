@@ -118,7 +118,7 @@ impl PluginLoader {
 
         // Add user plugin directory
         if let Some(home) = dirs::home_dir() {
-            dirs.push(home.join(".talisman/plugins"));
+            dirs.push(home.join(".magnolia/plugins"));
         }
 
         Self {
