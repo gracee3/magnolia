@@ -1,7 +1,7 @@
 use crate::{ControlSignal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal, Signal};
 use async_trait::async_trait;
 use std::ffi::CStr;
-use talisman_plugin_abi::*;
+use magnolia_plugin_abi::*;
 use tokio::sync::mpsc;
 
 pub struct PluginModuleAdapter {
@@ -150,7 +150,7 @@ impl PluginModuleAdapter {
                 };
 
                 // Parse JSON back to AstrologyData
-                use talisman_signals::AstrologyData;
+                use magnolia_signals::AstrologyData;
                 if let Ok(data) = serde_json::from_str::<AstrologyData>(&json_str) {
                     Some(Signal::Astrology(data))
                 } else if let Ok(_val) = serde_json::from_str::<serde_json::Value>(&json_str) {

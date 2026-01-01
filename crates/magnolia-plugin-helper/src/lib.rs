@@ -1,6 +1,6 @@
-pub use talisman_plugin_abi;
+pub use magnolia_plugin_abi;
 // Re-export common types for convenience
-pub use talisman_plugin_abi::{
+pub use magnolia_plugin_abi::{
     ABI_VERSION, ModuleRuntimeVTable, PluginManifest, SignalBuffer, SignalType, SignalValue,
 };
 
@@ -14,7 +14,7 @@ macro_rules! export_plugin {
 
         // --- MANIFEST ---
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn talisman_plugin_manifest() -> $crate::PluginManifest {
+        pub unsafe extern "C" fn magnolia_plugin_manifest() -> $crate::PluginManifest {
             use std::ffi::CString;
             let name = CString::new(<$plugin_type>::name()).unwrap();
             let ver = CString::new(<$plugin_type>::version()).unwrap();
@@ -32,7 +32,7 @@ macro_rules! export_plugin {
 
         // --- CREATE ---
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn talisman_plugin_create() -> *mut std::os::raw::c_void {
+        pub unsafe extern "C" fn magnolia_plugin_create() -> *mut std::os::raw::c_void {
             let plugin = Box::new(<$plugin_type>::default());
             Box::into_raw(plugin) as *mut std::os::raw::c_void
         }
@@ -50,22 +50,22 @@ macro_rules! export_plugin {
         };
 
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn talisman_plugin_get_vtable() -> *const $crate::ModuleRuntimeVTable
+        pub unsafe extern "C" fn magnolia_plugin_get_vtable() -> *const $crate::ModuleRuntimeVTable
         {
             &VTABLE as *const _
         }
 
         // --- SCHEMA ---
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn talisman_plugin_get_schema()
-        -> *const $crate::talisman_plugin_abi::ModuleSchemaAbi {
+        pub unsafe extern "C" fn magnolia_plugin_get_schema()
+        -> *const $crate::magnolia_plugin_abi::ModuleSchemaAbi {
             // Leak strings to keep them valid for the lifetime of the plugin (static)
             use std::ffi::CString;
 
             // Note: We don't support ports via macro yet, user must implement strict ABI manually if they want ports.
             // But we do support settings_schema.
 
-            static mut SCHEMA: Option<$crate::talisman_plugin_abi::ModuleSchemaAbi> = None;
+            static mut SCHEMA: Option<$crate::magnolia_plugin_abi::ModuleSchemaAbi> = None;
             static mut SCHEMA_INIT: std::sync::Once = std::sync::Once::new();
 
             unsafe {
@@ -80,7 +80,7 @@ macro_rules! export_plugin {
                         std::ptr::null()
                     };
 
-                    SCHEMA = Some($crate::talisman_plugin_abi::ModuleSchemaAbi {
+                    SCHEMA = Some($crate::magnolia_plugin_abi::ModuleSchemaAbi {
                         id: id.into_raw(),
                         name: name.into_raw(),
                         description: desc.into_raw(),
@@ -160,7 +160,7 @@ macro_rules! export_plugin {
     };
 }
 
-pub trait TalismanPlugin: Default {
+pub trait MagnoliaPlugin: Default {
     // Metadata
     fn name() -> &'static str;
     fn version() -> &'static str;

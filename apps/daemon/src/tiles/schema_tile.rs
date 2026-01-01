@@ -1,8 +1,8 @@
 use nannou::prelude::*;
 use serde_json::Value;
 use std::sync::Mutex;
-use talisman_core::{ControlSignal, RenderContext, Signal, TileRenderer};
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_core::{ControlSignal, RenderContext, Signal, TileRenderer};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 use tokio::sync::mpsc::Sender;
 
 pub struct SchemaTile {

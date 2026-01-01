@@ -1,8 +1,8 @@
 use nannou::lyon::math::point as lpoint;
 use nannou::lyon::path::Path;
 use nannou::prelude::*;
-use talisman_ui::tweaks::GlyphTweaks;
-use talisman_ui::{self, draw_text, theme, FontId, GlyphOp, TextAlignment};
+use magnolia_ui::tweaks::GlyphTweaks;
+use magnolia_ui::{self, draw_text, theme, FontId, GlyphOp, TextAlignment};
 
 fn main() {
     nannou::app(model).update(update).run();
@@ -221,7 +221,7 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
 fn build_path_for_glyph(
     _item: DisplayGlyph,
     ops: &[GlyphOp],
-    bounds: talisman_ui::GlyphBounds,
+    bounds: magnolia_ui::GlyphBounds,
     rect: Rect,
     tweaks: &GlyphTweaks,
     glyph_name: &str,
@@ -386,7 +386,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     );
 
                     let DisplayGlyph::Font(font, c) = item;
-                    if let Some((ops, bounds)) = talisman_ui::font_glyph_ops_bounds(*font, *c) {
+                    if let Some((ops, bounds)) = magnolia_ui::font_glyph_ops_bounds(*font, *c) {
                         let big_rect = Rect::from_xy_wh(
                             center,
                             vec2(model.big_glyph_size, model.big_glyph_size),
@@ -418,7 +418,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             let (item, name) = &model.glyphs[model.selected_index];
             let DisplayGlyph::Font(font, c) = item;
 
-            if let Some((ops, bounds)) = talisman_ui::font_glyph_ops_bounds(*font, *c) {
+            if let Some((ops, bounds)) = magnolia_ui::font_glyph_ops_bounds(*font, *c) {
                 let path =
                     build_path_for_glyph(*item, ops, bounds, detail_rect, &model.tweaks, name);
 

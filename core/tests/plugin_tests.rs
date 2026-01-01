@@ -1,4 +1,4 @@
-use talisman_core::PluginLoader;
+use magnolia_core::PluginLoader;
 
 #[test]
 fn test_plugin_discovery() {

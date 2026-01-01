@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use regex::Regex;
 use std::sync::{Arc, Mutex};
-use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
 
 // --- Word Count Sink ---
 pub struct WordCountSink {

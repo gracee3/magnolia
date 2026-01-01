@@ -3,7 +3,7 @@ use libloading::{Library, Symbol};
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
-use talisman_plugin_abi::*;
+use magnolia_plugin_abi::*;
 
 /// Loaded plugin library with manifest and vtable
 pub struct PluginLibrary {
@@ -34,7 +34,7 @@ impl PluginLibrary {
         // Get manifest
         let manifest_fn: Symbol<PluginManifestFn> = lib
             .get(PLUGIN_MANIFEST_SYMBOL)
-            .context("Plugin missing talisman_plugin_manifest symbol")?;
+            .context("Plugin missing magnolia_plugin_manifest symbol")?;
         let manifest = manifest_fn();
 
         // Check ABI version
@@ -49,7 +49,7 @@ impl PluginLibrary {
         // Get vtable
         let vtable_fn: Symbol<PluginGetVTableFn> = lib
             .get(PLUGIN_VTABLE_SYMBOL)
-            .context("Plugin missing talisman_plugin_get_vtable symbol")?;
+            .context("Plugin missing magnolia_plugin_get_vtable symbol")?;
         let vtable = &*vtable_fn();
 
         // Get schema (optional)
@@ -69,7 +69,7 @@ impl PluginLibrary {
         // Create instance
         let create_fn: Symbol<PluginCreateFn> = lib
             .get(PLUGIN_CREATE_SYMBOL)
-            .context("Plugin missing talisman_plugin_create symbol")?;
+            .context("Plugin missing magnolia_plugin_create symbol")?;
         let instance = create_fn();
 
         if instance.is_null() {

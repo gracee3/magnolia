@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 use std::io::{self, BufRead};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use talisman_plugin_helper::{
-    export_plugin, SignalBuffer, SignalType, SignalValue, TalismanPlugin,
+use magnolia_plugin_helper::{
+    export_plugin, SignalBuffer, SignalType, SignalValue, MagnoliaPlugin,
 };
 
 struct LogosPlugin {
@@ -42,7 +42,7 @@ impl Default for LogosPlugin {
     }
 }
 
-impl TalismanPlugin for LogosPlugin {
+impl MagnoliaPlugin for LogosPlugin {
     fn name() -> &'static str {
         "logos"
     }

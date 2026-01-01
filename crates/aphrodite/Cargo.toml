@@ -7,7 +7,7 @@ license = "AGPL-3.0-or-later"
 
 [features]
 default = []
-tile-rendering = ["talisman_core/tile-rendering", "talisman-ui/tile-rendering", "dep:nannou"]
+tile-rendering = ["magnolia_core/tile-rendering", "magnolia-ui/tile-rendering", "dep:nannou"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -19,10 +19,10 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 anyhow = "1.0"
 swisseph = "^0.1"
-talisman_core = { path = "../../core" }
-talisman_signals = { path = "../../crates/talisman-signals" }
-talisman-plugin-helper = { path = "../talisman-plugin-helper" }
-talisman-ui = { path = "../talisman-ui", features = ["tile-rendering"] }
+magnolia_core = { path = "../../core" }
+magnolia_signals = { path = "../../crates/magnolia-signals" }
+magnolia-plugin-helper = { path = "../magnolia-plugin-helper" }
+magnolia-ui = { path = "../magnolia-ui", features = ["tile-rendering"] }
 async-trait = "0.1"
 tokio = { version = "1.0", features = ["full"] }
 

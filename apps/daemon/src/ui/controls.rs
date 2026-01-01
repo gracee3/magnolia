@@ -6,7 +6,7 @@
 #![allow(dead_code)] // Used progressively across tiles/modals; keep available without warning spam.
 
 use nannou::prelude::*;
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 /// Spacing constants tuned for fullscreen "control mode" UIs.
 pub const ROW_H: f32 = 34.0;

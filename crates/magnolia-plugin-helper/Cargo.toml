@@ -1,0 +1,8 @@
+[package]
+name = "magnolia-plugin-helper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+magnolia-plugin-abi = { path = "../magnolia-plugin-abi" }
+magnolia_signals = { path = "../magnolia-signals" }

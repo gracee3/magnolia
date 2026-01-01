@@ -17,10 +17,10 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc as StdArc;
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "tile-rendering")]
-use talisman_core::{BindableAction, RenderContext, TileError, TileRenderer};
-use talisman_signals::ring_buffer::RingBufferReceiver;
+use magnolia_core::{BindableAction, RenderContext, TileError, TileRenderer};
+use magnolia_signals::ring_buffer::RingBufferReceiver;
 #[cfg(feature = "tile-rendering")]
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 /// Available visualization types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -524,7 +524,7 @@ impl TileRenderer for AudioVisTile {
 
         let content_rect = rect.pad(5.0);
 
-        use talisman_core::PowerProfile;
+        use magnolia_core::PowerProfile;
         let max_scope_points = match ctx.power_profile {
             PowerProfile::Normal => MAX_SCOPE_POINTS,
             PowerProfile::LowPower => MAX_SCOPE_POINTS / 2,

@@ -3,7 +3,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::error;
 
-use talisman_signals::ring_buffer::RingBufferReceiver;
+use magnolia_signals::ring_buffer::RingBufferReceiver;
 
 use super::{AudioOutputBackend, BackendStream, DeviceInfo, NegotiatedFormat};
 

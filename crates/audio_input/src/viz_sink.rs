@@ -4,8 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 
-use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
-use talisman_signals::ring_buffer::RingBufferSender;
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
+use magnolia_signals::ring_buffer::RingBufferSender;
 
 fn now_micros() -> u64 {
     SystemTime::now()

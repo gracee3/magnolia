@@ -1,5 +1,5 @@
 [package]
-name = "talisman_core"
+name = "magnolia_core"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,9 +8,9 @@ default = []
 tile-rendering = ["dep:nannou"]
 
 [dependencies]
-talisman_signals = { path = "../crates/talisman-signals" }
-talisman_module_api = { path = "../crates/talisman-module-api" }
-talisman-ui = { path = "../crates/talisman-ui", features = ["tile-rendering"] }
+magnolia_signals = { path = "../crates/magnolia-signals" }
+magnolia_module_api = { path = "../crates/magnolia-module-api" }
+magnolia-ui = { path = "../crates/magnolia-ui", features = ["tile-rendering"] }
 async-trait = "0.1"
 slab = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -36,5 +36,5 @@ wgpu = "0.17.1"
 seccompiler = "0.4"
 libc = "0.2"
 
-[dependencies.talisman-plugin-abi]
-path = "../crates/talisman-plugin-abi"
+[dependencies.magnolia-plugin-abi]
+path = "../crates/magnolia-plugin-abi"

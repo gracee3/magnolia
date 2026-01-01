@@ -1,7 +1,7 @@
-use talisman_plugin_helper::{
-    export_plugin, SignalBuffer, SignalType, SignalValue, TalismanPlugin,
+use magnolia_plugin_helper::{
+    export_plugin, SignalBuffer, SignalType, SignalValue, MagnoliaPlugin,
 };
-use talisman_signals::AstrologyData;
+use magnolia_signals::AstrologyData;
 
 pub mod aspects;
 #[cfg(feature = "tile-rendering")]
@@ -88,7 +88,7 @@ fn get_sign(lon: f64) -> String {
     signs[idx].to_string()
 }
 
-impl TalismanPlugin for AphroditePlugin {
+impl MagnoliaPlugin for AphroditePlugin {
     fn name() -> &'static str {
         "aphrodite"
     }

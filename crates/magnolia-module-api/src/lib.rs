@@ -1,4 +1,4 @@
-pub use talisman_signals::{ControlMsg, ControlSignal, Manifest, PortDesc};
+pub use magnolia_signals::{ControlMsg, ControlSignal, Manifest, PortDesc};
 
 /// A restricted context for RT-safe tick operations.
 /// No allocation allowed here for Tier 0 modules.

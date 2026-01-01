@@ -4,8 +4,8 @@ use crate::ui::fullscreen_modal::{
 };
 use crate::ui::modals::{PatchBayModalState, PatchBayPane};
 use nannou::prelude::*;
-use talisman_core::{PatchBay, PortDirection};
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_core::{PatchBay, PortDirection};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 pub fn render(
     draw: &Draw,

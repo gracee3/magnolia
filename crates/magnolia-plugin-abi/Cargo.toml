@@ -1,5 +1,5 @@
 [package]
-name = "talisman-plugin-abi"
+name = "magnolia-plugin-abi"
 version = "0.1.0"
 edition = "2021"
 

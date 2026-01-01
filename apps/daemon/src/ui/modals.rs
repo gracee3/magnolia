@@ -1,5 +1,5 @@
 use crate::ui::controls::FocusModel;
-use talisman_core::PowerProfile;
+use magnolia_core::PowerProfile;
 
 pub type ModuleId = String;
 pub type PortId = String;

@@ -4,7 +4,7 @@ use crate::ui::fullscreen_modal::{
 };
 use crate::ui::modals::GlobalSettingsState;
 use nannou::prelude::*;
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 pub fn render(draw: &Draw, rect: Rect, state: &GlobalSettingsState, anim: &ModalAnim) {
     // Calculate animated modal rect
@@ -133,7 +133,7 @@ pub fn handle_key(key: Key, state: &mut GlobalSettingsState) -> bool {
             }
             4 => {
                 // Power Profile
-                use talisman_core::PowerProfile;
+                use magnolia_core::PowerProfile;
                 match nav {
                     UiNav::Left => {
                         state.power_profile = match state.power_profile {

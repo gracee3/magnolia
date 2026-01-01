@@ -7,4 +7,4 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-talisman-plugin-abi = { path = "../../crates/talisman-plugin-abi" }
+magnolia-plugin-abi = { path = "../../crates/magnolia-plugin-abi" }

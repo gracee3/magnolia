@@ -161,8 +161,8 @@ pub type PluginGetVTableFn = unsafe extern "C" fn() -> *const ModuleRuntimeVTabl
 pub type PluginGetSchemaFn = unsafe extern "C" fn() -> *const ModuleSchemaAbi;
 
 /// Symbol names that plugins must export
-pub const PLUGIN_MANIFEST_SYMBOL: &[u8] = b"talisman_plugin_manifest\0";
-pub const PLUGIN_CREATE_SYMBOL: &[u8] = b"talisman_plugin_create\0";
-pub const PLUGIN_VTABLE_SYMBOL: &[u8] = b"talisman_plugin_get_vtable\0";
+pub const PLUGIN_MANIFEST_SYMBOL: &[u8] = b"magnolia_plugin_manifest\0";
+pub const PLUGIN_CREATE_SYMBOL: &[u8] = b"magnolia_plugin_create\0";
+pub const PLUGIN_VTABLE_SYMBOL: &[u8] = b"magnolia_plugin_get_vtable\0";
 /// Optional schema export symbol
-pub const PLUGIN_SCHEMA_SYMBOL: &[u8] = b"talisman_plugin_get_schema\0";
+pub const PLUGIN_SCHEMA_SYMBOL: &[u8] = b"magnolia_plugin_get_schema\0";

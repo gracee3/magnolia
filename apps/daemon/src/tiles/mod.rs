@@ -16,7 +16,7 @@ pub mod system_monitor;
 pub mod compositor;
 
 // Re-export main types from magnolia_core
-pub use talisman_core::{
+pub use magnolia_core::{
     render_error_overlay, BindableAction, RenderContext, TileRegistry, TileRenderer,
 };
 

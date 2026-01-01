@@ -21,7 +21,7 @@
 use nannou::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 /// Describes an action that can be bound to a key
 #[derive(Debug, Clone)]

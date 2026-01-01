@@ -9,7 +9,7 @@ use chrono::Local;
 use nannou::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeFormat {

@@ -1,5 +1,5 @@
 [package]
-name = "talisman-ui"
+name = "magnolia-ui"
 version = "0.1.0"
 edition = "2021"
 authors = ["Gaia Tools"]

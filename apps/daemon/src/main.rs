@@ -1,9 +1,9 @@
 use nannou::prelude::*;
-use talisman_core::adapters::{ProcessorAdapter, SinkAdapter, SourceAdapter};
-use talisman_core::{
+use magnolia_core::adapters::{ProcessorAdapter, SinkAdapter, SourceAdapter};
+use magnolia_core::{
     ModuleRuntime, PatchBay, PluginManager, PluginModuleAdapter, RoutedSignal, Signal,
 };
-use talisman_core::{Processor, Sink, Source};
+use magnolia_core::{Processor, Sink, Source};
 // use nannou_egui removed
 use tokio::sync::mpsc;
 
@@ -13,7 +13,7 @@ use audio_input::tile::AudioVisTile;
 use audio_input::{AudioInputSettings, AudioInputSource, AudioInputTile, AudioVizRingSink};
 use audio_output::tile::AudioOutputTile;
 use audio_output::{AudioOutputSettings, AudioOutputSink, AudioOutputState};
-// use talisman_core::ring_buffer; // Removed usage
+// use magnolia_core::ring_buffer; // Removed usage
 
 // Layout editor and visualizer modules
 mod input;
@@ -23,7 +23,7 @@ mod theme;
 mod tiles;
 mod ui;
 
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 use input::{AppAction, KeyboardNav};
 use layout::Layout;
@@ -58,8 +58,8 @@ struct Model {
     is_sleeping: bool,
 
     // Runtime State
-    module_host: talisman_core::ModuleHost,
-    plugin_manager: talisman_core::PluginManager,
+    module_host: magnolia_core::ModuleHost,
+    plugin_manager: magnolia_core::PluginManager,
 
     // Tile System (Phase 6: Settings Architecture)
     tile_registry: TileRegistry,
@@ -87,7 +87,7 @@ enum ModalAnimKey {
     AddTilePicker,
 }
 
-fn make_unique_tile_id(layout: &talisman_core::LayoutConfig, base: &str) -> String {
+fn make_unique_tile_id(layout: &magnolia_core::LayoutConfig, base: &str) -> String {
     if !layout.tiles.iter().any(|t| t.id == base) {
         return base.to_string();
     }
@@ -108,7 +108,7 @@ fn make_unique_tile_id(layout: &talisman_core::LayoutConfig, base: &str) -> Stri
 }
 
 // Layout now imported from layout.rs module
-use talisman_core::TileConfig;
+use magnolia_core::TileConfig;
 
 fn main() {
     // Init Logger
@@ -129,7 +129,7 @@ fn model(app: &App) -> Model {
     let _tx_ui_clone = tx_ui.clone();
 
     // 2. Create ModuleHost for isolated module execution
-    let mut module_host = talisman_core::ModuleHost::new(tx_router.clone());
+    let mut module_host = magnolia_core::ModuleHost::new(tx_router.clone());
 
     // NOTE: No hardcoded module registration here!
     // Modules are discovered and loaded dynamically via PluginManager.
@@ -190,7 +190,7 @@ fn model(app: &App) -> Model {
     let vis_ch = vis_tile.get_channels_meter();
     vis_tile.connect_latency_meter(vis_latency.clone());
 
-    let (viz_tx, viz_rx) = talisman_signals::ring_buffer::channel::<f32>(65536);
+    let (viz_tx, viz_rx) = magnolia_signals::ring_buffer::channel::<f32>(65536);
     // Channels will be updated via `vis_ch` as audio flows, so this is only a startup hint.
     vis_tile.connect_audio_stream(viz_rx, 2);
     tile_registry.register(vis_tile);
@@ -320,7 +320,7 @@ fn model(app: &App) -> Model {
         // We should have collected IDs or use `patch_bay`?
         // ModuleHost has internal map.
         // Let's just broadcast to known "kamea" for now or verify ModuleHost API.
-        // talisman_core::ModuleHost::send_signal takes id.
+        // magnolia_core::ModuleHost::send_signal takes id.
         // Let's assume we can get IDs from PatchBay.
 
         for module in patch_bay.get_modules() {
@@ -667,7 +667,7 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
             model.layout.save();
 
             // Apply power profile to audio knobs
-            use talisman_core::PowerProfile;
+            use magnolia_core::PowerProfile;
             let (frame_samples, max_wait_ms) = match state.power_profile {
                 PowerProfile::Normal => (256, 3),
                 PowerProfile::LowPower => (512, 6),

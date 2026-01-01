@@ -1,6 +1,6 @@
 use std::ffi::CString;
 use std::os::raw::c_void;
-use talisman_plugin_abi::*;
+use magnolia_plugin_abi::*;
 
 /// Example plugin state
 struct HelloPlugin {
@@ -23,7 +23,7 @@ impl HelloPlugin {
 
 // Plugin manifest
 #[no_mangle]
-pub unsafe extern "C" fn talisman_plugin_manifest() -> PluginManifest {
+pub unsafe extern "C" fn magnolia_plugin_manifest() -> PluginManifest {
     PluginManifest {
         abi_version: 4,
         name: "Hello Plugin\0".as_ptr() as *const i8,
@@ -35,7 +35,7 @@ pub unsafe extern "C" fn talisman_plugin_manifest() -> PluginManifest {
 
 // Create plugin instance
 #[no_mangle]
-pub unsafe extern "C" fn talisman_plugin_create() -> *mut c_void {
+pub unsafe extern "C" fn magnolia_plugin_create() -> *mut c_void {
     let plugin = Box::new(HelloPlugin::new());
     Box::into_raw(plugin) as *mut c_void
 }
@@ -53,7 +53,7 @@ static VTABLE: ModuleRuntimeVTable = ModuleRuntimeVTable {
 };
 
 #[no_mangle]
-pub unsafe extern "C" fn talisman_plugin_get_vtable() -> *const ModuleRuntimeVTable {
+pub unsafe extern "C" fn magnolia_plugin_get_vtable() -> *const ModuleRuntimeVTable {
     &VTABLE as *const _
 }
 

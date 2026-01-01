@@ -1,9 +1,9 @@
 #[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
-pub use talisman_core::KameaGrid;
+pub use magnolia_core::KameaGrid;
 #[cfg(feature = "tile-rendering")]
-use talisman_plugin_helper::SignalValue;
-use talisman_plugin_helper::{export_plugin, SignalBuffer, SignalType, TalismanPlugin};
+use magnolia_plugin_helper::SignalValue;
+use magnolia_plugin_helper::{export_plugin, SignalBuffer, SignalType, MagnoliaPlugin};
 
 #[cfg(feature = "tile-rendering")]
 use nannou::wgpu; // Access nannou's re-exported wgpu
@@ -50,7 +50,7 @@ impl Default for KameaPlugin {
     }
 }
 
-impl TalismanPlugin for KameaPlugin {
+impl MagnoliaPlugin for KameaPlugin {
     fn name() -> &'static str {
         "kamea"
     }
@@ -96,13 +96,13 @@ impl TalismanPlugin for KameaPlugin {
         {
             if let Some(gpu) = &mut self.gpu_state {
                 let tile = self.tile.as_mut().unwrap();
-                use talisman_core::TileRenderer;
+                use magnolia_core::TileRenderer;
                 tile.update();
 
                 let draw = Draw::new();
                 let rect = Rect::from_w_h(gpu.width as f32, gpu.height as f32);
 
-                let ctx = talisman_core::RenderContext {
+                let ctx = magnolia_core::RenderContext {
                     time: std::time::Instant::now(),
                     frame_count: 0,
                     is_selected: false,

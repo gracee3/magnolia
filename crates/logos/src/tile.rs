@@ -6,8 +6,8 @@
 use nannou::prelude::*;
 // use nannou_egui::egui removed
 use std::sync::{Arc, Mutex};
-use talisman_core::{TileRenderer, RenderContext, BindableAction};
-use talisman_ui::{FontId, draw_text, TextAlignment};
+use magnolia_core::{TileRenderer, RenderContext, BindableAction};
+use magnolia_ui::{FontId, draw_text, TextAlignment};
 
 pub struct TextInputTile {
     text_buffer: Arc<Mutex<String>>,

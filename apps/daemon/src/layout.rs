@@ -5,7 +5,7 @@
 
 use nannou::prelude::*;
 use std::fs;
-use talisman_core::{LayoutConfig, TileConfig};
+use magnolia_core::{LayoutConfig, TileConfig};
 
 pub struct Layout {
     pub window_rect: Rect,

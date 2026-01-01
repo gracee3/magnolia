@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use talisman_signals::ring_buffer::RingBufferSender;
+use magnolia_signals::ring_buffer::RingBufferSender;
 
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {

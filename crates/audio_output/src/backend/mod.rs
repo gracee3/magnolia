@@ -1,4 +1,4 @@
-use talisman_signals::ring_buffer::RingBufferReceiver;
+use magnolia_signals::ring_buffer::RingBufferReceiver;
 
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {

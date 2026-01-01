@@ -1,8 +1,0 @@
-[package]
-name = "talisman-plugin-helper"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-talisman-plugin-abi = { path = "../talisman-plugin-abi" }
-talisman_signals = { path = "../talisman-signals" }

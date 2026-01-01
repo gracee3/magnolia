@@ -11,7 +11,7 @@ use spa::param::format::{MediaSubtype, MediaType};
 use spa::param::format_utils;
 use spa::pod::Pod;
 
-use talisman_signals::ring_buffer::RingBufferReceiver;
+use magnolia_signals::ring_buffer::RingBufferReceiver;
 
 use super::{AudioOutputBackend, BackendStream, DeviceInfo, NegotiatedFormat};
 

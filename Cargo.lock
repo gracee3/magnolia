@@ -208,15 +208,15 @@ dependencies = [
  "chrono",
  "criterion",
  "lazy_static",
+ "magnolia-plugin-helper",
+ "magnolia-ui",
+ "magnolia_core",
+ "magnolia_signals",
  "nannou",
  "regex",
  "serde",
  "serde_json",
  "swisseph",
- "talisman-plugin-helper",
- "talisman-ui",
- "talisman_core",
- "talisman_signals",
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.23",
@@ -297,11 +297,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "magnolia-ui",
+ "magnolia_core",
+ "magnolia_signals",
  "nannou",
  "serde_json",
- "talisman-ui",
- "talisman_core",
- "talisman_signals",
 ]
 
 [[package]]
@@ -312,15 +312,15 @@ dependencies = [
  "async-trait",
  "cpal",
  "log",
+ "magnolia-ui",
+ "magnolia_core",
+ "magnolia_signals",
  "nannou",
  "num-traits",
  "pipewire",
  "rustfft",
  "serde",
  "serde_json",
- "talisman-ui",
- "talisman_core",
- "talisman_signals",
  "tokio",
 ]
 
@@ -332,12 +332,12 @@ dependencies = [
  "async-trait",
  "cpal",
  "log",
+ "magnolia-ui",
+ "magnolia_core",
+ "magnolia_signals",
  "nannou",
  "pipewire",
  "serde_json",
- "talisman-ui",
- "talisman_core",
- "talisman_signals",
 ]
 
 [[package]]
@@ -1050,16 +1050,16 @@ dependencies = [
  "chrono",
  "env_logger",
  "log",
+ "magnolia-ui",
+ "magnolia_core",
+ "magnolia_module_api",
+ "magnolia_signals",
  "nannou",
  "nvml-wrapper",
  "serde",
  "serde_json",
  "sha2",
  "sysinfo",
- "talisman-ui",
- "talisman_core",
- "talisman_module_api",
- "talisman_signals",
  "tokio",
  "toml 0.8.23",
 ]
@@ -1741,7 +1741,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hello_plugin"
 version = "0.1.0"
 dependencies = [
- "talisman-plugin-abi",
+ "magnolia-plugin-abi",
 ]
 
 [[package]]
@@ -1987,15 +1987,15 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "log",
+ "magnolia-plugin-helper",
+ "magnolia-ui",
+ "magnolia_core",
  "nannou",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
  "serde_json",
  "sha2",
- "talisman-plugin-helper",
- "talisman-ui",
- "talisman_core",
 ]
 
 [[package]]
@@ -2156,11 +2156,11 @@ name = "logos"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "magnolia-plugin-helper",
+ "magnolia_core",
  "nannou",
  "serde",
  "serde_json",
- "talisman-plugin-helper",
- "talisman_core",
 ]
 
 [[package]]
@@ -2220,6 +2220,78 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "magnolia-plugin-abi"
+version = "0.1.0"
+
+[[package]]
+name = "magnolia-plugin-helper"
+version = "0.1.0"
+dependencies = [
+ "magnolia-plugin-abi",
+ "magnolia_signals",
+]
+
+[[package]]
+name = "magnolia-ui"
+version = "0.1.0"
+dependencies = [
+ "nannou",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "ttf-parser 0.20.0",
+]
+
+[[package]]
+name = "magnolia_core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dirs",
+ "ed25519-dalek",
+ "hex",
+ "libc",
+ "libloading 0.8.9",
+ "log",
+ "magnolia-plugin-abi",
+ "magnolia-ui",
+ "magnolia_module_api",
+ "magnolia_signals",
+ "nannou",
+ "notify",
+ "schemars",
+ "seccompiler",
+ "serde",
+ "serde_json",
+ "sha2",
+ "slab",
+ "thiserror 1.0.69",
+ "tokio",
+ "wgpu",
+]
+
+[[package]]
+name = "magnolia_module_api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "magnolia_signals",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "magnolia_signals"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3977,78 +4049,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "talisman-plugin-abi"
-version = "0.1.0"
-
-[[package]]
-name = "talisman-plugin-helper"
-version = "0.1.0"
-dependencies = [
- "talisman-plugin-abi",
- "talisman_signals",
-]
-
-[[package]]
-name = "talisman-ui"
-version = "0.1.0"
-dependencies = [
- "nannou",
- "serde",
- "serde_json",
- "toml 0.8.23",
- "ttf-parser 0.20.0",
-]
-
-[[package]]
-name = "talisman_core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "dirs",
- "ed25519-dalek",
- "hex",
- "libc",
- "libloading 0.8.9",
- "log",
- "nannou",
- "notify",
- "schemars",
- "seccompiler",
- "serde",
- "serde_json",
- "sha2",
- "slab",
- "talisman-plugin-abi",
- "talisman-ui",
- "talisman_module_api",
- "talisman_signals",
- "thiserror 1.0.69",
- "tokio",
- "wgpu",
-]
-
-[[package]]
-name = "talisman_module_api"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "talisman_signals",
-]
-
-[[package]]
-name = "talisman_signals"
-version = "0.1.0"
-dependencies = [
- "schemars",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "target-lexicon"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4070,10 +4070,10 @@ dependencies = [
  "async-trait",
  "hound",
  "log",
+ "magnolia_core",
  "regex",
  "serde",
  "serde_json",
- "talisman_core",
  "tokio",
 ]
 

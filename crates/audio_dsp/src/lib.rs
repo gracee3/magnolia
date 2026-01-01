@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
 
 #[cfg(feature = "tile-rendering")]
 pub mod tile;

@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use log::{info, warn};
 
 use crate::backend::{default_backend, AudioOutputBackend, BackendStream};
-use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
-use talisman_signals::ring_buffer::{self, RingBufferSender};
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Sink};
+use magnolia_signals::ring_buffer::{self, RingBufferSender};
 
 use settings::AudioDeviceEntry;
 pub use settings::AudioOutputSettings;

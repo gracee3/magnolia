@@ -1,5 +1,5 @@
 use nannou::prelude::*;
-use talisman_core::Patch;
+use magnolia_core::Patch;
 
 /// Render a Bézier curve cable between two points
 pub fn draw_cable(draw: &Draw, start: Vec2, end: Vec2, color: Srgb<u8>, thickness: f32) {

@@ -10,8 +10,8 @@ use tokio::time::Instant;
 use crate::AudioInputSettings;
 use crate::backend::{default_backend, AudioInputBackend, BackendStream};
 use crate::settings::AudioDeviceEntry;
-use talisman_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source};
-use talisman_signals::ring_buffer::{self, RingBufferReceiver};
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source};
+use magnolia_signals::ring_buffer::{self, RingBufferReceiver};
 
 const DEFAULT_CAPACITY: usize = 16384;
 

@@ -5,15 +5,15 @@ edition = "2021"
 
 [features]
 default = []
-tile-rendering = ["talisman_core/tile-rendering", "dep:nannou", "dep:rustfft"]
+tile-rendering = ["magnolia_core/tile-rendering", "dep:nannou", "dep:rustfft"]
 
 [lib]
 crate-type = ["rlib"]
 
 [dependencies]
-talisman_signals = { path = "../talisman-signals" }
-talisman_core = { path = "../../core" }
-talisman-ui = { path = "../talisman-ui", features = ["tile-rendering"] }
+magnolia_signals = { path = "../magnolia-signals" }
+magnolia_core = { path = "../../core" }
+magnolia-ui = { path = "../magnolia-ui", features = ["tile-rendering"] }
 log = "0.4"
 anyhow = "1.0"
 async-trait = "0.1"
@@ -25,8 +25,8 @@ nannou = { version = "0.19", optional = true }
 tokio = { version = "1.0", features = ["time"] }
 rustfft = { version = "6.2", optional = true }
 
-# Removed: talisman-plugin-helper, talisman-core (to avoid circular deps if possible, though host uses core)
-# We rely on talisman-module-api and talisman-signals for shared types.
+# Removed: magnolia-plugin-helper, magnolia_core (to avoid circular deps if possible, though host uses core)
+# We rely on magnolia-module-api and magnolia-signals for shared types.
 
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = "0.9.2"

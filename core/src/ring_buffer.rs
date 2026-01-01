@@ -199,7 +199,7 @@ impl<T: Copy + Default> RingBufferReceiver<T> {
 /// # Example
 ///
 /// ```
-/// use talisman_core::ring_buffer;
+/// use magnolia_core::ring_buffer;
 ///
 /// let (tx, rx) = ring_buffer::channel::<f32>(1024);
 ///

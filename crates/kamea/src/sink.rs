@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use talisman_core::{Sink, Signal, Result, ModuleSchema, Port, DataType, PortDirection};
+use magnolia_core::{Sink, Signal, Result, ModuleSchema, Port, DataType, PortDirection};
 
 pub struct KameaSink {
     enabled: bool,

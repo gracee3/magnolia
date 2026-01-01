@@ -5,8 +5,8 @@ use nannou::prelude::*;
 use std::str::FromStr;
 
 #[cfg(feature = "tile-rendering")]
-pub use talisman_ui::{build_path, build_path_fit, font_glyph_ops_bounds};
-pub use talisman_ui::{FontId, GlyphBounds, GlyphMetrics, GlyphOp};
+pub use magnolia_ui::{build_path, build_path_fit, font_glyph_ops_bounds};
+pub use magnolia_ui::{FontId, GlyphBounds, GlyphMetrics, GlyphOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Glyph {
@@ -100,12 +100,12 @@ pub mod glyph_paths {
 
 #[cfg(feature = "tile-rendering")]
 pub fn glyph_path(font: FontId, c: char) -> Option<Path> {
-    talisman_ui::glyph_path(font, c)
+    magnolia_ui::glyph_path(font, c)
 }
 
 #[cfg(feature = "tile-rendering")]
 pub fn glyph_metrics(font: FontId, c: char) -> Option<GlyphMetrics> {
-    talisman_ui::glyph_metrics(font, c)
+    magnolia_ui::glyph_metrics(font, c)
 }
 
 #[cfg(feature = "tile-rendering")]

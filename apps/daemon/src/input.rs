@@ -5,7 +5,7 @@
 
 use crate::tiles::TileRegistry;
 use nannou::prelude::Key;
-use talisman_core::{LayoutConfig, TileConfig};
+use magnolia_core::{LayoutConfig, TileConfig};
 
 /// Top-level input mode
 #[derive(Debug, Clone, PartialEq)]

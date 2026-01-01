@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use nannou::prelude::*;
-use talisman_core::{BindableAction, RenderContext, TileError, TileRenderer};
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_core::{BindableAction, RenderContext, TileError, TileRenderer};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 use crate::{AudioOutputSettings, AudioOutputState};
 

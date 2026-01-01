@@ -456,8 +456,8 @@ use std::fmt::Debug;
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
 
 // Re-export core types from signals
-pub use talisman_signals::{AstrologyData, ControlSignal, DataType, PortDirection, Signal};
-pub use talisman_signals::{AudioBufferHandle, BlobHandle, GpuBufferHandle, GpuTextureHandle};
+pub use magnolia_signals::{AstrologyData, ControlSignal, DataType, PortDirection, Signal};
+pub use magnolia_signals::{AudioBufferHandle, BlobHandle, GpuBufferHandle, GpuTextureHandle};
 
 /// A typed port on a module for connecting to other modules
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -502,7 +502,7 @@ pub struct Patch {
     pub sink_port: String,
 }
 
-// Signal types replaced by talisman_signals re-export
+// Signal types replaced by magnolia_signals re-export
 
 // ============================================================================
 // MODULE TRAITS

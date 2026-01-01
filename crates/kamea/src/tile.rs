@@ -16,9 +16,9 @@ use nannou::prelude::*;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "tile-rendering")]
-use talisman_core::{BindableAction, RenderContext, TileRenderer};
+use magnolia_core::{BindableAction, RenderContext, TileRenderer};
 #[cfg(feature = "tile-rendering")]
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 pub struct KameaTile {
     current_text: Arc<Mutex<String>>,

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use talisman_core::{Source, Signal, ModuleSchema, Port, DataType, PortDirection};
+use magnolia_core::{Source, Signal, ModuleSchema, Port, DataType, PortDirection};
 use crate::ephemeris::{SwissEphemerisAdapter, EphemerisSettings, GeoLocation};
 use std::time::Duration;
 use tokio::time::{sleep, Instant};

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use std::fs;
 use sysinfo::{System, Networks, Disks};
 use nvml_wrapper::Nvml;
-use talisman_ui::{draw_text, FontId, TextAlignment};
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 const HISTORY_SIZE: usize = 60;
 const REFRESH_INTERVAL: Duration = Duration::from_millis(1000); // 1Hz
