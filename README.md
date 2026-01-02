@@ -70,8 +70,9 @@ now located in `/home/emmy/git/trt-asr-engine`.
    Debug knobs (optional):
    - `PARAKEET_SLOW_CHUNK_MS` (default 250): log per-chunk decode calls slower than this threshold.
    - `PARAKEET_ABORT_SLOW_CHUNK_MS` (default 5000): emit `slow_chunk_abort` error after a slow chunk returns.
-   - `PARAKEET_WORKER_JOIN_TIMEOUT_MS` (default 0): cap worker join during restarts (ms).
-   - `PARAKEET_SLOW_ENQUEUE_MS` (default 250): TRT `enqueueV3` slow log + cudaMemGetInfo delta (C++).
+   - `PARAKEET_WORKER_JOIN_TIMEOUT_MS` (default 0): cap worker join during restarts (ms); non-zero exits the process on timeout to avoid stuck CUDA contexts.
+   - `PARAKEET_SLOW_ENQUEUE_MS` (default 250): TRT `enqueueV3` slow/error log + cudaMemGetInfo delta (C++).
+   - `PARAKEET_DUMP_BINDINGS_ON_SLOW=1`: dump TRT binding pointers/dims on slow/enqueue errors (C++).
    - `PARAKEET_GPU_TELEMETRY=1`: enable NVML sampling (GPU util/memory/power/temp) per utterance.
    - `PARAKEET_GPU_TELEMETRY_HZ` (default 5): NVML sampling rate.
    - `PARAKEET_GPU_TELEMETRY_DEVICE` (default = device id): NVML device index override.

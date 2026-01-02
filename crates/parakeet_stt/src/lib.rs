@@ -927,6 +927,8 @@ impl Drop for ParakeetSttProcessor {
                         "[parakeet_stt] WARNING: worker join timed out after {}ms",
                         timeout_ms
                     );
+                    eprintln!("[parakeet_stt] FATAL: exiting due to worker join timeout");
+                    std::process::exit(42);
                 }
             }
         }
