@@ -80,6 +80,8 @@ now located in `/home/emmy/git/trt-asr-engine`.
    - `PARAKEET_DEBUG_SYNC=1`: force `cudaStreamSynchronize` after every `enqueueV3` and log timing/errors.
    - `PARAKEET_DEBUG_SYNC_ENGINE` (all|encoder|predictor|joint, default all): select which engine(s) to sync.
    - `PARAKEET_DEBUG_SYNC_LIMIT` (default 0): sync only first K enqueues per utterance (0 = no limit).
+   - `PARAKEET_DEBUG_SYNC_MEMCPY=1`: force `cudaStreamSynchronize` after each CUDA memcpy/memset and log timing/errors.
+   - `PARAKEET_SLOW_MEMCPY_MS` (default 50): log memcpy/memset calls slower than this threshold.
    - `PARAKEET_GPU_TELEMETRY=1`: enable NVML sampling (GPU util/memory/power/temp) per utterance.
    - `PARAKEET_GPU_TELEMETRY_HZ` (default 5): NVML sampling rate.
    - `PARAKEET_GPU_TELEMETRY_DEVICE` (default = device id): NVML device index override.
