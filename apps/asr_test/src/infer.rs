@@ -71,6 +71,7 @@ pub struct Summary {
     pub no_final: usize,
     pub stt_error: usize,
     pub truncation: usize,
+    pub stop_stats_missing: usize,
     pub aggregate_wer: f32,
     pub sum_edits: usize,
     pub sum_ref_words: usize,
@@ -122,9 +123,14 @@ fn update_progress_counts(
     empty_hyp: &mut usize,
     no_final: &mut usize,
     stt_error: &mut usize,
+    stop_stats_missing: &mut usize,
 ) {
     match status {
         "ok" => *ok += 1,
+        "stop_stats_missing_only" => {
+            *ok += 1;
+            *stop_stats_missing += 1;
+        }
         "truncation" => *truncation += 1,
         "empty_hyp" => *empty_hyp += 1,
         "no_final" => *no_final += 1,
@@ -141,11 +147,12 @@ fn maybe_print_progress(
     empty_hyp: usize,
     no_final: usize,
     stt_error: usize,
+    stop_stats_missing: usize,
 ) {
     if completed % 5 == 0 || completed == total {
         eprintln!(
-            "[asr_test] progress {}/{} ok={} truncation={} empty_hyp={} no_final={} stt_error={}",
-            completed, total, ok, truncation, empty_hyp, no_final, stt_error
+            "[asr_test] progress {}/{} ok={} truncation={} empty_hyp={} no_final={} stt_error={} stop_stats_missing={}",
+            completed, total, ok, truncation, empty_hyp, no_final, stt_error, stop_stats_missing
         );
     }
 }
@@ -370,6 +377,12 @@ impl TimingStats {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+struct PassDiagnostics {
+    saw_slow_chunk: bool,
+    saw_error_event: bool,
+}
+
 fn matches_utterance_seq(target: u64, event: u64) -> bool {
     target == 0 || event == 0 || target == event
 }
@@ -532,6 +545,7 @@ pub async fn run_manifest(
     let mut empty_hyp = 0usize;
     let mut no_final = 0usize;
     let mut stt_error = 0usize;
+    let mut stop_stats_missing = 0usize;
     if job_count == 1 {
         let mut stt = build_worker(
             "asr_test",
@@ -601,9 +615,10 @@ pub async fn run_manifest(
                 &mut empty_hyp,
                 &mut no_final,
                 &mut stt_error,
+                &mut stop_stats_missing,
             );
             maybe_print_progress(
-                completed, total, ok, truncation, empty_hyp, no_final, stt_error,
+                completed, total, ok, truncation, empty_hyp, no_final, stt_error, stop_stats_missing,
             );
             results.push(res);
         }
@@ -714,9 +729,10 @@ pub async fn run_manifest(
                 &mut empty_hyp,
                 &mut no_final,
                 &mut stt_error,
+                &mut stop_stats_missing,
             );
             maybe_print_progress(
-                completed, total, ok, truncation, empty_hyp, no_final, stt_error,
+                completed, total, ok, truncation, empty_hyp, no_final, stt_error, stop_stats_missing,
             );
             results[idx] = Some(res);
         }
@@ -879,6 +895,7 @@ async fn run_one_inner(
         mut err,
         mut stop_stats,
         mut timing,
+        mut diag,
     ) = run_pass(
         stt,
         entry.id.as_str(),
@@ -926,6 +943,7 @@ async fn run_one_inner(
             r_err,
             r_stop_stats,
             r_timing,
+            r_diag,
         ) = run_pass(
             stt,
             entry.id.as_str(),
@@ -967,6 +985,7 @@ async fn run_one_inner(
             err = r_err;
             stop_stats = r_stop_stats;
             timing = r_timing;
+            diag = r_diag;
         }
     }
 
@@ -984,6 +1003,7 @@ async fn run_one_inner(
             r_err,
             r_stop_stats,
             r_timing,
+            r_diag,
         ) = run_pass(
             stt,
             entry.id.as_str(),
@@ -1026,6 +1046,7 @@ async fn run_one_inner(
             err = r_err;
             stop_stats = r_stop_stats;
             timing = r_timing;
+            diag = r_diag;
             hyp_words = retry_hyp_words;
             is_truncation = err.is_none()
                 && hyp_words > 0
@@ -1061,24 +1082,60 @@ async fn run_one_inner(
         status = "truncation";
     }
 
-    if (status != "ok" || enable_debug || verbose_stop) && stop_stats.is_none() {
-        let mut gpu = None;
-        wait_for_stop_stats(
-            stt,
-            entry.id.as_str(),
-            utterance_seq,
-            &mut stop_stats,
-            stop_stats_timeout_ms,
-            log_mismatch,
-            &mut gpu,
-        )
-        .await?;
-        let has_post_stats = stop_stats
+    let mut stop_stats_missing_only = false;
+    if stop_stats_timeout_ms > 0 {
+        let should_wait = (status != "ok" || enable_debug || verbose_stop) && stop_stats.is_none();
+        let should_wait_for_post = stop_stats
             .as_ref()
-            .map(stop_stats_is_post)
-            .unwrap_or(false);
-        if !has_post_stats && err.is_none() && stop_stats_timeout_ms > 0 {
-            err = Some("stop_stats_timeout".to_string());
+            .map(stop_stats_is_pre)
+            .unwrap_or(false)
+            && (enable_debug || verbose_stop);
+        if should_wait || should_wait_for_post {
+            let mut gpu = None;
+            wait_for_stop_stats(
+                stt,
+                entry.id.as_str(),
+                utterance_seq,
+                &mut stop_stats,
+                stop_stats_timeout_ms,
+                log_mismatch,
+                &mut gpu,
+            )
+            .await?;
+        }
+    }
+    let has_post_stats = stop_stats
+        .as_ref()
+        .map(stop_stats_is_post)
+        .unwrap_or(false);
+    let has_nonempty_final = final_text
+        .as_ref()
+        .map(|t| !t.trim().is_empty())
+        .unwrap_or(false);
+    if !has_post_stats {
+        if let Some(stats) = stop_stats.as_ref() {
+            if stop_stats_is_pre(stats) {
+                eprintln!(
+                    "[asr_test] stop_stats_post_missing id={} utt_seq={}",
+                    stats.id.as_deref().unwrap_or(entry.id.as_str()),
+                    stats.utterance_seq
+                );
+            }
+        }
+        if err.is_none() {
+            if diag.saw_slow_chunk || diag.saw_error_event {
+                if stop_stats_timeout_ms > 0 {
+                    err = Some("stop_stats_timeout".to_string());
+                }
+            } else if has_nonempty_final {
+                if enable_debug || verbose_stop {
+                    err = Some("stop_stats_timeout".to_string());
+                } else {
+                    stop_stats_missing_only = true;
+                }
+            } else if stop_stats_timeout_ms > 0 {
+                err = Some("stop_stats_timeout".to_string());
+            }
         }
     }
     if err.is_none() {
@@ -1100,6 +1157,9 @@ async fn run_one_inner(
     };
     if status == "ok" && is_truncation {
         status = "truncation";
+    }
+    if status == "ok" && stop_stats_missing_only {
+        status = "stop_stats_missing_only";
     }
 
     let wer_stats = wer::wer(&entry.text, &hypothesis);
@@ -1267,9 +1327,11 @@ async fn run_pass(
     Option<String>,
     Option<StopStats>,
     TimingStats,
+    PassDiagnostics,
 )> {
     let mut timing = TimingStats::new();
     let mut gpu = GpuTelemetry::new_if_enabled(gpu_device_id);
+    let mut diag = PassDiagnostics::default();
     // Reset between utterances (worker only processes control at chunk boundaries, so tick it).
     send_settings_and_tick(stt, settings.clone(), backpressure_timeout_ms).await?;
     let needs_reset_ack = settings
@@ -1360,6 +1422,7 @@ async fn run_pass(
                     print_partials,
                     utterance_id,
                     &mut gpu,
+                    &mut diag,
                 )
                 .await?;
                 if err.is_some() {
@@ -1406,6 +1469,7 @@ async fn run_pass(
                     print_partials,
                     utterance_id,
                     &mut gpu,
+                    &mut diag,
                 )?;
             }
             Err(e) => {
@@ -1428,6 +1492,7 @@ async fn run_pass(
             print_partials,
             utterance_id,
             &mut gpu,
+            &mut diag,
         )
         .await?;
         gpu_tick(&mut gpu);
@@ -1487,6 +1552,7 @@ async fn run_pass(
                         print_partials,
                         utterance_id,
                         &mut gpu,
+                        &mut diag,
                     )
                     .await?;
                     if err.is_some() {
@@ -1533,6 +1599,7 @@ async fn run_pass(
                         print_partials,
                         utterance_id,
                         &mut gpu,
+                        &mut diag,
                     )?;
                 }
                 Err(e) => {
@@ -1555,6 +1622,7 @@ async fn run_pass(
                 print_partials,
                 utterance_id,
                 &mut gpu,
+                &mut diag,
             )
             .await?;
             gpu_tick(&mut gpu);
@@ -1615,6 +1683,7 @@ async fn run_pass(
                         print_partials,
                         utterance_id,
                         &mut gpu,
+                        &mut diag,
                     )
                     .await?;
                     if err.is_some() {
@@ -1661,6 +1730,7 @@ async fn run_pass(
                         print_partials,
                         utterance_id,
                         &mut gpu,
+                        &mut diag,
                     )?;
                 }
                 Err(e) => {
@@ -1683,6 +1753,7 @@ async fn run_pass(
                 print_partials,
                 utterance_id,
                 &mut gpu,
+                &mut diag,
             )
             .await?;
             gpu_tick(&mut gpu);
@@ -1726,6 +1797,7 @@ async fn run_pass(
             print_partials,
             utterance_id,
             &mut gpu,
+            &mut diag,
         )
         .await?;
         if err.is_some() {
@@ -1755,7 +1827,7 @@ async fn run_pass(
     if let Some(gpu) = gpu.as_mut() {
         gpu.finish(utterance_id, utterance_seq, pass_label);
     }
-    Ok((partials, final_text, final_parts, metrics, err, stop_stats, timing))
+    Ok((partials, final_text, final_parts, metrics, err, stop_stats, timing, diag))
 }
 
 async fn send_settings_and_tick(
@@ -1905,6 +1977,7 @@ async fn drain(
     print_partials: bool,
     utterance_id: &str,
     gpu: &mut Option<GpuTelemetry>,
+    diag: &mut PassDiagnostics,
 ) -> anyhow::Result<()> {
     loop {
         let out = stt.process(Signal::Pulse).await?;
@@ -1926,6 +1999,7 @@ async fn drain(
             print_partials,
             utterance_id,
             gpu,
+            diag,
         )?;
     }
     Ok(())
@@ -1946,6 +2020,7 @@ fn handle_outputs(
     print_partials: bool,
     utterance_id: &str,
     gpu: &mut Option<GpuTelemetry>,
+    diag: &mut PassDiagnostics,
 ) -> anyhow::Result<()> {
     let Some(sig) = out else { return Ok(()); };
     let Signal::Computed { source, content } = sig else { return Ok(()); };
@@ -2016,6 +2091,7 @@ fn handle_outputs(
                     }
                 }
                 "error" => {
+                    diag.saw_error_event = true;
                     *err = Some(ev.message);
                 }
                 _ => {}
@@ -2036,6 +2112,7 @@ fn handle_outputs(
         "stt_slow_chunk" => {
             if let Ok(slow) = serde_json::from_str::<SlowChunk>(&content) {
                 if matches_utterance_seq(target_utterance_seq, slow.utterance_seq) {
+                    diag.saw_slow_chunk = true;
                     let extra = format!(
                         "feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={} enc_shape={} length_shape={} profile_idx={} post_stop={} offline_mode={}",
                         slow.feature_idx,
@@ -2114,12 +2191,17 @@ pub fn summarize(results: &[UtteranceResult]) -> Summary {
     let mut no_final = 0usize;
     let mut empty_hyp = 0usize;
     let mut truncation = 0usize;
+    let mut stop_stats_missing = 0usize;
     let mut sum_edits = 0usize;
     let mut sum_ref_words = 0usize;
 
     for r in results {
         match r.status.as_str() {
             "ok" => ok += 1,
+            "stop_stats_missing_only" => {
+                ok += 1;
+                stop_stats_missing += 1;
+            }
             "stt_error" => stt_error += 1,
             "no_final" => no_final += 1,
             "empty_hyp" => empty_hyp += 1,
@@ -2145,6 +2227,7 @@ pub fn summarize(results: &[UtteranceResult]) -> Summary {
         no_final,
         stt_error,
         truncation,
+        stop_stats_missing,
         aggregate_wer,
         sum_edits,
         sum_ref_words,
@@ -2158,6 +2241,7 @@ pub fn print_summary_table(summary: &Summary, results: &[UtteranceResult], thres
     eprintln!("ok          : {}", summary.ok);
     eprintln!("failures    : {}", summary.failures);
     eprintln!("stt_error   : {}", summary.stt_error);
+    eprintln!("stop_stats  : {}", summary.stop_stats_missing);
     eprintln!("no_final    : {}", summary.no_final);
     eprintln!("empty_hyp   : {}", summary.empty_hyp);
     eprintln!("truncation  : {}", summary.truncation);

@@ -191,10 +191,15 @@ async fn main() -> anyhow::Result<()> {
         Mode::Manifest => 0,
     };
     let n = if args.limit > 0 { args.limit } else { default_n };
+    let n_for_ids = if args.limit > 0 {
+        args.limit
+    } else {
+        args.ids.len().max(1)
+    };
 
     let mut smoke_seed_used: Option<u64> = None;
     let selected = if !args.ids.is_empty() {
-        select_by_ids(&manifest, &args.ids, n)?
+        select_by_ids(&manifest, &args.ids, n_for_ids)?
     } else if args.smoke_use_last {
         let last_ids = read_smoke_last(&args.out_dir)?;
         select_by_ids(&manifest, &last_ids, n)?
