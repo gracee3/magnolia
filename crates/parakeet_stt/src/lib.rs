@@ -2066,13 +2066,26 @@ fn spawn_worker(
                     continue;
                 }
 
+                // Flag to skip audio processing but still reach finalization check
+                let skip_to_finalize;
+                
                 if chunk.is_tick {
-                    continue;
+                    // If we received a tick while pending_stop is true, 
+                    // this is the signal to finalize the utterance
+                    if pending_stop {
+                        // Drain any remaining audio that might be in the queue
+                        // so the finalization check will pass
+                        while let Ok(_) = in_rx.try_recv() {}
+                        // Don't process audio, just jump to finalization check
+                        skip_to_finalize = true;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    skip_to_finalize = false;
                 }
-
-                if chunk.sample_rate == 0 || chunk.channels == 0 {
-                    continue;
-                }
+                
+                if !skip_to_finalize {
                 StageTimes::mark_if_none(&mut stage_times.first_audio);
                 let ack = ChunkAck {
                     schema_version: 1,
@@ -2248,6 +2261,7 @@ fn spawn_worker(
                         }
                     }
                 }
+                } // end of if !skip_to_finalize
 
                 if pending_stop && in_rx.is_empty() {
                     is_running = false;
