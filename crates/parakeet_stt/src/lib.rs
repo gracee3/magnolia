@@ -334,6 +334,37 @@ impl SttEvent {
         }
     }
 
+    /// Emitted when silence is detected after speech (VAD endpoint).
+    /// `silence_ms` is the duration of silence that triggered the endpoint.
+    pub fn endpoint(silence_ms: u64, t_ms: u64, seq: u64) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "endpoint".to_string(),
+            seq,
+            utterance_seq: 0,
+            t_ms,
+            text: String::new(),
+            stable_prefix_len: silence_ms as usize, // Reuse field for silence duration
+            code: 0,
+            message: String::new(),
+        }
+    }
+
+    /// Emitted when audio chunks are dropped due to backpressure.
+    pub fn audio_dropped(dropped_count: u64, total_dropped: u64, t_ms: u64, seq: u64) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "audio_dropped".to_string(),
+            seq,
+            utterance_seq: 0,
+            t_ms,
+            text: String::new(),
+            stable_prefix_len: dropped_count as usize,
+            code: total_dropped as i32,
+            message: String::new(),
+        }
+    }
+
     pub fn with_utterance_seq(mut self, utterance_seq: u64) -> Self {
         self.utterance_seq = utterance_seq;
         self
@@ -346,6 +377,8 @@ impl SttEvent {
             "partial" => "stt_partial",
             "final" => "stt_final",
             "error" => "stt_error",
+            "endpoint" => "stt_endpoint",
+            "audio_dropped" => "stt_audio_dropped",
             _ => "stt_error",
         };
         Signal::Computed {
@@ -793,6 +826,10 @@ enum SttControl {
     SetFinalBlankPenaltyDelta(f32),
     SetUtteranceId(String),
     SetUtteranceSeq(u64),
+    // Real-time streaming controls
+    SetMinPartialEmitMs(u64),
+    SetSilenceHangoverMs(u64),
+    SetAutoFlushSilenceMs(u64), // 0 = disabled
     Shutdown,
 }
 
@@ -1217,11 +1254,20 @@ fn spawn_worker(
             let mut last_partial_text = String::new();
 
             // Best-effort cadence control (we’ll also drop partials when queue is full).
-            let min_emit = Duration::from_millis(100);
+            let mut min_emit = Duration::from_millis(100);
             let mut last_emit = Instant::now() - Duration::from_secs(1);
             let mut last_metrics_emit = Instant::now() - Duration::from_secs(1);
             let metrics_interval = Duration::from_millis(500);
 
+
+            // Real-time streaming: VAD/endpoint detection state
+            let mut silence_hangover_ms: u64 = 300;  // Time speech must be stable before "active"
+            let mut auto_flush_silence_ms: u64 = 0;  // 0 = disabled, >0 = flush after N ms silence
+            let mut speech_active = false;
+            let mut silence_start: Option<Instant> = None;
+            let mut last_speech_time = Instant::now();
+            let mut endpoint_emitted = false;  // Prevent multiple endpoint events per silence
+            let mut total_audio_dropped: u64 = 0;
             let mut running_rms = 0.0f32;
             let mut running_peak = 0.0f32;
             let mut samples_seen = 0usize;
@@ -2028,6 +2074,17 @@ fn spawn_worker(
                         SttControl::SetUtteranceSeq(seq_val) => {
                             utterance_seq = seq_val;
                         }
+                        SttControl::SetMinPartialEmitMs(ms) => {
+                            min_emit = Duration::from_millis(ms);
+                        }
+                        SttControl::SetSilenceHangoverMs(ms) => {
+                            silence_hangover_ms = ms;
+                        }
+                        SttControl::SetAutoFlushSilenceMs(ms) => {
+                            auto_flush_silence_ms = ms;
+                            // Reset endpoint state when changing this setting
+                            endpoint_emitted = false;
+                        }
                         SttControl::Shutdown => {
                             should_exit = true;
                             is_running = false;
@@ -2200,6 +2257,51 @@ fn spawn_worker(
                         );
                     }
                     // #endregion
+
+                    // Real-time streaming: VAD/endpoint detection
+                    if is_silent {
+                        // Silence detected
+                        if speech_active {
+                            // Speech was active, start silence timer
+                            if silence_start.is_none() {
+                                silence_start = Some(Instant::now());
+                            }
+                            // Check if silence has exceeded hangover + auto_flush threshold
+                            if let Some(start) = silence_start {
+                                let silence_ms = start.elapsed().as_millis() as u64;
+                                // Auto-flush endpoint detection
+                                if auto_flush_silence_ms > 0 
+                                    && silence_ms >= silence_hangover_ms + auto_flush_silence_ms 
+                                    && !endpoint_emitted 
+                                {
+                                    endpoint_emitted = true;
+                                    let evt = SttEvent::endpoint(
+                                        silence_ms,
+                                        chunk.timestamp_us / 1000,
+                                        seq.fetch_add(1, Ordering::Relaxed),
+                                    ).with_utterance_seq(utterance_seq);
+                                    let _ = out_tx.try_send(WorkerOut::Event(evt));
+                                }
+                            }
+                        }
+                    } else {
+                        // Speech detected
+                        if !speech_active {
+                            // Check hangover before activating
+                            let since_last = last_speech_time.elapsed().as_millis() as u64;
+                            if since_last < silence_hangover_ms {
+                                // Transient, keep tracking
+                                last_speech_time = Instant::now();
+                            } else {
+                                // Speech is now active
+                                speech_active = true;
+                                endpoint_emitted = false;
+                            }
+                        }
+                        // Reset silence tracking
+                        last_speech_time = Instant::now();
+                        silence_start = None;
+                    }
 
                     // 3. Apply internal boost
                     for s in &mut resampled {
@@ -3032,6 +3134,28 @@ impl Processor for ParakeetSttProcessor {
                                 "set_utterance_seq",
                             )?;
                         }
+                    }
+
+                    // Real-time streaming controls
+                    if let Some(ms) = v.get("min_partial_emit_ms").and_then(|x| x.as_u64()) {
+                        self.send_ctrl_with_timeout(
+                            SttControl::SetMinPartialEmitMs(ms),
+                            "set_min_partial_emit_ms",
+                        )?;
+                    }
+
+                    if let Some(ms) = v.get("silence_hangover_ms").and_then(|x| x.as_u64()) {
+                        self.send_ctrl_with_timeout(
+                            SttControl::SetSilenceHangoverMs(ms),
+                            "set_silence_hangover_ms",
+                        )?;
+                    }
+
+                    if let Some(ms) = v.get("auto_flush_silence_ms").and_then(|x| x.as_u64()) {
+                        self.send_ctrl_with_timeout(
+                            SttControl::SetAutoFlushSilenceMs(ms),
+                            "set_auto_flush_silence_ms",
+                        )?;
                     }
                 }
                 _ => {}
