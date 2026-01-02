@@ -77,6 +77,9 @@ now located in `/home/emmy/git/trt-asr-engine`.
    - `PARAKEET_SLOT_REUSE_MODE` (log|wait|fail, default log): action on detected slot reuse.
    - `PARAKEET_SLOT_REUSE_LOG_THRESHOLD` (default 4): cap reuse logs per engine (0 disables logging).
    - `PARAKEET_SLOT_REUSE_CAP` (default = engine binding count): override slot ring size used by the reuse checker.
+   - `PARAKEET_DEBUG_SYNC=1`: force `cudaStreamSynchronize` after every `enqueueV3` and log timing/errors.
+   - `PARAKEET_DEBUG_SYNC_ENGINE` (all|encoder|predictor|joint, default all): select which engine(s) to sync.
+   - `PARAKEET_DEBUG_SYNC_LIMIT` (default 0): sync only first K enqueues per utterance (0 = no limit).
    - `PARAKEET_GPU_TELEMETRY=1`: enable NVML sampling (GPU util/memory/power/temp) per utterance.
    - `PARAKEET_GPU_TELEMETRY_HZ` (default 5): NVML sampling rate.
    - `PARAKEET_GPU_TELEMETRY_DEVICE` (default = device id): NVML device index override.
