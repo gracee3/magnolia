@@ -57,6 +57,7 @@ now located in `/home/emmy/git/trt-asr-engine`.
    cargo run --bin asr_test -- \
      --dataset /home/emmy/git/magnolia/tools/LibriSpeech/dev-clean \
      --engine parakeet \
+     --model-dir /home/emmy/git/trt-asr-engine/models/parakeet-tdt-0.6b-v3 \
      --mode smoke \
      --smoke-n 20 \
      --smoke-seed 123 \

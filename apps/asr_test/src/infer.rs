@@ -210,6 +210,8 @@ async fn build_worker(
 struct StopStats {
     schema_version: u32,
     #[serde(default)]
+    phase: Option<String>,
+    #[serde(default)]
     id: Option<String>,
     #[serde(default)]
     utterance_seq: u64,
@@ -247,6 +249,44 @@ struct StopStats {
     audio_samples_seen: u64,
     #[serde(default)]
     audio_samples_resampled: u64,
+    #[serde(default)]
+    t_reset_start_ms: Option<u64>,
+    #[serde(default)]
+    t_reset_done_ms: Option<u64>,
+    #[serde(default)]
+    t_first_audio_ms: Option<u64>,
+    #[serde(default)]
+    t_first_feature_ms: Option<u64>,
+    #[serde(default)]
+    t_first_decode_ms: Option<u64>,
+    #[serde(default)]
+    t_first_partial_ms: Option<u64>,
+    #[serde(default)]
+    t_first_final_ms: Option<u64>,
+    #[serde(default)]
+    t_stop_received_ms: Option<u64>,
+    #[serde(default)]
+    t_finalize_start_ms: Option<u64>,
+    #[serde(default)]
+    t_finalize_done_ms: Option<u64>,
+    #[serde(default)]
+    t_stop_stats_ms: Option<u64>,
+    #[serde(default)]
+    finalize_ms: Option<u64>,
+    #[serde(default)]
+    slow_chunk_threshold_ms: u64,
+    #[serde(default)]
+    slow_chunk_count: u64,
+    #[serde(default)]
+    slowest_chunk_ms: u64,
+    #[serde(default)]
+    slowest_chunk_idx: u64,
+    #[serde(default)]
+    slowest_chunk_audio_idx: u64,
+    #[serde(default)]
+    last_audio_chunk_idx: u64,
+    #[serde(default)]
+    last_feature_chunk_idx: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -310,6 +350,20 @@ fn preview_text(input: &str, max_chars: usize) -> String {
         }
     }
     out
+}
+
+fn fmt_opt_ms(value: Option<u64>) -> String {
+    value
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn stop_stats_is_post(stats: &StopStats) -> bool {
+    stats.phase.as_deref() == Some("post")
+}
+
+fn stop_stats_is_pre(stats: &StopStats) -> bool {
+    stats.phase.as_deref() == Some("pre")
 }
 
 fn is_backpressure_full_err(err: &anyhow::Error) -> bool {
@@ -952,7 +1006,11 @@ async fn run_one_inner(
             log_mismatch,
         )
         .await?;
-        if stop_stats.is_none() && err.is_none() && stop_stats_timeout_ms > 0 {
+        let has_post_stats = stop_stats
+            .as_ref()
+            .map(stop_stats_is_post)
+            .unwrap_or(false);
+        if !has_post_stats && err.is_none() && stop_stats_timeout_ms > 0 {
             err = Some("stop_stats_timeout".to_string());
         }
     }
@@ -1053,6 +1111,36 @@ async fn run_one_inner(
                 stats.audio_samples_seen,
                 stats.audio_samples_resampled
             );
+            if stats.phase.is_some()
+                || stats.slow_chunk_count > 0
+                || stats.t_first_audio_ms.is_some()
+                || stats.t_finalize_done_ms.is_some()
+            {
+                eprintln!(
+                    "[asr_test] stop_stats_timing id={} utt_seq={} phase={} t_reset_start_ms={} t_reset_done_ms={} t_first_audio_ms={} t_first_feature_ms={} t_first_decode_ms={} t_first_partial_ms={} t_first_final_ms={} t_stop_received_ms={} t_finalize_start_ms={} t_finalize_done_ms={} t_stop_stats_ms={} finalize_ms={} slow_chunk_count={} slowest_chunk_ms={} slowest_chunk_idx={} slowest_chunk_audio_idx={} last_audio_chunk_idx={} last_feature_chunk_idx={}",
+                    stats.id.as_deref().unwrap_or(entry.id.as_str()),
+                    stats.utterance_seq,
+                    stats.phase.as_deref().unwrap_or("n/a"),
+                    fmt_opt_ms(stats.t_reset_start_ms),
+                    fmt_opt_ms(stats.t_reset_done_ms),
+                    fmt_opt_ms(stats.t_first_audio_ms),
+                    fmt_opt_ms(stats.t_first_feature_ms),
+                    fmt_opt_ms(stats.t_first_decode_ms),
+                    fmt_opt_ms(stats.t_first_partial_ms),
+                    fmt_opt_ms(stats.t_first_final_ms),
+                    fmt_opt_ms(stats.t_stop_received_ms),
+                    fmt_opt_ms(stats.t_finalize_start_ms),
+                    fmt_opt_ms(stats.t_finalize_done_ms),
+                    fmt_opt_ms(stats.t_stop_stats_ms),
+                    fmt_opt_ms(stats.finalize_ms),
+                    stats.slow_chunk_count,
+                    stats.slowest_chunk_ms,
+                    stats.slowest_chunk_idx,
+                    stats.slowest_chunk_audio_idx,
+                    stats.last_audio_chunk_idx,
+                    stats.last_feature_chunk_idx
+                );
+            }
         } else {
             eprintln!(
                 "[asr_test] stop_stats id={} utt_seq={} missing",
@@ -1598,8 +1686,16 @@ async fn wait_for_stop_stats(
             }
             if let Ok(s) = serde_json::from_str::<StopStats>(&content) {
                 if matches_utterance_seq(target_utterance_seq, s.utterance_seq) {
-                    *stop_stats = Some(s);
-                    break;
+                    let replace = stop_stats
+                        .as_ref()
+                        .map(stop_stats_is_pre)
+                        .unwrap_or(true);
+                    if replace || stop_stats_is_post(&s) {
+                        *stop_stats = Some(s.clone());
+                    }
+                    if stop_stats_is_post(&s) {
+                        break;
+                    }
                 } else if log_mismatch {
                     eprintln!(
                         "[asr_test] drop_event kind=stop_stats expected_utt_seq={} event_utt_seq={}",
@@ -1793,7 +1889,13 @@ fn handle_outputs(
         "stt_stop_stats" => {
             if let Ok(s) = serde_json::from_str::<StopStats>(&content) {
                 if matches_utterance_seq(target_utterance_seq, s.utterance_seq) {
-                    *stop_stats = Some(s);
+                    let replace = stop_stats
+                        .as_ref()
+                        .map(stop_stats_is_pre)
+                        .unwrap_or(true);
+                    if replace || stop_stats_is_post(&s) {
+                        *stop_stats = Some(s);
+                    }
                 } else if log_mismatch {
                     eprintln!(
                         "[asr_test] drop_event kind=stop_stats expected_utt_seq={} event_utt_seq={}",

@@ -135,6 +135,8 @@ impl SttMetrics {
 pub struct StopStats {
     pub schema_version: u32,
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub id: Option<String>,
     #[serde(default)]
     pub utterance_seq: u64,
@@ -159,6 +161,44 @@ pub struct StopStats {
     pub audio_chunks_seen: u64,
     pub audio_samples_seen: u64,
     pub audio_samples_resampled: u64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_reset_start_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_reset_done_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_first_audio_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_first_feature_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_first_decode_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_first_partial_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_first_final_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_stop_received_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_finalize_start_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_finalize_done_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub t_stop_stats_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub finalize_ms: Option<u64>,
+    #[serde(default)]
+    pub slow_chunk_threshold_ms: u64,
+    #[serde(default)]
+    pub slow_chunk_count: u64,
+    #[serde(default)]
+    pub slowest_chunk_ms: u64,
+    #[serde(default)]
+    pub slowest_chunk_idx: u64,
+    #[serde(default)]
+    pub slowest_chunk_audio_idx: u64,
+    #[serde(default)]
+    pub last_audio_chunk_idx: u64,
+    #[serde(default)]
+    pub last_feature_chunk_idx: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -838,7 +878,25 @@ impl Drop for ParakeetSttProcessor {
             received_at: Instant::now(),
         });
         if let Some(h) = self.worker_join.take() {
-            let _ = h.join();
+            let timeout_ms = std::env::var("PARAKEET_WORKER_JOIN_TIMEOUT_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+            if timeout_ms == 0 {
+                let _ = h.join();
+            } else {
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = h.join();
+                    let _ = tx.send(());
+                });
+                if rx.recv_timeout(Duration::from_millis(timeout_ms)).is_err() {
+                    eprintln!(
+                        "[parakeet_stt] WARNING: worker join timed out after {}ms",
+                        timeout_ms
+                    );
+                }
+            }
         }
     }
 }
@@ -916,6 +974,143 @@ fn push_with_backpressure(queue: &mut VecDeque<Signal>, sig: Signal, cap: usize)
 
     // Unknown: drop newest.
  }
+
+#[derive(Default)]
+struct StageTimes {
+    t0: Option<Instant>,
+    reset_start: Option<Instant>,
+    reset_done: Option<Instant>,
+    first_audio: Option<Instant>,
+    first_feature: Option<Instant>,
+    first_decode: Option<Instant>,
+    first_partial: Option<Instant>,
+    first_final: Option<Instant>,
+    stop_received: Option<Instant>,
+    finalize_start: Option<Instant>,
+    finalize_done: Option<Instant>,
+}
+
+impl StageTimes {
+    fn begin_reset(&mut self) {
+        *self = StageTimes::default();
+        let now = Instant::now();
+        self.t0 = Some(now);
+        self.reset_start = Some(now);
+    }
+
+    fn mark_reset_done(&mut self) {
+        self.reset_done = Some(Instant::now());
+    }
+
+    fn mark_if_none(slot: &mut Option<Instant>) {
+        if slot.is_none() {
+            *slot = Some(Instant::now());
+        }
+    }
+
+    fn ms_since(&self, t: Option<Instant>) -> Option<u64> {
+        self.t0
+            .and_then(|t0| t.map(|v| v.duration_since(t0).as_millis() as u64))
+    }
+
+    fn delta_ms(start: Option<Instant>, end: Option<Instant>) -> Option<u64> {
+        match (start, end) {
+            (Some(s), Some(e)) => Some(e.duration_since(s).as_millis() as u64),
+            _ => None,
+        }
+    }
+}
+
+struct StopStatsSnapshot<'a> {
+    utterance_id: &'a str,
+    utterance_seq: u64,
+    staging_samples: usize,
+    queued_before: usize,
+    queued_after: usize,
+    offline_frames: usize,
+    tail_flush_decodes: usize,
+    post_stop_decode_iters: usize,
+    post_stop_events: u32,
+    final_blank_penalty_delta: f32,
+    emitted_partial_pre: u64,
+    emitted_partial_post: u64,
+    emitted_final_pre: u64,
+    emitted_final_post: u64,
+    emitted_final_empty: u64,
+    emitted_final_nonempty: u64,
+    suppressed_junk_partial: u64,
+    suppressed_junk_final: u64,
+    filter_junk: bool,
+    offline_mode: bool,
+    audio_chunks_seen: u64,
+    audio_samples_seen: u64,
+    audio_samples_resampled: u64,
+    slow_chunk_threshold_ms: u64,
+    slow_chunk_count: u64,
+    slowest_chunk_ms: u64,
+    slowest_chunk_idx: u64,
+    slowest_chunk_audio_idx: u64,
+    last_audio_chunk_idx: u64,
+    last_feature_chunk_idx: u64,
+}
+
+fn build_stop_stats(
+    snapshot: &StopStatsSnapshot<'_>,
+    stage_times: &StageTimes,
+    phase: &str,
+    emitted_at: Instant,
+) -> StopStats {
+    StopStats {
+        schema_version: 2,
+        phase: Some(phase.to_string()),
+        id: if snapshot.utterance_id.is_empty() {
+            None
+        } else {
+            Some(snapshot.utterance_id.to_string())
+        },
+        utterance_seq: snapshot.utterance_seq,
+        staging_samples: snapshot.staging_samples,
+        queued_before: snapshot.queued_before,
+        queued_after: snapshot.queued_after,
+        offline_frames: snapshot.offline_frames,
+        tail_flush_decodes: snapshot.tail_flush_decodes,
+        post_stop_decode_iters: snapshot.post_stop_decode_iters,
+        post_stop_events: snapshot.post_stop_events,
+        final_blank_penalty_delta: snapshot.final_blank_penalty_delta,
+        emitted_partial_pre: snapshot.emitted_partial_pre,
+        emitted_partial_post: snapshot.emitted_partial_post,
+        emitted_final_pre: snapshot.emitted_final_pre,
+        emitted_final_post: snapshot.emitted_final_post,
+        emitted_final_empty: snapshot.emitted_final_empty,
+        emitted_final_nonempty: snapshot.emitted_final_nonempty,
+        suppressed_junk_partial: snapshot.suppressed_junk_partial,
+        suppressed_junk_final: snapshot.suppressed_junk_final,
+        filter_junk: snapshot.filter_junk,
+        offline_mode: snapshot.offline_mode,
+        audio_chunks_seen: snapshot.audio_chunks_seen,
+        audio_samples_seen: snapshot.audio_samples_seen,
+        audio_samples_resampled: snapshot.audio_samples_resampled,
+        t_reset_start_ms: stage_times.ms_since(stage_times.reset_start),
+        t_reset_done_ms: stage_times.ms_since(stage_times.reset_done),
+        t_first_audio_ms: stage_times.ms_since(stage_times.first_audio),
+        t_first_feature_ms: stage_times.ms_since(stage_times.first_feature),
+        t_first_decode_ms: stage_times.ms_since(stage_times.first_decode),
+        t_first_partial_ms: stage_times.ms_since(stage_times.first_partial),
+        t_first_final_ms: stage_times.ms_since(stage_times.first_final),
+        t_stop_received_ms: stage_times.ms_since(stage_times.stop_received),
+        t_finalize_start_ms: stage_times.ms_since(stage_times.finalize_start),
+        t_finalize_done_ms: stage_times.ms_since(stage_times.finalize_done),
+        t_stop_stats_ms: stage_times.ms_since(Some(emitted_at)),
+        finalize_ms: StageTimes::delta_ms(stage_times.finalize_start, stage_times.finalize_done),
+        slow_chunk_threshold_ms: snapshot.slow_chunk_threshold_ms,
+        slow_chunk_count: snapshot.slow_chunk_count,
+        slowest_chunk_ms: snapshot.slowest_chunk_ms,
+        slowest_chunk_idx: snapshot.slowest_chunk_idx,
+        slowest_chunk_audio_idx: snapshot.slowest_chunk_audio_idx,
+        last_audio_chunk_idx: snapshot.last_audio_chunk_idx,
+        last_feature_chunk_idx: snapshot.last_feature_chunk_idx,
+    }
+}
 
 fn spawn_worker(
     model_dir: String,
@@ -1013,6 +1208,18 @@ fn spawn_worker(
             let mut audio_chunks_seen = 0u64;
             let mut audio_samples_seen = 0u64;
             let mut audio_samples_resampled = 0u64;
+            let mut stage_times = StageTimes::default();
+            let mut last_audio_chunk_idx = 0u64;
+            let mut feature_chunk_idx = 0u64;
+            let mut last_feature_chunk_idx = 0u64;
+            let mut slow_chunk_count = 0u64;
+            let mut slowest_chunk_ms = 0u64;
+            let mut slowest_chunk_idx = 0u64;
+            let mut slowest_chunk_audio_idx = 0u64;
+            let slow_chunk_threshold_ms: u64 = std::env::var("PARAKEET_SLOW_CHUNK_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(250);
 
             let mut norm_sum: Vec<f64> = vec![0.0; n_mels];
             let mut norm_sumsq: Vec<f64> = vec![0.0; n_mels];
@@ -1044,11 +1251,20 @@ fn spawn_worker(
                 }
             };
             macro_rules! process_chunk {
-                ($timestamp_us:expr, $received_at:expr, $post_stop:expr, $post_stop_events:expr) => {{
+                (
+                    $timestamp_us:expr,
+                    $received_at:expr,
+                    $post_stop:expr,
+                    $post_stop_events:expr,
+                    $audio_chunk_idx:expr,
+                    $feature_chunk_idx:expr
+                ) => {{
                     let timestamp_us: u64 = $timestamp_us;
                     let received_at_opt: Option<Instant> = $received_at;
                     let post_stop: bool = $post_stop;
                     let post_stop_events = $post_stop_events;
+                    let audio_chunk_idx: u64 = $audio_chunk_idx;
+                    let feature_chunk_idx: u64 = $feature_chunk_idx;
                     let mut ok = true;
 
                     if sample_buf_16k.len() < needed_samples {
@@ -1072,6 +1288,7 @@ fn spawn_worker(
                             }
                         }
 
+                        StageTimes::mark_if_none(&mut stage_times.first_feature);
                         let mut feats_tc = extractor.compute(&segment); // TC order (frame-major)
                         if feats_tc.len() != chunk_frames * n_mels {
                             // #region agent log
@@ -1197,6 +1414,7 @@ fn spawn_worker(
 
                             // Push features to runtime.
                             // NOTE: current Parakeet runtime is chunk-scoped; later todo will make it true token-streaming.
+                            StageTimes::mark_if_none(&mut stage_times.first_decode);
                             let t_decode0 = Instant::now();
                             // #region agent log
                             let push_idx = DBG_STT_PUSH_OK_N.load(Ordering::Relaxed)
@@ -1257,6 +1475,28 @@ fn spawn_worker(
                             }
 
                             let decode_ms = t_decode0.elapsed().as_millis() as u64;
+                            if decode_ms >= slow_chunk_threshold_ms {
+                                slow_chunk_count = slow_chunk_count.saturating_add(1);
+                                if decode_ms > slowest_chunk_ms {
+                                    slowest_chunk_ms = decode_ms;
+                                    slowest_chunk_idx = feature_chunk_idx;
+                                    slowest_chunk_audio_idx = audio_chunk_idx;
+                                }
+                                if slow_chunk_count <= 8 {
+                                    let queue_ms = received_at_opt.map(|t| t.elapsed().as_millis() as u64);
+                                    eprintln!(
+                                        "[parakeet_stt] slow_chunk id={} utt_seq={} feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={:?} post_stop={} offline_mode={}",
+                                        utterance_id,
+                                        utterance_seq,
+                                        feature_chunk_idx,
+                                        audio_chunk_idx,
+                                        decode_ms,
+                                        queue_ms,
+                                        post_stop,
+                                        offline_mode
+                                    );
+                                }
+                            }
                             if ok {
                                 // Poll runtime events
                                 // #region agent log
@@ -1268,6 +1508,7 @@ fn spawn_worker(
                                     // #endregion
                                     match ev {
                                         parakeet_trt::TranscriptionEvent::PartialText { text, .. } => {
+                                            StageTimes::mark_if_none(&mut stage_times.first_partial);
                                             emitted_partial_pre = emitted_partial_pre.saturating_add(1);
                                             if current_filter_junk && (text.is_empty() || is_junk(&text)) {
                                                 suppressed_junk_partial =
@@ -1486,11 +1727,13 @@ fn spawn_worker(
                         }
                         SttControl::Stop => {
                             pending_stop = true;
+                            stage_times.stop_received = Some(Instant::now());
                             if let Ok(mut s) = state.lock() {
                                 s.status = "stopping".to_string();
                             }
                         }
                         SttControl::Reset => {
+                            stage_times.begin_reset();
                             let audio_q = in_rx.len();
                             let ctrl_q = ctrl_rx.len();
                             let mut drained_audio = 0usize;
@@ -1553,12 +1796,21 @@ fn spawn_worker(
                             audio_chunks_seen = 0;
                             audio_samples_seen = 0;
                             audio_samples_resampled = 0;
+                            feature_chunk_idx = 0;
+                            last_feature_chunk_idx = 0;
+                            last_audio_chunk_idx = 0;
+                            slow_chunk_count = 0;
+                            slowest_chunk_ms = 0;
+                            slowest_chunk_idx = 0;
+                            slowest_chunk_audio_idx = 0;
+                            stage_times.mark_reset_done();
                         }
                         SttControl::ResetWithMeta {
                             utterance_id: new_id,
                             utterance_seq: new_seq,
                             offline_mode: new_offline,
                         } => {
+                            stage_times.begin_reset();
                             let audio_q = in_rx.len();
                             let ctrl_q = ctrl_rx.len();
                             let mut drained_audio = 0usize;
@@ -1622,8 +1874,16 @@ fn spawn_worker(
                             audio_chunks_seen = 0;
                             audio_samples_seen = 0;
                             audio_samples_resampled = 0;
+                            feature_chunk_idx = 0;
+                            last_feature_chunk_idx = 0;
+                            last_audio_chunk_idx = 0;
+                            slow_chunk_count = 0;
+                            slowest_chunk_ms = 0;
+                            slowest_chunk_idx = 0;
+                            slowest_chunk_audio_idx = 0;
                             utterance_seq = new_seq;
                             utterance_id = new_id.unwrap_or_default();
+                            stage_times.mark_reset_done();
                         }
                         SttControl::SetGain(g) => {
                             current_gain = g;
@@ -1709,12 +1969,14 @@ fn spawn_worker(
                 if chunk.sample_rate == 0 || chunk.channels == 0 {
                     continue;
                 }
+                StageTimes::mark_if_none(&mut stage_times.first_audio);
                 let ack = ChunkAck {
                     schema_version: 1,
                     utterance_seq,
                     chunk_idx: chunk.chunk_idx,
                 };
                 let _ = out_tx.send(WorkerOut::ChunkAck(ack));
+                last_audio_chunk_idx = chunk.chunk_idx;
                 audio_chunks_seen = audio_chunks_seen.saturating_add(1);
                 audio_samples_seen = audio_samples_seen.saturating_add(chunk.samples.len() as u64);
                 last_audio_ts_us = chunk.timestamp_us;
@@ -1865,7 +2127,17 @@ fn spawn_worker(
                     let mut ignored_events = 0u32;
                     while sample_buf_16k.len() >= needed_samples {
                         let t_us = chunk_t0_us.unwrap_or(chunk.timestamp_us);
-                        if !process_chunk!(t_us, Some(chunk.received_at), false, &mut ignored_events) {
+                        let feature_idx = feature_chunk_idx;
+                        feature_chunk_idx = feature_chunk_idx.saturating_add(1);
+                        last_feature_chunk_idx = feature_idx;
+                        if !process_chunk!(
+                            t_us,
+                            Some(chunk.received_at),
+                            false,
+                            &mut ignored_events,
+                            chunk.chunk_idx,
+                            feature_idx
+                        ) {
                             break;
                         }
                     }
@@ -1877,6 +2149,7 @@ fn spawn_worker(
                     if let Ok(mut s) = state.lock() {
                         s.status = "stopped".to_string();
                     }
+                    StageTimes::mark_if_none(&mut stage_times.finalize_start);
 
                     let mut post_stop_decode_iters = 0usize;
                     let mut post_stop_events = 0u32;
@@ -1885,6 +2158,46 @@ fn spawn_worker(
                     let mut queued_after = 0usize;
                     let mut staging_samples = 0usize;
                     let mut offline_frames = 0usize;
+
+                    let pre_snapshot = StopStatsSnapshot {
+                        utterance_id: &utterance_id,
+                        utterance_seq,
+                        staging_samples,
+                        queued_before,
+                        queued_after,
+                        offline_frames,
+                        tail_flush_decodes,
+                        post_stop_decode_iters,
+                        post_stop_events,
+                        final_blank_penalty_delta,
+                        emitted_partial_pre,
+                        emitted_partial_post,
+                        emitted_final_pre,
+                        emitted_final_post,
+                        emitted_final_empty,
+                        emitted_final_nonempty,
+                        suppressed_junk_partial,
+                        suppressed_junk_final,
+                        filter_junk: current_filter_junk,
+                        offline_mode,
+                        audio_chunks_seen,
+                        audio_samples_seen,
+                        audio_samples_resampled,
+                        slow_chunk_threshold_ms,
+                        slow_chunk_count,
+                        slowest_chunk_ms,
+                        slowest_chunk_idx,
+                        slowest_chunk_audio_idx,
+                        last_audio_chunk_idx,
+                        last_feature_chunk_idx,
+                    };
+                    let pre_stats = build_stop_stats(&pre_snapshot, &stage_times, "pre", Instant::now());
+                    if let Err(e) = out_tx.try_send(WorkerOut::StopStats(pre_stats)) {
+                        eprintln!(
+                            "[parakeet_stt] stop_stats_send_failed phase=pre id={} utt_seq={} err={}",
+                            utterance_id, utterance_seq, e
+                        );
+                    }
 
                     with_blank_penalty_delta(final_blank_penalty_delta, || {
                         if offline_mode {
@@ -1947,6 +2260,12 @@ fn spawn_worker(
                                         }
                                     }
 
+                                    let feature_idx = feature_chunk_idx;
+                                    feature_chunk_idx = feature_chunk_idx.saturating_add(1);
+                                    last_feature_chunk_idx = feature_idx;
+                                    StageTimes::mark_if_none(&mut stage_times.first_feature);
+                                    StageTimes::mark_if_none(&mut stage_times.first_decode);
+                                    let t_decode0 = Instant::now();
                                     if let Err(e) = session.push_features(&bct_chunk, frames) {
                                         let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
                                         let ev = SttEvent::error(
@@ -1957,12 +2276,43 @@ fn spawn_worker(
                                         )
                                         .with_utterance_seq(utterance_seq);
                                         let _ = out_tx.send(WorkerOut::Event(ev));
+                                        let decode_ms = t_decode0.elapsed().as_millis() as u64;
+                                        if decode_ms >= slow_chunk_threshold_ms {
+                                            slow_chunk_count = slow_chunk_count.saturating_add(1);
+                                            if decode_ms > slowest_chunk_ms {
+                                                slowest_chunk_ms = decode_ms;
+                                                slowest_chunk_idx = feature_idx;
+                                                slowest_chunk_audio_idx = last_audio_chunk_idx;
+                                            }
+                                        }
                                         break;
+                                    }
+                                    let decode_ms = t_decode0.elapsed().as_millis() as u64;
+                                    if decode_ms >= slow_chunk_threshold_ms {
+                                        slow_chunk_count = slow_chunk_count.saturating_add(1);
+                                        if decode_ms > slowest_chunk_ms {
+                                            slowest_chunk_ms = decode_ms;
+                                            slowest_chunk_idx = feature_idx;
+                                            slowest_chunk_audio_idx = last_audio_chunk_idx;
+                                        }
+                                        if slow_chunk_count <= 8 {
+                                            eprintln!(
+                                                "[parakeet_stt] slow_chunk id={} utt_seq={} feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={:?} post_stop=true offline_mode={}",
+                                                utterance_id,
+                                                utterance_seq,
+                                                feature_idx,
+                                                last_audio_chunk_idx,
+                                                decode_ms,
+                                                Option::<u64>::None,
+                                                offline_mode
+                                            );
+                                        }
                                     }
 
                                     while let Some(ev) = session.poll_event() {
                                         match ev {
                                             parakeet_trt::TranscriptionEvent::PartialText { text, .. } => {
+                                                StageTimes::mark_if_none(&mut stage_times.first_partial);
                                                 emitted_partial_pre = emitted_partial_pre.saturating_add(1);
                                                 if current_filter_junk
                                                     && (text.is_empty() || is_junk(&text))
@@ -1989,6 +2339,7 @@ fn spawn_worker(
                                                 post_stop_events = post_stop_events.saturating_add(1);
                                             }
                                             parakeet_trt::TranscriptionEvent::FinalText { text, .. } => {
+                                                StageTimes::mark_if_none(&mut stage_times.first_final);
                                                 emitted_final_pre = emitted_final_pre.saturating_add(1);
                                                 if text.trim().is_empty() {
                                                     emitted_final_empty =
@@ -2035,6 +2386,7 @@ fn spawn_worker(
                                 }
 
                                 if !emitted_final && !last_partial_text.is_empty() {
+                                    StageTimes::mark_if_none(&mut stage_times.first_final);
                                     let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
                                     let ev = SttEvent::final_(
                                         last_partial_text.clone(),
@@ -2051,7 +2403,17 @@ fn spawn_worker(
                             queued_before = queued_chunks(staging_samples);
                             while sample_buf_16k.len() >= needed_samples {
                                 let t_us = chunk_t0_us.unwrap_or(last_audio_ts_us);
-                                if !process_chunk!(t_us, None, true, &mut post_stop_events) {
+                                let feature_idx = feature_chunk_idx;
+                                feature_chunk_idx = feature_chunk_idx.saturating_add(1);
+                                last_feature_chunk_idx = feature_idx;
+                                if !process_chunk!(
+                                    t_us,
+                                    None,
+                                    true,
+                                    &mut post_stop_events,
+                                    last_audio_chunk_idx,
+                                    feature_idx
+                                ) {
                                     break;
                                 }
                                 post_stop_decode_iters += 1;
@@ -2069,7 +2431,17 @@ fn spawn_worker(
                                     sample_buf_16k.resize(needed_samples, 0.0);
                                 }
                                 let t_us = chunk_t0_us.unwrap_or(last_audio_ts_us);
-                                if !process_chunk!(t_us, None, true, &mut post_stop_events) {
+                                let feature_idx = feature_chunk_idx;
+                                feature_chunk_idx = feature_chunk_idx.saturating_add(1);
+                                last_feature_chunk_idx = feature_idx;
+                                if !process_chunk!(
+                                    t_us,
+                                    None,
+                                    true,
+                                    &mut post_stop_events,
+                                    last_audio_chunk_idx,
+                                    feature_idx
+                                ) {
                                     break;
                                 }
                                 post_stop_decode_iters += 1;
@@ -2077,6 +2449,7 @@ fn spawn_worker(
                             sample_buf_16k.clear();
                             // Flush final with last hypothesis (if any).
                             if !last_partial_text.is_empty() {
+                                StageTimes::mark_if_none(&mut stage_times.first_final);
                                 let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
                                 let ev = SttEvent::final_(
                                     last_partial_text.clone(),
@@ -2087,6 +2460,7 @@ fn spawn_worker(
                                 let _ = out_tx.send(WorkerOut::Event(ev));
                                 post_stop_events = post_stop_events.saturating_add(1);
                             } else {
+                                StageTimes::mark_if_none(&mut stage_times.first_final);
                                 let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
                                 let ev = SttEvent::final_(
                                     String::new(),
@@ -2099,14 +2473,10 @@ fn spawn_worker(
                             }
                         }
                     });
+                    stage_times.finalize_done = Some(Instant::now());
 
-                    let stats = StopStats {
-                        schema_version: 1,
-                        id: if utterance_id.is_empty() {
-                            None
-                        } else {
-                            Some(utterance_id.clone())
-                        },
+                    let post_snapshot = StopStatsSnapshot {
+                        utterance_id: &utterance_id,
                         utterance_seq,
                         staging_samples,
                         queued_before,
@@ -2129,8 +2499,22 @@ fn spawn_worker(
                         audio_chunks_seen,
                         audio_samples_seen,
                         audio_samples_resampled,
+                        slow_chunk_threshold_ms,
+                        slow_chunk_count,
+                        slowest_chunk_ms,
+                        slowest_chunk_idx,
+                        slowest_chunk_audio_idx,
+                        last_audio_chunk_idx,
+                        last_feature_chunk_idx,
                     };
-                    let _ = out_tx.try_send(WorkerOut::StopStats(stats));
+                    let post_stats =
+                        build_stop_stats(&post_snapshot, &stage_times, "post", Instant::now());
+                    if let Err(e) = out_tx.try_send(WorkerOut::StopStats(post_stats)) {
+                        eprintln!(
+                            "[parakeet_stt] stop_stats_send_failed phase=post id={} utt_seq={} err={}",
+                            utterance_id, utterance_seq, e
+                        );
+                    }
                     last_partial_text.clear();
                     sample_buf_16k.clear();
                     chunk_t0_us = None;
