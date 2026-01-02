@@ -281,6 +281,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "asr_test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "audio_replay",
+ "chrono",
+ "clap",
+ "magnolia_config",
+ "magnolia_core",
+ "parakeet_stt",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "walkdir",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -338,6 +356,17 @@ dependencies = [
  "nannou",
  "pipewire",
  "serde_json",
+]
+
+[[package]]
+name = "audio_replay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "hound",
+ "magnolia_core",
+ "tokio",
 ]
 
 [[package]]
@@ -1299,6 +1328,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrand"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
 name = "fax"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2246,6 +2281,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "magnolia_config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "magnolia_core"
 version = "0.1.0"
 dependencies = [
@@ -3083,9 +3127,19 @@ name = "parakeet_stt"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "crossbeam-channel",
  "features",
- "hound",
+ "log",
+ "magnolia-ui",
+ "magnolia_core",
+ "nannou",
  "parakeet_trt",
+ "realfft",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4053,6 +4107,19 @@ name = "target-lexicon"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df7f62577c25e07834649fc3b39fafdc597c0a3527dc1c60129201ccfcbaa50c"
+
+[[package]]
+name = "tempfile"
+version = "3.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "655da9c7eb6305c55742045d5a8d2037996d61d8de95806335c7c86ce0f82e9c"
+dependencies = [
+ "fastrand",
+ "getrandom 0.3.4",
+ "once_cell",
+ "rustix 1.1.3",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "termcolor"

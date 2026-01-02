@@ -5,10 +5,33 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-hound = "3.5"
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+crossbeam-channel = "0.5"
+realfft = "3.3"
+rustfft = "6.2"
+log = "0.4"
 
 # Pull Parakeet's existing Rust bindings + feature extractor via the sibling repo.
 features = { path = "../../../parakeet/rust/features" }
 parakeet_trt = { path = "../../../parakeet/rust/parakeet_trt" }
 
+magnolia_core = { path = "../../core" }
+
+[features]
+tile-rendering = ["magnolia_core/tile-rendering", "dep:nannou", "dep:magnolia-ui", "dep:tokio"]
+
+[dependencies.nannou]
+version = "0.19"
+optional = true
+
+[dependencies.magnolia-ui]
+path = "../magnolia-ui"
+optional = true
+
+[dependencies.tokio]
+version = "1.0"
+features = ["sync"]
+optional = true
 

@@ -1,0 +1,11 @@
+[package]
+name = "audio_replay"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+hound = "3.5"
+magnolia_core = { path = "../../core" }
+tokio = { version = "1.0", features = ["time"] }

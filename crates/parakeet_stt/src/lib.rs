@@ -1,77 +1,2485 @@
-use anyhow::Context;
+use async_trait::async_trait;
+use crossbeam_channel::{Receiver, Sender, SendTimeoutError, TrySendError};
 use features::{FeatureConfig, LogMelExtractor};
-use parakeet_trt::{ParakeetSessionSafe, TranscriptionEvent};
-use std::path::Path;
+use realfft::RealFftPlanner;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
 
-fn wav_to_f32_mono_16k(path: &Path) -> anyhow::Result<Vec<f32>> {
-    let mut reader = hound::WavReader::open(path).with_context(|| format!("open wav: {}", path.display()))?;
-    let spec = reader.spec();
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
 
-    if spec.sample_rate != 16000 || spec.channels != 1 {
-        anyhow::bail!(
-            "WAV must be 16kHz mono (got {} Hz, {} channels)",
-            spec.sample_rate,
-            spec.channels
-        );
+use realfft::num_complex;
+
+#[cfg(feature = "tile-rendering")]
+pub mod tile;
+
+// #region agent log
+fn dbglog(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
+    let payload = serde_json::json!({
+        "sessionId": "debug-session",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    });
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/home/emmy/git/parakeet/.cursor/debug.log")
+    {
+        let _ = writeln!(f, "{}", payload.to_string());
+    }
+}
+
+static DBG_STT_AUDIO_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_OUT_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_AUDIO_DROP_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_PUSH_OK_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_PUSH_ERR_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_GATE_FLIP_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_WORKER_EV_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_CHUNK_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_RMS_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_RMS_ACTIVE_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_RMS_SILENT_N: AtomicU64 = AtomicU64::new(0);
+// #endregion
+
+static BLANK_PENALTY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn with_blank_penalty_delta<F: FnOnce()>(delta: f32, f: F) {
+    if !delta.is_finite() || delta == 0.0 {
+        f();
+        return;
+    }
+    let lock = BLANK_PENALTY_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().unwrap();
+    let prev = std::env::var("PARAKEET_BLANK_PENALTY").ok();
+    let base = prev
+        .as_deref()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let next = base + delta;
+    std::env::set_var("PARAKEET_BLANK_PENALTY", next.to_string());
+    f();
+    match prev {
+        Some(v) => std::env::set_var("PARAKEET_BLANK_PENALTY", v),
+        None => std::env::remove_var("PARAKEET_BLANK_PENALTY"),
+    }
+}
+
+// =============================================================================
+// Event contract (1C)
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttEvent {
+    pub schema_version: u32,
+    pub kind: String, // "partial" | "final" | "error"
+    pub seq: u64,
+
+    #[serde(default)]
+    pub utterance_seq: u64,
+
+    #[serde(default)]
+    pub t_ms: u64,
+
+    #[serde(default)]
+    pub text: String,
+
+    #[serde(default)]
+    pub stable_prefix_len: usize,
+
+    #[serde(default)]
+    pub code: i32,
+
+    #[serde(default)]
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttMetrics {
+    pub schema_version: u32,
+    pub kind: String, // "metrics"
+    pub seq: u64,
+
+    #[serde(default)]
+    pub utterance_seq: u64,
+
+    pub t_ms: u64,
+    pub latency_ms: u64,
+    pub decode_ms: u64,
+    pub rtf: f32,
+    pub audio_rms: f32,
+    pub audio_peak: f32,
+}
+
+impl SttMetrics {
+    pub fn to_signal(self) -> Signal {
+        Signal::Computed {
+            source: "stt_metrics".to_string(),
+            content: serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StopStats {
+    pub schema_version: u32,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub utterance_seq: u64,
+    pub staging_samples: usize,
+    pub queued_before: usize,
+    pub queued_after: usize,
+    pub offline_frames: usize,
+    pub tail_flush_decodes: usize,
+    pub post_stop_decode_iters: usize,
+    pub post_stop_events: u32,
+    pub final_blank_penalty_delta: f32,
+    pub emitted_partial_pre: u64,
+    pub emitted_partial_post: u64,
+    pub emitted_final_pre: u64,
+    pub emitted_final_post: u64,
+    pub emitted_final_empty: u64,
+    pub emitted_final_nonempty: u64,
+    pub suppressed_junk_partial: u64,
+    pub suppressed_junk_final: u64,
+    pub filter_junk: bool,
+    pub offline_mode: bool,
+    pub audio_chunks_seen: u64,
+    pub audio_samples_seen: u64,
+    pub audio_samples_resampled: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetAck {
+    pub schema_version: u32,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub utterance_seq: u64,
+    #[serde(default)]
+    pub drained_audio: usize,
+    #[serde(default)]
+    pub ctrl_queued: usize,
+    #[serde(default)]
+    pub offline_mode: bool,
+}
+
+impl ResetAck {
+    pub fn to_signal(self) -> Signal {
+        Signal::Computed {
+            source: "stt_reset_ack".to_string(),
+            content: serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkAck {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub utterance_seq: u64,
+    #[serde(default)]
+    pub chunk_idx: u64,
+}
+
+impl ChunkAck {
+    pub fn to_signal(self) -> Signal {
+        Signal::Computed {
+            source: "stt_chunk_ack".to_string(),
+            content: serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string()),
+        }
+    }
+}
+
+impl StopStats {
+    pub fn to_signal(self) -> Signal {
+        Signal::Computed {
+            source: "stt_stop_stats".to_string(),
+            content: serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ParakeetSttState {
+    pub status: String,
+    pub latency_ms: u64,
+    pub decode_ms: u64,
+    pub rtf: f32,
+    pub last_seq: u64,
+}
+
+impl SttEvent {
+    pub fn partial(text: String, stable_prefix_len: usize, t_ms: u64, seq: u64) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "partial".to_string(),
+            seq,
+            utterance_seq: 0,
+            t_ms,
+            text,
+            stable_prefix_len,
+            code: 0,
+            message: String::new(),
+        }
     }
 
-    let audio: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader.samples::<f32>().map(|s| s.unwrap()).collect(),
-        hound::SampleFormat::Int => {
-            let bits = spec.bits_per_sample;
-            if bits == 0 || bits > 32 {
-                anyhow::bail!("Unsupported PCM bit depth: {}", bits);
+    pub fn final_(text: String, t_ms: u64, seq: u64) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "final".to_string(),
+            seq,
+            utterance_seq: 0,
+            t_ms,
+            text,
+            stable_prefix_len: 0,
+            code: 0,
+            message: String::new(),
+        }
+    }
+
+    pub fn error(code: i32, message: String, t_ms: u64, seq: u64) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "error".to_string(),
+            seq,
+            utterance_seq: 0,
+            t_ms,
+            text: String::new(),
+            stable_prefix_len: 0,
+            code,
+            message,
+        }
+    }
+
+    pub fn with_utterance_seq(mut self, utterance_seq: u64) -> Self {
+        self.utterance_seq = utterance_seq;
+        self
+    }
+}
+
+impl SttEvent {
+    pub fn to_signal(self) -> Signal {
+        let source = match self.kind.as_str() {
+            "partial" => "stt_partial",
+            "final" => "stt_final",
+            "error" => "stt_error",
+            _ => "stt_error",
+        };
+        Signal::Computed {
+            source: source.to_string(),
+            content: serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string()),
+        }
+    }
+}
+
+// =============================================================================
+// Streaming audio normalization + framing (2A boundary)
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct AudioChunk {
+    samples: Vec<f32>,
+    sample_rate: u32,
+    channels: u16,
+    timestamp_us: u64,
+    chunk_idx: u64,
+    is_tick: bool,
+    received_at: Instant,
+}
+
+// =============================================================================
+// Streaming log-mel (incremental)
+// =============================================================================
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct FeatureConfigLocal {
+    sample_rate: u32,
+    n_fft: usize,
+    win_length: usize,
+    hop_length: usize,
+    n_mels: usize,
+    preemphasis: f32,
+}
+
+impl Default for FeatureConfigLocal {
+    fn default() -> Self {
+        Self {
+            sample_rate: 16000,
+            n_fft: 512,
+            win_length: 400,
+            hop_length: 160,
+            n_mels: 128,
+            preemphasis: 0.97,
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn hann_window(size: usize) -> Vec<f32> {
+    (0..size)
+        .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (size - 1) as f32).cos()))
+        .collect()
+}
+
+#[allow(dead_code)]
+fn hz_to_mel(hz: f32) -> f32 {
+    2595.0 * (1.0 + hz / 700.0).log10()
+}
+
+#[allow(dead_code)]
+fn mel_to_hz(mel: f32) -> f32 {
+    700.0 * (10.0f32.powf(mel / 2595.0) - 1.0)
+}
+
+#[allow(dead_code)]
+fn create_mel_filterbank(
+    n_mels: usize,
+    n_fft: usize,
+    sample_rate: f32,
+    f_min: f32,
+    f_max: f32,
+) -> Vec<Vec<f32>> {
+    let min_mel = hz_to_mel(f_min);
+    let max_mel = hz_to_mel(f_max);
+
+    let mut mel_points = Vec::with_capacity(n_mels + 2);
+    for i in 0..(n_mels + 2) {
+        let mel = min_mel + (max_mel - min_mel) * (i as f32 / (n_mels + 1) as f32);
+        mel_points.push(mel_to_hz(mel));
+    }
+
+    let bin_count = n_fft / 2 + 1;
+    let mut filterbank = vec![vec![0.0; bin_count]; n_mels];
+
+    for m in 0..n_mels {
+        let left = mel_points[m];
+        let center = mel_points[m + 1];
+        let right = mel_points[m + 2];
+
+        for i in 0..bin_count {
+            let freq = i as f32 * sample_rate / n_fft as f32;
+            if freq > left && freq < center {
+                filterbank[m][i] = (freq - left) / (center - left);
+            } else if freq >= center && freq < right {
+                filterbank[m][i] = (right - freq) / (right - center);
             }
-            let denom = (1u64 << (bits - 1)) as f32;
-            reader
-                .samples::<i32>()
-                .map(|s| s.unwrap() as f32 / denom)
-                .collect()
-        }
-    };
-
-    Ok(audio)
-}
-
-fn to_bct(feat_tc: &[f32], frames: usize, n_mels: usize) -> Vec<f32> {
-    // Input is [T, C] (frame-major), output is [C, T] (mel-major) to match encoder [B,C,T].
-    let mut out = vec![0.0f32; n_mels * frames];
-    for t in 0..frames {
-        for m in 0..n_mels {
-            out[m * frames + t] = feat_tc[t * n_mels + m];
         }
     }
-    out
+
+    filterbank
 }
 
-/// Offline WAV transcription (one utterance).
-///
-/// Notes:
-/// - The current TensorRT engine profiles in `parakeet` are built for **T <= 256** frames
-///   (~2.56s at 10ms hop). Longer audio should be chunked (not implemented yet).
-pub fn transcribe_wav(model_dir: &Path, wav_path: &Path, device_id: i32) -> anyhow::Result<String> {
-    let audio = wav_to_f32_mono_16k(wav_path)?;
+#[allow(dead_code)]
+struct StreamingLogMel {
+    cfg: FeatureConfigLocal,
+    mel_filterbank: Vec<Vec<f32>>,
+    window: Vec<f32>,
+    fft_plan: std::sync::Arc<dyn realfft::RealToComplex<f32>>,
 
-    let config = FeatureConfig::default();
-    let extractor = LogMelExtractor::new(config);
-    let n_mels = extractor.n_mels();
+    // sample staging for incremental framing
+    samples_16k: VecDeque<f32>,
+    prev_sample: f32,
 
-    let features_tc = extractor.compute(&audio);
-    let num_frames = features_tc.len() / n_mels;
-    let features_bct = to_bct(&features_tc, num_frames, n_mels);
+    // scratch
+    fft_in: Vec<f32>,
+    fft_out: Vec<num_complex::Complex<f32>>,
+    power_spec: Vec<f32>,
+}
 
-    let session = ParakeetSessionSafe::new(model_dir.to_str().context("model_dir not utf-8")?, device_id, true)?;
-    session.push_features(&features_bct, num_frames)?;
+#[allow(dead_code)]
+impl StreamingLogMel {
+    fn new(cfg: FeatureConfigLocal) -> Self {
+        let window = hann_window(cfg.win_length);
+        let mel_filterbank = create_mel_filterbank(
+            cfg.n_mels,
+            cfg.n_fft,
+            cfg.sample_rate as f32,
+            0.0,
+            (cfg.sample_rate / 2) as f32,
+        );
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fft_plan = planner.plan_fft_forward(cfg.n_fft);
+        let fft_in = fft_plan.make_input_vec();
+        let fft_out = fft_plan.make_output_vec();
+        let power_spec = vec![0.0; fft_out.len()];
 
-    while let Some(ev) = session.poll_event() {
-        match ev {
-            TranscriptionEvent::FinalText { text, .. } => return Ok(text),
-            TranscriptionEvent::Error { message } => anyhow::bail!("Parakeet error: {}", message),
+        Self {
+            cfg,
+            mel_filterbank,
+            window,
+            fft_plan,
+            samples_16k: VecDeque::new(),
+            prev_sample: 0.0,
+            fft_in,
+            fft_out,
+            power_spec,
+        }
+    }
+
+    fn push_samples(&mut self, samples: &[f32]) {
+        self.samples_16k.extend(samples.iter().copied());
+    }
+
+    /// Extract as many new frames as possible, returning features in **TC** layout:
+    /// `[t0_m0, t0_m1, ... t0_m127, t1_m0, ...]`.
+    fn pop_frames_tc(&mut self, out_tc: &mut Vec<f32>) -> usize {
+        out_tc.clear();
+        if self.samples_16k.len() < self.cfg.win_length {
+            return 0;
+        }
+
+        let mut frames = 0usize;
+        while self.samples_16k.len() >= self.cfg.win_length {
+            // Copy one window into fft_in with preemphasis + Hann.
+            for i in 0..self.cfg.win_length {
+                let x = *self.samples_16k.get(i).unwrap_or(&0.0);
+                let y = if i == 0 {
+                    x - self.cfg.preemphasis * self.prev_sample
+                } else {
+                    let x_prev = *self.samples_16k.get(i - 1).unwrap_or(&0.0);
+                    x - self.cfg.preemphasis * x_prev
+                };
+                self.fft_in[i] = y * self.window[i];
+            }
+            if frames == 0 {
+                let max_in = self.fft_in.iter().map(|v| v.abs()).fold(0.0, f32::max);
+                log::trace!("FFT Input check: max={:.6}", max_in);
+            }
+            for i in self.cfg.win_length..self.cfg.n_fft {
+                self.fft_in[i] = 0.0;
+            }
+
+            self.fft_plan
+                .process(&mut self.fft_in, &mut self.fft_out)
+                .expect("fft process failed");
+
+            // Power spectrum
+            for (i, c) in self.fft_out.iter().enumerate() {
+                self.power_spec[i] = c.re * c.re + c.im * c.im;
+            }
+
+            // Mel filtering + log
+            for mel_bin in &self.mel_filterbank {
+                let mut energy = 0.0f32;
+                for (i, &w) in mel_bin.iter().enumerate() {
+                    energy += self.power_spec[i] * w;
+                }
+                out_tc.push((energy + 1e-5).ln());
+            }
+
+            if frames % 50 == 0 {
+                let avg = out_tc.iter().sum::<f32>() / out_tc.len() as f32;
+                log::trace!("STT LogMel: frames={}, avg_ln={:.4}", frames, avg);
+            }
+
+            frames += 1;
+
+            // Advance hop: drop hop_length samples.
+            for _ in 0..self.cfg.hop_length {
+                if let Some(s) = self.samples_16k.pop_front() {
+                    self.prev_sample = s;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        frames
+    }
+}
+
+/// Simple streaming resampler (linear interpolation) to 16kHz mono.
+/// Good enough for 1C; we can swap to a high-quality resampler later.
+struct LinearResampler16k {
+    src_rate: u32,
+    phase: f32, // in source-sample units
+    prev_sample: f32,
+}
+
+impl LinearResampler16k {
+    fn new(src_rate: u32) -> Self {
+        Self {
+            src_rate,
+            phase: 0.0,
+            prev_sample: 0.0,
+        }
+    }
+
+    fn reset_rate(&mut self, src_rate: u32) {
+        self.src_rate = src_rate;
+        self.phase = 0.0;
+    }
+
+    fn resample_mono(&mut self, input: &[f32], out: &mut Vec<f32>) {
+        if input.is_empty() || self.src_rate == 0 {
+            return;
+        }
+        let step = self.src_rate as f32 / 16000.0;
+        
+        while self.phase < input.len() as f32 {
+            let idx = self.phase.floor() as i32;
+            let frac = self.phase - self.phase.floor();
+            
+            let s0 = if idx < 0 { self.prev_sample } else { input[idx as usize] };
+            let s1 = if idx + 1 >= input.len() as i32 {
+                input[input.len() - 1]
+            } else {
+                input[(idx + 1) as usize]
+            };
+            
+            out.push(s0 + (s1 - s0) * frac);
+            self.phase += step;
+        }
+        
+        if !input.is_empty() {
+            self.prev_sample = input[input.len() - 1];
+        }
+        self.phase -= input.len() as f32;
+    }
+}
+
+struct Leveler {
+    enabled: bool,
+    sample_rate: u32,
+    target_rms: f32,
+    min_rms: f32,
+    max_gain_up: f32,
+    max_gain_down: f32,
+    attack_ms: f32,
+    release_ms: f32,
+    limiter: f32,
+    hp_alpha: f32,
+    hp_x1: f32,
+    hp_y1: f32,
+    rms_s: f32,
+    gain: f32,
+}
+
+impl Leveler {
+    fn new(sample_rate: u32) -> Self {
+        let hp_freq = 30.0f32;
+        let hp_alpha = (-2.0 * std::f32::consts::PI * hp_freq / sample_rate as f32).exp();
+        Self {
+            enabled: false,
+            sample_rate,
+            target_rms: 0.1,
+            min_rms: 0.0056,
+            max_gain_up: 7.94,
+            max_gain_down: 0.063,
+            attack_ms: 20.0,
+            release_ms: 500.0,
+            limiter: 0.89,
+            hp_alpha,
+            hp_x1: 0.0,
+            hp_y1: 0.0,
+            rms_s: 0.0,
+            gain: 1.0,
+        }
+    }
+
+    fn coeff_for_chunk(&self, len: usize, tau_ms: f32) -> f32 {
+        if len == 0 {
+            return 0.0;
+        }
+        let tau_s = (tau_ms / 1000.0).max(1.0e-4);
+        let n = len as f32;
+        let sr = self.sample_rate as f32;
+        1.0 - (-n / (tau_s * sr)).exp()
+    }
+
+    fn process(&mut self, samples: &mut [f32]) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+
+        let mut sum_sq = 0.0f32;
+        for s in samples.iter_mut() {
+            let x = *s;
+            let y = x - self.hp_x1 + self.hp_alpha * self.hp_y1;
+            self.hp_x1 = x;
+            self.hp_y1 = y;
+            *s = y;
+            sum_sq += y * y;
+        }
+
+        let rms = (sum_sq / samples.len() as f32).sqrt();
+        let rms_coeff = self.coeff_for_chunk(samples.len(), 20.0);
+        self.rms_s = self.rms_s + rms_coeff * (rms - self.rms_s);
+
+        let denom = self.rms_s.max(self.min_rms);
+        let mut desired = self.target_rms / denom;
+        if desired > self.max_gain_up {
+            desired = self.max_gain_up;
+        } else if desired < self.max_gain_down {
+            desired = self.max_gain_down;
+        }
+
+        let gain_coeff = if desired > self.gain {
+            self.coeff_for_chunk(samples.len(), self.attack_ms)
+        } else {
+            self.coeff_for_chunk(samples.len(), self.release_ms)
+        };
+        self.gain = self.gain + gain_coeff * (desired - self.gain);
+
+        for s in samples.iter_mut() {
+            let y = *s * self.gain;
+            *s = (y / self.limiter).tanh() * self.limiter;
+        }
+    }
+}
+
+fn downmix_to_mono(input_interleaved: &[f32], channels: u16, out: &mut Vec<f32>) {
+    out.clear();
+    if channels <= 1 {
+        out.extend_from_slice(input_interleaved);
+        return;
+    }
+    let ch = channels as usize;
+    out.reserve(input_interleaved.len() / ch);
+    for frame in input_interleaved.chunks_exact(ch) {
+        let mut sum = 0.0f32;
+        for &s in frame {
+            sum += s;
+        }
+        out.push(sum / ch as f32);
+    }
+}
+
+// =============================================================================
+// Processor skeleton + worker plumbing (we’ll fill in decode in later todos)
+// =============================================================================
+
+pub struct ParakeetSttProcessor {
+    id: String,
+    enabled: bool,
+
+    in_tx: Sender<AudioChunk>,
+    ctrl_tx: Sender<SttControl>,
+    out_rx: Receiver<WorkerOut>,
+
+    pending_out: VecDeque<Signal>,
+    pre_gain: f32,
+    gate_threshold: f32,
+    filter_junk: bool,
+    normalize_mode: NormalizeMode,
+    offline_mode: bool,
+    backpressure: bool,
+    backpressure_timeout_ms: u64,
+    utterance_seq: u64,
+    final_blank_penalty_delta: f32,
+    next_chunk_idx: u64,
+
+    // Ensures the worker thread is cleanly stopped before process exit (avoids FFI teardown races).
+    worker_join: Option<std::thread::JoinHandle<()>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NormalizeMode {
+    PerChunk,
+    Running,
+    None,
+}
+
+impl NormalizeMode {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "per_chunk" => Some(Self::PerChunk),
+            "running" => Some(Self::Running),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum SttControl {
+    Start,
+    Stop,
+    Reset,
+    ResetWithMeta {
+        utterance_id: Option<String>,
+        utterance_seq: u64,
+        offline_mode: bool,
+    },
+    SetGain(f32),
+    SetGateThreshold(f32),
+    SetFilterJunk(bool),
+    SetNormalizeMode(NormalizeMode),
+    SetOfflineMode(bool),
+    SetFinalBlankPenaltyDelta(f32),
+    SetUtteranceId(String),
+    SetUtteranceSeq(u64),
+    Shutdown,
+}
+
+#[derive(Debug, Clone)]
+enum WorkerOut {
+    Event(SttEvent),
+    Metrics(SttMetrics),
+    StopStats(StopStats),
+    ResetAck(ResetAck),
+    ChunkAck(ChunkAck),
+}
+
+impl ParakeetSttProcessor {
+    pub fn new(id: &str, model_dir: String, device_id: i32, state: Arc<Mutex<ParakeetSttState>>) -> anyhow::Result<Self> {
+        // A slightly larger buffer reduces short-term backpressure drops which can
+        // starve the decoder of contiguous audio.
+        let mut audio_queue_cap = 256usize;
+        if let Ok(v) = std::env::var("PARAKEET_AUDIO_QUEUE_CAP") {
+            if let Ok(n) = v.parse::<usize>() {
+                if n > 0 {
+                    audio_queue_cap = n;
+                }
+            }
+        }
+        let (in_tx, in_rx) = crossbeam_channel::bounded::<AudioChunk>(audio_queue_cap);
+        let (ctrl_tx, ctrl_rx) = crossbeam_channel::bounded::<SttControl>(64);
+        let (out_tx, out_rx) = crossbeam_channel::bounded::<WorkerOut>(128);
+
+        let worker_join = Some(spawn_worker(
+            model_dir,
+            device_id,
+            in_rx,
+            ctrl_rx,
+            out_tx,
+            state.clone(),
+        ));
+
+        Ok(Self {
+            id: id.to_string(),
+            enabled: true,
+            in_tx,
+            ctrl_tx,
+            out_rx,
+            pending_out: VecDeque::new(),
+            pre_gain: 1.0,
+            gate_threshold: 0.005,
+            filter_junk: true,
+            normalize_mode: NormalizeMode::PerChunk,
+            offline_mode: false,
+            backpressure: false,
+            backpressure_timeout_ms: 0,
+            utterance_seq: 0,
+            final_blank_penalty_delta: 0.0,
+            next_chunk_idx: 0,
+            worker_join,
+        })
+    }
+
+    fn send_ctrl_with_timeout(&self, ctrl: SttControl, label: &str) -> anyhow::Result<()> {
+        let timeout_ms = self.backpressure_timeout_ms.max(2000);
+        let timeout = Duration::from_millis(timeout_ms);
+        match self.ctrl_tx.send_timeout(ctrl, timeout) {
+            Ok(()) => Ok(()),
+            Err(SendTimeoutError::Timeout(_)) => {
+                Err(anyhow::anyhow!("control_timeout {}", label))
+            }
+            Err(SendTimeoutError::Disconnected(_)) => {
+                Err(anyhow::anyhow!("control_disconnected {}", label))
+            }
+        }
+    }
+
+    fn drain_worker_out(&mut self) {
+        while let Ok(ev) = self.out_rx.try_recv() {
+            let sig = match ev {
+                WorkerOut::Event(e) => e.to_signal(),
+                WorkerOut::Metrics(m) => m.to_signal(),
+                WorkerOut::StopStats(s) => s.to_signal(),
+                WorkerOut::ResetAck(a) => a.to_signal(),
+                WorkerOut::ChunkAck(a) => a.to_signal(),
+            };
+            // #region agent log
+            let k = DBG_STT_OUT_N.fetch_add(1, Ordering::Relaxed);
+            if k < 12 {
+                let (source, content_len) = match &sig {
+                    Signal::Computed { source, content } => (source.as_str(), content.len()),
+                    _ => ("<non-computed>", 0),
+                };
+                dbglog(
+                    "H3",
+                    "crates/parakeet_stt/src/lib.rs:ParakeetSttProcessor:drain_worker_out",
+                    "Drain worker -> pending_out",
+                    serde_json::json!({"computed_source": source, "content_len": content_len}),
+                );
+            }
+            // #endregion
+            push_with_backpressure(&mut self.pending_out, sig, 64);
+        }
+    }
+}
+
+impl Drop for ParakeetSttProcessor {
+    fn drop(&mut self) {
+        // Best-effort: ask worker to shutdown, then wake it with a tiny audio tick.
+        let _ = self.ctrl_tx.try_send(SttControl::Shutdown);
+        let _ = self.in_tx.try_send(AudioChunk {
+            samples: vec![0.0],
+            sample_rate: 16_000,
+            channels: 1,
+            timestamp_us: 0,
+            chunk_idx: 0,
+            is_tick: true,
+            received_at: Instant::now(),
+        });
+        if let Some(h) = self.worker_join.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+fn is_partial(sig: &Signal) -> bool {
+    matches!(
+        sig,
+        Signal::Computed { source, .. } if source == "stt_partial"
+    )
+}
+
+fn is_priority(sig: &Signal) -> bool {
+    matches!(
+        sig,
+        Signal::Computed { source, .. }
+            if source == "stt_final"
+                || source == "stt_error"
+                || source == "stt_chunk_ack"
+                || source == "stt_reset_ack"
+                || source == "stt_stop_stats"
+    )
+}
+
+fn push_with_backpressure(queue: &mut VecDeque<Signal>, sig: Signal, cap: usize) {
+    if cap == 0 {
+        return;
+    }
+    if queue.len() < cap {
+        queue.push_back(sig);
+        return;
+    }
+
+    // Make room by dropping older partials.
+    if is_partial(&sig) {
+        // Drop one oldest partial, if any.
+        if let Some(idx) = queue.iter().position(is_partial) {
+            // Remove by rotating to front.
+            for _ in 0..idx {
+                if let Some(front) = queue.pop_front() {
+                    queue.push_back(front);
+                }
+            }
+            let _ = queue.pop_front();
+            queue.push_back(sig);
+        }
+        // If no partials to drop, drop this partial.
+        return;
+    }
+
+    if is_priority(&sig) {
+        // Keep trying to drop partials until there's space.
+        while queue.len() >= cap {
+            if let Some(idx) = queue.iter().position(is_partial) {
+                for _ in 0..idx {
+                    if let Some(front) = queue.pop_front() {
+                        queue.push_back(front);
+                    }
+                }
+                let _ = queue.pop_front();
+                continue;
+            }
+            // No partials available to drop; as a last resort, wait briefly for consumer to drain.
+            break;
+        }
+        if queue.len() < cap {
+            queue.push_back(sig);
+        } else {
+            // If we still can't enqueue, drop oldest (extremely unlikely); log via stderr.
+            eprintln!("[parakeet_stt] WARNING: dropping event due to full queue (final/error backlog)");
+            let _ = queue.pop_front();
+            queue.push_back(sig);
+        }
+        return;
+    }
+
+    // Unknown: drop newest.
+ }
+
+fn spawn_worker(
+    model_dir: String,
+    device_id: i32,
+    in_rx: Receiver<AudioChunk>,
+    ctrl_rx: Receiver<SttControl>,
+    out_tx: Sender<WorkerOut>,
+    state: Arc<Mutex<ParakeetSttState>>,
+) -> std::thread::JoinHandle<()> {
+    use parakeet_trt::ParakeetSessionSafe;
+    thread::Builder::new()
+        .name("parakeet_stt_worker".to_string())
+        .spawn(move || {
+            let _running = Arc::new(AtomicBool::new(true));
+            let seq = AtomicU64::new(1);
+            let mut is_running = true;
+            let mut should_exit = false;
+            let mut pending_stop = false;
+
+            {
+                if let Ok(mut s) = state.lock() {
+                    s.status = "running".to_string();
+                }
+            }
+
+            let mut utterance_seq = 0u64;
+            let session = match ParakeetSessionSafe::new(&model_dir, device_id, true) {
+                Ok(s) => s,
+                Err(e) => {
+                    let ev = SttEvent::error(
+                        -1,
+                        format!("failed to create parakeet session: {e}"),
+                        0,
+                        seq.fetch_add(1, Ordering::Relaxed),
+                    )
+                    .with_utterance_seq(utterance_seq);
+                    let _ = out_tx.send(WorkerOut::Event(ev));
+                    return;
+                }
+            };
+
+            let mut mono = Vec::<f32>::new();
+            let mut resampled = Vec::<f32>::new();
+            let mut resampler: Option<LinearResampler16k> = None;
+
+            // Tradeoff: chunk size impacts both decoding quality and responsiveness.
+            // 256 frames (~2.56s) provides more context and tends to reduce truncation in offline tests.
+            // 128 frames (~1.28s) is faster but can under-decode for LibriSpeech.
+            // 64 frames  (~0.64s) produced all-blank decoding (T_enc=8) in runtime evidence.
+            let mut chunk_frames: usize = 256;
+            if let Ok(v) = std::env::var("PARAKEET_CHUNK_FRAMES") {
+                if let Ok(n) = v.parse::<usize>() {
+                    if (16..=256).contains(&n) {
+                        chunk_frames = n;
+                    }
+                }
+            }
+            let cfg = FeatureConfig::default();
+            let n_mels = cfg.n_mels;
+            let extractor = LogMelExtractor::new(cfg);
+            let needed_samples = extractor_needed_samples(chunk_frames);
+            // Overlap by 50%: decode more often without shrinking context.
+            let advance_samples = (extractor_advance_samples(chunk_frames) / 2).max(1);
+
+            let mut bct = vec![0.0f32; n_mels * chunk_frames];
+            let mut chunk_t0_us: Option<u64> = None;
+
+            let mut last_partial_text = String::new();
+
+            // Best-effort cadence control (we’ll also drop partials when queue is full).
+            let min_emit = Duration::from_millis(100);
+            let mut last_emit = Instant::now() - Duration::from_secs(1);
+            let mut last_metrics_emit = Instant::now() - Duration::from_secs(1);
+            let metrics_interval = Duration::from_millis(500);
+
+            let mut running_rms = 0.0f32;
+            let mut running_peak = 0.0f32;
+            let mut samples_seen = 0usize;
+            let mut current_gain = 5.0f32; 
+            let mut current_gate_threshold = 0.005f32;
+            let mut current_filter_junk = true;
+            let mut normalize_mode = NormalizeMode::PerChunk;
+            let mut offline_mode = false;
+            let mut utterance_id = String::new();
+            let mut last_audio_ts_us = 0u64;
+            let mut final_blank_penalty_delta = 0.0f32;
+            let mut emitted_partial_pre = 0u64;
+            let mut emitted_partial_post = 0u64;
+            let mut emitted_final_pre = 0u64;
+            let mut emitted_final_post = 0u64;
+            let mut emitted_final_empty = 0u64;
+            let mut emitted_final_nonempty = 0u64;
+            let mut suppressed_junk_partial = 0u64;
+            let mut suppressed_junk_final = 0u64;
+            let mut audio_chunks_seen = 0u64;
+            let mut audio_samples_seen = 0u64;
+            let mut audio_samples_resampled = 0u64;
+
+            let mut norm_sum: Vec<f64> = vec![0.0; n_mels];
+            let mut norm_sumsq: Vec<f64> = vec![0.0; n_mels];
+            let mut norm_frames: usize = 0;
+            let mut offline_audio: Vec<f32> = Vec::new();
+            let mut leveler = Leveler::new(16_000);
+
+            // NOTE: Do not shadow `chunk_frames` here. Using 16-frame chunks tends to produce
+            // empty/1-char hypotheses with this demo runtime (confirmed in debug logs).
+
+            // Audio staging for feature extraction: keep STFT overlap across chunks.
+            let mut sample_buf_16k: VecDeque<f32> = VecDeque::new();
+            let mut segment = Vec::<f32>::with_capacity(needed_samples);
+            // NeMo preprocessor settings from the model's `model_config.yaml`.
+            // - normalize: per_feature (default per-chunk unless overridden)
+            // - dither: 1e-5
+            let dither = 1.0e-5f32;
+            // Tiny RNG for dither (deterministic, no external deps).
+            let mut dither_state: u64 = 0x9E3779B97F4A7C15;
+
+            // #region agent log
+            let mut last_gate_is_silent: Option<bool> = None;
+            // #endregion
+            let queued_chunks = |samples: usize| -> usize {
+                if samples < needed_samples {
+                    0
+                } else {
+                    1 + (samples - needed_samples) / advance_samples
+                }
+            };
+            macro_rules! process_chunk {
+                ($timestamp_us:expr, $received_at:expr, $post_stop:expr, $post_stop_events:expr) => {{
+                    let timestamp_us: u64 = $timestamp_us;
+                    let received_at_opt: Option<Instant> = $received_at;
+                    let post_stop: bool = $post_stop;
+                    let post_stop_events = $post_stop_events;
+                    let mut ok = true;
+
+                    if sample_buf_16k.len() < needed_samples {
+                        ok = false;
+                    }
+
+                    if ok {
+                        segment.clear();
+                        segment.extend(sample_buf_16k.iter().take(needed_samples).copied());
+                        // Apply very small dither (matches NeMo default in the model config) before feature extraction.
+                        if dither > 0.0 {
+                            for s in &mut segment {
+                                // xorshift64*
+                                dither_state ^= dither_state >> 12;
+                                dither_state ^= dither_state << 25;
+                                dither_state ^= dither_state >> 27;
+                                let r = (dither_state.wrapping_mul(2685821657736338717) >> 40) as u32;
+                                let u01 = (r as f32) / (u32::MAX as f32);
+                                let noise = (u01 * 2.0 - 1.0) * dither;
+                                *s += noise;
+                            }
+                        }
+
+                        let mut feats_tc = extractor.compute(&segment); // TC order (frame-major)
+                        if feats_tc.len() != chunk_frames * n_mels {
+                            // #region agent log
+                            dbglog(
+                                "H4",
+                                "crates/parakeet_stt/src/lib.rs:worker:feature_shape",
+                                "Unexpected feature length",
+                                serde_json::json!({"got": feats_tc.len(), "expected": chunk_frames * n_mels}),
+                            );
+                            // #endregion
+                            ok = false;
+                        }
+
+                        if ok {
+                            // NeMo `normalize: per_feature`: per mel-bin normalize over time frames.
+                            // This is important for stable decoding with Parakeet checkpoints.
+                            let ln_eps = -11.512925f32; // ln(1e-5); used as a reference floor threshold in logs
+                            let mut raw_floor_ct: u32 = 0;
+                            for &v in &feats_tc {
+                                if v <= ln_eps + 1e-3 {
+                                    raw_floor_ct += 1;
+                                }
+                            }
+
+                            if normalize_mode != NormalizeMode::None {
+                                let frames = chunk_frames;
+                                if normalize_mode == NormalizeMode::Running {
+                                    for m in 0..n_mels {
+                                        let mut sum = 0.0f64;
+                                        let mut sumsq = 0.0f64;
+                                        for t in 0..frames {
+                                            let v = feats_tc[t * n_mels + m] as f64;
+                                            sum += v;
+                                            sumsq += v * v;
+                                        }
+                                        norm_sum[m] += sum;
+                                        norm_sumsq[m] += sumsq;
+                                    }
+                                    norm_frames += frames;
+                                }
+
+                                let denom_frames = if normalize_mode == NormalizeMode::Running {
+                                    (norm_frames.max(1)) as f64
+                                } else {
+                                    frames as f64
+                                };
+
+                                for m in 0..n_mels {
+                                    let (sum, sumsq) = if normalize_mode == NormalizeMode::Running {
+                                        (norm_sum[m], norm_sumsq[m])
+                                    } else {
+                                        let mut sum = 0.0f64;
+                                        let mut sumsq = 0.0f64;
+                                        for t in 0..frames {
+                                            let v = feats_tc[t * n_mels + m] as f64;
+                                            sum += v;
+                                            sumsq += v * v;
+                                        }
+                                        (sum, sumsq)
+                                    };
+
+                                    let mean = (sum / denom_frames) as f32;
+                                    let mut var = (sumsq / denom_frames) - (mean as f64) * (mean as f64);
+                                    if var < 0.0 {
+                                        var = 0.0;
+                                    }
+                                    let mut std = (var as f32).sqrt();
+                                    if std < 1.0e-5 {
+                                        std = 1.0e-5;
+                                    }
+                                    for t in 0..frames {
+                                        let idx = t * n_mels + m;
+                                        feats_tc[idx] = (feats_tc[idx] - mean) / std;
+                                    }
+                                }
+                            }
+
+                            // Transpose TC -> CT (BCT without batch): [C, T]
+                            for t in 0..chunk_frames {
+                                for m in 0..n_mels {
+                                    bct[m * chunk_frames + t] = feats_tc[t * n_mels + m];
+                                }
+                            }
+
+                            // #region agent log
+                            let chunk_n = DBG_STT_CHUNK_N.fetch_add(1, Ordering::Relaxed);
+                            if chunk_n < 12 {
+                                let mut mn = f32::INFINITY;
+                                let mut mx = f32::NEG_INFINITY;
+                                let mut sum = 0.0f64;
+                                let mut floor_ct: u32 = 0;
+                                for &v in &bct[..(n_mels * chunk_frames)] {
+                                    mn = mn.min(v);
+                                    mx = mx.max(v);
+                                    sum += v as f64;
+                                }
+                                // Count how many values are near the minimum; high % suggests "all-floor" features (often no-speech / bad scale).
+                                let floor_thr = mn + 1e-3;
+                                for &v in &bct[..(n_mels * chunk_frames)] {
+                                    if v <= floor_thr {
+                                        floor_ct += 1;
+                                    }
+                                }
+                                let mean = (sum / (n_mels * chunk_frames) as f64) as f32;
+                                dbglog(
+                                    "H4",
+                                    "crates/parakeet_stt/src/lib.rs:worker:chunk_stats",
+                                    "BCT feature stats (pre push_features)",
+                                    serde_json::json!({
+                                        "chunk_frames": chunk_frames,
+                                        "n_mels": n_mels,
+                                        "min": mn,
+                                        "max": mx,
+                                        "mean": mean
+                                        ,"floor_ct": floor_ct
+                                        ,"floor_frac": (floor_ct as f64) / ((n_mels * chunk_frames) as f64)
+                                        ,"raw_floor_ct": raw_floor_ct
+                                        ,"raw_floor_frac": (raw_floor_ct as f64) / ((n_mels * chunk_frames) as f64)
+                                    }),
+                                );
+                            }
+                            // #endregion
+
+                            // Push features to runtime.
+                            // NOTE: current Parakeet runtime is chunk-scoped; later todo will make it true token-streaming.
+                            let t_decode0 = Instant::now();
+                            // #region agent log
+                            let push_idx = DBG_STT_PUSH_OK_N.load(Ordering::Relaxed)
+                                + DBG_STT_PUSH_ERR_N.load(Ordering::Relaxed);
+                            if push_idx < 12 {
+                                dbglog(
+                                    "H23",
+                                    "crates/parakeet_stt/src/lib.rs:worker:push_features",
+                                    "About to call push_features",
+                                    serde_json::json!({
+                                        "push_idx": push_idx,
+                                        "chunk_frames": chunk_frames,
+                                        "needed_samples": needed_samples,
+                                        "advance_samples": advance_samples,
+                                        "buf_len": sample_buf_16k.len(),
+                                    }),
+                                );
+                            }
+                            // #endregion
+
+                            match session.push_features(&bct, chunk_frames) {
+                                Ok(_) => {
+                                    // #region agent log
+                                    let k = DBG_STT_PUSH_OK_N.fetch_add(1, Ordering::Relaxed);
+                                    if k < 12 {
+                                        dbglog(
+                                            "H23",
+                                            "crates/parakeet_stt/src/lib.rs:worker:push_features",
+                                            "push_features OK",
+                                            serde_json::json!({"ok_idx": k}),
+                                        );
+                                    }
+                                    // #endregion
+                                }
+                                Err(e) => {
+                                    // #region agent log
+                                    let k = DBG_STT_PUSH_ERR_N.fetch_add(1, Ordering::Relaxed);
+                                    if k < 12 {
+                                        dbglog(
+                                            "H24",
+                                            "crates/parakeet_stt/src/lib.rs:worker:push_features",
+                                            "push_features ERR",
+                                            serde_json::json!({"err_idx": k, "err": e.to_string()}),
+                                        );
+                                    }
+                                    // #endregion
+                                    let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
+                                    let ev = SttEvent::error(
+                                        -4,
+                                        format!("push_features failed: {e}"),
+                                        t_ms,
+                                        seq.fetch_add(1, Ordering::Relaxed),
+                                    )
+                                    .with_utterance_seq(utterance_seq);
+                                    let _ = out_tx.send(WorkerOut::Event(ev));
+                                    ok = false;
+                                }
+                            }
+
+                            let decode_ms = t_decode0.elapsed().as_millis() as u64;
+                            if ok {
+                                // Poll runtime events
+                                // #region agent log
+                                let mut saw_any = false;
+                                // #endregion
+                                while let Some(ev) = session.poll_event() {
+                                    // #region agent log
+                                    saw_any = true;
+                                    // #endregion
+                                    match ev {
+                                        parakeet_trt::TranscriptionEvent::PartialText { text, .. } => {
+                                            emitted_partial_pre = emitted_partial_pre.saturating_add(1);
+                                            if current_filter_junk && (text.is_empty() || is_junk(&text)) {
+                                                suppressed_junk_partial =
+                                                    suppressed_junk_partial.saturating_add(1);
+                                                // #region agent log
+                                                let k = DBG_STT_WORKER_EV_N.fetch_add(1, Ordering::Relaxed);
+                                                if k < 8 {
+                                                    dbglog(
+                                                        "H4",
+                                                        "crates/parakeet_stt/src/lib.rs:worker:poll_event",
+                                                        "Worker PartialText (filtered)",
+                                                        serde_json::json!({"text_len": text.len()}),
+                                                    );
+                                                }
+                                                // #endregion
+                                                continue;
+                                            }
+                                            emitted_partial_post = emitted_partial_post.saturating_add(1);
+                                            // #region agent log
+                                            let k = DBG_STT_WORKER_EV_N.fetch_add(1, Ordering::Relaxed);
+                                            if k < 2 {
+                                                dbglog(
+                                                    "H4",
+                                                    "crates/parakeet_stt/src/lib.rs:worker:poll_event",
+                                                    "Worker PartialText (passed filter)",
+                                                    serde_json::json!({"text_len": text.len()}),
+                                                );
+                                            }
+                                            // #endregion
+                                            let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
+                                            if last_emit.elapsed() < min_emit {
+                                                last_partial_text = text;
+                                                continue;
+                                            }
+
+                                            let stable_prefix_len =
+                                                common_prefix_len_chars(&last_partial_text, &text);
+                                            let stable_prefix_len = stable_prefix_len.min(text.chars().count());
+                                            last_partial_text = text.clone();
+
+                                            let ev = SttEvent::partial(
+                                                text,
+                                                stable_prefix_len,
+                                                t_ms,
+                                                seq.fetch_add(1, Ordering::Relaxed),
+                                            )
+                                            .with_utterance_seq(utterance_seq);
+                                            let _ = out_tx.try_send(WorkerOut::Event(ev));
+                                            if post_stop {
+                                                *post_stop_events = (*post_stop_events).saturating_add(1);
+                                            }
+                                            last_emit = Instant::now();
+                                        }
+                                        parakeet_trt::TranscriptionEvent::FinalText { text, .. } => {
+                                            emitted_final_pre = emitted_final_pre.saturating_add(1);
+                                            if text.trim().is_empty() {
+                                                emitted_final_empty = emitted_final_empty.saturating_add(1);
+                                            } else {
+                                                emitted_final_nonempty = emitted_final_nonempty.saturating_add(1);
+                                            }
+                                            if current_filter_junk && (text.is_empty() || is_junk(&text)) {
+                                                suppressed_junk_final =
+                                                    suppressed_junk_final.saturating_add(1);
+                                                // #region agent log
+                                                let alnum = text.chars().filter(|c| c.is_alphanumeric()).count();
+                                                let punct = text.chars().filter(|c| c.is_ascii_punctuation()).count();
+                                                dbglog(
+                                                    "H4",
+                                                    "crates/parakeet_stt/src/lib.rs:worker:poll_event",
+                                                    "Worker FinalText (filtered)",
+                                                    serde_json::json!({
+                                                        "text_len": text.len(),
+                                                        "text_preview": text.chars().take(64).collect::<String>(),
+                                                        "alnum": alnum,
+                                                        "punct": punct
+                                                    }),
+                                                );
+                                                // #endregion
+                                                continue;
+                                            }
+                                            emitted_final_post = emitted_final_post.saturating_add(1);
+                                            // #region agent log
+                                            let alnum = text.chars().filter(|c| c.is_alphanumeric()).count();
+                                            let punct = text.chars().filter(|c| c.is_ascii_punctuation()).count();
+                                            dbglog(
+                                                "H4",
+                                                "crates/parakeet_stt/src/lib.rs:worker:poll_event",
+                                                "Worker FinalText (passed filter)",
+                                                serde_json::json!({
+                                                    "text_len": text.len(),
+                                                    "text_preview": text.chars().take(64).collect::<String>(),
+                                                    "alnum": alnum,
+                                                    "punct": punct
+                                                }),
+                                            );
+                                            // #endregion
+                                            let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
+                                            let ev = SttEvent::final_(
+                                                text,
+                                                t_ms,
+                                                seq.fetch_add(1, Ordering::Relaxed),
+                                            )
+                                            .with_utterance_seq(utterance_seq);
+                                            let _ = out_tx.send(WorkerOut::Event(ev));
+                                            if post_stop {
+                                                *post_stop_events = (*post_stop_events).saturating_add(1);
+                                            }
+                                            last_partial_text.clear();
+                                            last_emit = Instant::now();
+                                        }
+                                        parakeet_trt::TranscriptionEvent::Error { message } => {
+                                            // #region agent log
+                                            dbglog(
+                                                "H4",
+                                                "crates/parakeet_stt/src/lib.rs:worker:poll_event",
+                                                "Worker Error event",
+                                                serde_json::json!({"message_len": message.len()}),
+                                            );
+                                            // #endregion
+                                            let ev = SttEvent::error(
+                                                -3,
+                                                message,
+                                                chunk_t0_us.unwrap_or(timestamp_us) / 1000,
+                                                seq.fetch_add(1, Ordering::Relaxed),
+                                            )
+                                            .with_utterance_seq(utterance_seq);
+                                            let _ = out_tx.send(WorkerOut::Event(ev));
+                                        }
+                                    }
+                                }
+                                // #region agent log
+                                if chunk_n < 6 && !saw_any {
+                                    dbglog(
+                                        "H4",
+                                        "crates/parakeet_stt/src/lib.rs:worker:poll_event",
+                                        "No runtime events after push_features",
+                                        serde_json::json!({"chunk_frames": chunk_frames}),
+                                    );
+                                }
+                                // #endregion
+
+                                if let Some(received_at) = received_at_opt {
+                                    // Telemetry (best-effort): latency and RTF.
+                                    if last_metrics_emit.elapsed() >= metrics_interval {
+                                        let audio_chunk_ms = (chunk_frames as u64) * 10; // 64 frames * 10ms hop
+                                        let rtf = if audio_chunk_ms > 0 {
+                                            decode_ms as f32 / audio_chunk_ms as f32
+                                        } else {
+                                            0.0
+                                        };
+                                        let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
+                                        let latency_ms = received_at.elapsed().as_millis() as u64;
+                                        let avg_rms = if samples_seen > 0 {
+                                            running_rms / samples_seen as f32
+                                        } else {
+                                            0.0
+                                        };
+                                        let metrics = SttMetrics {
+                                            schema_version: 1,
+                                            kind: "metrics".to_string(),
+                                            seq: seq.fetch_add(1, Ordering::Relaxed),
+                                            utterance_seq,
+                                            t_ms,
+                                            latency_ms,
+                                            decode_ms,
+                                            rtf,
+                                            audio_rms: avg_rms,
+                                            audio_peak: running_peak,
+                                        };
+                                        let _ = out_tx.try_send(WorkerOut::Metrics(metrics.clone()));
+
+                                        running_rms = 0.0;
+                                        running_peak = 0.0;
+                                        samples_seen = 0;
+                                        last_metrics_emit = Instant::now();
+
+                                        if let Ok(mut s) = state.lock() {
+                                            s.latency_ms = metrics.latency_ms;
+                                            s.decode_ms = metrics.decode_ms;
+                                            s.rtf = metrics.rtf;
+                                            s.last_seq = metrics.seq;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if ok {
+                        // Advance by hop_length*chunk_frames samples; keep STFT overlap in buffer.
+                        for _ in 0..advance_samples {
+                            let _ = sample_buf_16k.pop_front();
+                        }
+
+                        // Next chunk starts at next audio timestamp we see.
+                        chunk_t0_us = None;
+                    }
+
+                    ok
+                }};
+            }
+            while let Ok(chunk) = in_rx.recv() {
+                let mut drop_chunk = false;
+                let mut reset_seen = false;
+                let mut reset_drained_audio = 0usize;
+                let mut reset_ctrl_q = 0usize;
+                // Handle any pending controls (non-blocking).
+                while let Ok(ctrl) = ctrl_rx.try_recv() {
+                    match ctrl {
+                        SttControl::Start => {
+                            is_running = true;
+                            pending_stop = false;
+                            if let Ok(mut s) = state.lock() {
+                                s.status = "running".to_string();
+                            }
+                        }
+                        SttControl::Stop => {
+                            pending_stop = true;
+                            if let Ok(mut s) = state.lock() {
+                                s.status = "stopping".to_string();
+                            }
+                        }
+                        SttControl::Reset => {
+                            let audio_q = in_rx.len();
+                            let ctrl_q = ctrl_rx.len();
+                            let mut drained_audio = 0usize;
+                            while let Ok(_) = in_rx.try_recv() {
+                                drained_audio += 1;
+                            }
+                            let log_reset = matches!(
+                                std::env::var("PARAKEET_LOG_RESET").ok().as_deref(),
+                                Some("1")
+                            );
+                            if log_reset
+                                || audio_q > 0
+                                || ctrl_q > 0
+                                || drained_audio > 0
+                                || pending_stop
+                            {
+                                eprintln!(
+                                    "[parakeet_stt] reset id={} utt_seq={} audio_q={} drained_audio={} ctrl_q={} running={} pending_stop={} offline_mode={}",
+                                    utterance_id,
+                                    utterance_seq,
+                                    audio_q,
+                                    drained_audio,
+                                    ctrl_q,
+                                    is_running,
+                                    pending_stop,
+                                    offline_mode
+                                );
+                            }
+                            reset_seen = true;
+                            reset_drained_audio = drained_audio;
+                            reset_ctrl_q = ctrl_q;
+                            drop_chunk = true;
+                            is_running = true;
+                            pending_stop = false;
+                            utterance_id.clear();
+                            if let Ok(mut s) = state.lock() {
+                                s.status = "running".to_string();
+                            }
+                            last_partial_text.clear();
+                            sample_buf_16k.clear();
+                            chunk_t0_us = None;
+                            norm_frames = 0;
+                            for v in &mut norm_sum {
+                                *v = 0.0;
+                            }
+                            for v in &mut norm_sumsq {
+                                *v = 0.0;
+                            }
+                            offline_audio.clear();
+                            session.reset();
+                            seq.store(1, Ordering::Relaxed);
+                            emitted_partial_pre = 0;
+                            emitted_partial_post = 0;
+                            emitted_final_pre = 0;
+                            emitted_final_post = 0;
+                            emitted_final_empty = 0;
+                            emitted_final_nonempty = 0;
+                            suppressed_junk_partial = 0;
+                            suppressed_junk_final = 0;
+                            audio_chunks_seen = 0;
+                            audio_samples_seen = 0;
+                            audio_samples_resampled = 0;
+                        }
+                        SttControl::ResetWithMeta {
+                            utterance_id: new_id,
+                            utterance_seq: new_seq,
+                            offline_mode: new_offline,
+                        } => {
+                            let audio_q = in_rx.len();
+                            let ctrl_q = ctrl_rx.len();
+                            let mut drained_audio = 0usize;
+                            while let Ok(_) = in_rx.try_recv() {
+                                drained_audio += 1;
+                            }
+                            let log_reset = matches!(
+                                std::env::var("PARAKEET_LOG_RESET").ok().as_deref(),
+                                Some("1")
+                            );
+                            if log_reset
+                                || audio_q > 0
+                                || ctrl_q > 0
+                                || drained_audio > 0
+                                || pending_stop
+                            {
+                                eprintln!(
+                                    "[parakeet_stt] reset id={} utt_seq={} audio_q={} drained_audio={} ctrl_q={} running={} pending_stop={} offline_mode={}",
+                                    utterance_id,
+                                    utterance_seq,
+                                    audio_q,
+                                    drained_audio,
+                                    ctrl_q,
+                                    is_running,
+                                    pending_stop,
+                                    offline_mode
+                                );
+                            }
+                            reset_seen = true;
+                            reset_drained_audio = drained_audio;
+                            reset_ctrl_q = ctrl_q;
+                            drop_chunk = true;
+                            is_running = true;
+                            pending_stop = false;
+                            utterance_id.clear();
+                            if let Ok(mut s) = state.lock() {
+                                s.status = "running".to_string();
+                            }
+                            last_partial_text.clear();
+                            sample_buf_16k.clear();
+                            chunk_t0_us = None;
+                            norm_frames = 0;
+                            for v in &mut norm_sum {
+                                *v = 0.0;
+                            }
+                            for v in &mut norm_sumsq {
+                                *v = 0.0;
+                            }
+                            offline_mode = new_offline;
+                            offline_audio.clear();
+                            session.reset();
+                            seq.store(1, Ordering::Relaxed);
+                            emitted_partial_pre = 0;
+                            emitted_partial_post = 0;
+                            emitted_final_pre = 0;
+                            emitted_final_post = 0;
+                            emitted_final_empty = 0;
+                            emitted_final_nonempty = 0;
+                            suppressed_junk_partial = 0;
+                            suppressed_junk_final = 0;
+                            audio_chunks_seen = 0;
+                            audio_samples_seen = 0;
+                            audio_samples_resampled = 0;
+                            utterance_seq = new_seq;
+                            utterance_id = new_id.unwrap_or_default();
+                        }
+                        SttControl::SetGain(g) => {
+                            current_gain = g;
+                        }
+                        SttControl::SetGateThreshold(t) => {
+                            current_gate_threshold = t;
+                        }
+                        SttControl::SetFilterJunk(f) => {
+                            current_filter_junk = f;
+                        }
+                        SttControl::SetNormalizeMode(m) => {
+                            normalize_mode = m;
+                            norm_frames = 0;
+                            for v in &mut norm_sum {
+                                *v = 0.0;
+                            }
+                            for v in &mut norm_sumsq {
+                                *v = 0.0;
+                            }
+                        }
+                        SttControl::SetOfflineMode(v) => {
+                            offline_mode = v;
+                            offline_audio.clear();
+                            norm_frames = 0;
+                            for val in &mut norm_sum {
+                                *val = 0.0;
+                            }
+                            for val in &mut norm_sumsq {
+                                *val = 0.0;
+                            }
+                        }
+                        SttControl::SetFinalBlankPenaltyDelta(v) => {
+                            final_blank_penalty_delta = v;
+                        }
+                        SttControl::SetUtteranceId(id) => {
+                            utterance_id = id;
+                        }
+                        SttControl::SetUtteranceSeq(seq_val) => {
+                            utterance_seq = seq_val;
+                        }
+                        SttControl::Shutdown => {
+                            should_exit = true;
+                            is_running = false;
+                            if let Ok(mut s) = state.lock() {
+                                s.status = "stopped".to_string();
+                            }
+                        }
+                    }
+                }
+
+                if reset_seen {
+                    let ack = ResetAck {
+                        schema_version: 1,
+                        id: if utterance_id.is_empty() {
+                            None
+                        } else {
+                            Some(utterance_id.clone())
+                        },
+                        utterance_seq,
+                        drained_audio: reset_drained_audio,
+                        ctrl_queued: reset_ctrl_q,
+                        offline_mode,
+                    };
+                    let _ = out_tx.send(WorkerOut::ResetAck(ack));
+                }
+
+                if should_exit {
+                    break;
+                }
+
+                if drop_chunk {
+                    continue;
+                }
+
+                if !is_running {
+                    continue;
+                }
+
+                if chunk.is_tick {
+                    continue;
+                }
+
+                if chunk.sample_rate == 0 || chunk.channels == 0 {
+                    continue;
+                }
+                let ack = ChunkAck {
+                    schema_version: 1,
+                    utterance_seq,
+                    chunk_idx: chunk.chunk_idx,
+                };
+                let _ = out_tx.send(WorkerOut::ChunkAck(ack));
+                audio_chunks_seen = audio_chunks_seen.saturating_add(1);
+                audio_samples_seen = audio_samples_seen.saturating_add(chunk.samples.len() as u64);
+                last_audio_ts_us = chunk.timestamp_us;
+
+                downmix_to_mono(&chunk.samples, chunk.channels, &mut mono);
+                let rs = resampler.get_or_insert_with(|| LinearResampler16k::new(chunk.sample_rate));
+                if rs.src_rate != chunk.sample_rate {
+                    rs.reset_rate(chunk.sample_rate);
+                }
+                resampled.clear();
+                rs.resample_mono(&mono, &mut resampled);
+                audio_samples_resampled =
+                    audio_samples_resampled.saturating_add(resampled.len() as u64);
+
+                if !resampled.is_empty() && samples_seen % 5000 < resampled.len() {
+                    log::trace!("Resample check: mono[0]={:.4}, resampled[0]={:.4}, rate={}", 
+                                mono[0], resampled[0], chunk.sample_rate);
+                }
+
+                if !resampled.is_empty() {
+                    // 1. Calculate raw RMS (already has DSP gain applied, but not internal 10x)
+                    let mut sum_sq: f32 = 0.0;
+                    let mut max_abs: f32 = 0.0;
+                    for s in &resampled {
+                        max_abs = max_abs.max(s.abs());
+                        sum_sq += *s * *s;
+                    }
+                    let raw_rms = (sum_sq / resampled.len() as f32).sqrt();
+
+                    // 2. Gate early: If quiet, zero everything out before boost.
+                    // Evidence-driven: 0.02 was too aggressive and caused long "all blank" spans.
+                    // Lower threshold to preserve low-amplitude speech.
+                    let is_silent = raw_rms < current_gate_threshold;
+
+                    // #region agent log
+                    // Log when the gate flips state (SILENT <-> ACTIVE) to correlate with "blank spans".
+                    if last_gate_is_silent.map(|v| v != is_silent).unwrap_or(true) {
+                        let k = DBG_STT_GATE_FLIP_N.fetch_add(1, Ordering::Relaxed);
+                        if k < 30 {
+                            dbglog(
+                                "H25",
+                                "crates/parakeet_stt/src/lib.rs:worker:gate_rms",
+                                "Audio gate state flip",
+                                serde_json::json!({
+                                    "raw_rms": raw_rms,
+                                    "max_abs": max_abs,
+                                    "is_silent": is_silent,
+                                    "gain": current_gain,
+                                    "n_samples": resampled.len()
+                                }),
+                            );
+                        }
+                        last_gate_is_silent = Some(is_silent);
+                    }
+                    // #endregion
+
+                    // #region agent log
+                    let _k = DBG_STT_RMS_N.fetch_add(1, Ordering::Relaxed);
+                    if !is_silent {
+                        let k2 = DBG_STT_RMS_ACTIVE_N.fetch_add(1, Ordering::Relaxed);
+                        if k2 < 20 {
+                            dbglog(
+                                "H7",
+                                "crates/parakeet_stt/src/lib.rs:worker:gate_rms",
+                                "Audio gate decision (ACTIVE)",
+                                serde_json::json!({
+                                    "raw_rms": raw_rms,
+                                    "max_abs": max_abs,
+                                    "is_silent": is_silent,
+                                    "gain": current_gain,
+                                    "n_samples": resampled.len()
+                                }),
+                            );
+                        }
+                    } else {
+                        let k1 = DBG_STT_RMS_SILENT_N.fetch_add(1, Ordering::Relaxed);
+                        if k1 < 20 {
+                            dbglog(
+                                "H7",
+                                "crates/parakeet_stt/src/lib.rs:worker:gate_rms",
+                                "Audio gate decision (SILENT)",
+                                serde_json::json!({
+                                    "raw_rms": raw_rms,
+                                    "max_abs": max_abs,
+                                    "is_silent": is_silent,
+                                    "gain": current_gain,
+                                    "n_samples": resampled.len()
+                                }),
+                            );
+                        }
+                    }
+                    if false {
+                        dbglog(
+                            "H7",
+                            "crates/parakeet_stt/src/lib.rs:worker:gate_rms",
+                            "Audio gate decision",
+                            serde_json::json!({
+                                "raw_rms": raw_rms,
+                                "is_silent": is_silent,
+                                "gain": current_gain,
+                                "gate_threshold": current_gate_threshold,
+                                "n_samples": resampled.len()
+                            }),
+                        );
+                    }
+                    // #endregion
+
+                    // 3. Apply internal boost
+                    for s in &mut resampled {
+                        if is_silent {
+                            *s = 0.0;
+                        } else {
+                            *s *= current_gain;
+                        }
+                    }
+
+                    if leveler.enabled {
+                        leveler.process(&mut resampled);
+                    }
+
+                    let mut sum_sq: f32 = 0.0;
+                    for s in &resampled {
+                        sum_sq += *s * *s;
+                        running_peak = running_peak.max(s.abs());
+                    }
+                    let rms = (sum_sq / resampled.len() as f32).sqrt();
+                    running_rms += rms * resampled.len() as f32;
+                    samples_seen += resampled.len();
+
+                    if !is_silent {
+                        // log::debug!("STT Audio Input (active): rms={:.6}, boosted={:.6}", raw_rms, boosted_rms);
+                    }
+                }
+
+                if offline_mode {
+                    offline_audio.extend(resampled.iter().copied());
+                    if chunk_t0_us.is_none() {
+                        chunk_t0_us = Some(chunk.timestamp_us);
+                    }
+                } else {
+                    // Feed normalized stream into 16k staging buffer (used for feature extraction).
+                    sample_buf_16k.extend(resampled.iter().copied());
+                    if chunk_t0_us.is_none() {
+                        chunk_t0_us = Some(chunk.timestamp_us);
+                    }
+
+                    // Process fixed-size audio windows into exactly `chunk_frames` log-mel frames.
+                    let mut ignored_events = 0u32;
+                    while sample_buf_16k.len() >= needed_samples {
+                        let t_us = chunk_t0_us.unwrap_or(chunk.timestamp_us);
+                        if !process_chunk!(t_us, Some(chunk.received_at), false, &mut ignored_events) {
+                            break;
+                        }
+                    }
+                }
+
+                if pending_stop && in_rx.is_empty() {
+                    is_running = false;
+                    pending_stop = false;
+                    if let Ok(mut s) = state.lock() {
+                        s.status = "stopped".to_string();
+                    }
+
+                    let mut post_stop_decode_iters = 0usize;
+                    let mut post_stop_events = 0u32;
+                    let mut tail_flush_decodes = 0usize;
+                    let mut queued_before = 0usize;
+                    let mut queued_after = 0usize;
+                    let mut staging_samples = 0usize;
+                    let mut offline_frames = 0usize;
+
+                    with_blank_penalty_delta(final_blank_penalty_delta, || {
+                        if offline_mode {
+                            // Offline decode: compute features over the full utterance, normalize per feature,
+                            // then push features in chunks to the runtime.
+                            staging_samples = offline_audio.len();
+                            if !offline_audio.is_empty() {
+                                let mut offline_audio = std::mem::take(&mut offline_audio);
+                                if dither > 0.0 {
+                                    for s in &mut offline_audio {
+                                        dither_state ^= dither_state >> 12;
+                                        dither_state ^= dither_state << 25;
+                                        dither_state ^= dither_state >> 27;
+                                        let r =
+                                            (dither_state.wrapping_mul(2685821657736338717) >> 40) as u32;
+                                        let u01 = (r as f32) / (u32::MAX as f32);
+                                        let noise = (u01 * 2.0 - 1.0) * dither;
+                                        *s += noise;
+                                    }
+                                }
+
+                                let mut feats_tc = extractor.compute(&offline_audio);
+                                let total_frames = feats_tc.len() / n_mels;
+                                offline_frames = total_frames;
+                                if normalize_mode != NormalizeMode::None && total_frames > 0 {
+                                    for m in 0..n_mels {
+                                        let mut sum = 0.0f64;
+                                        let mut sumsq = 0.0f64;
+                                        for t in 0..total_frames {
+                                            let v = feats_tc[t * n_mels + m] as f64;
+                                            sum += v;
+                                            sumsq += v * v;
+                                        }
+                                        let mean = (sum / total_frames as f64) as f32;
+                                        let mut var =
+                                            (sumsq / total_frames as f64) - (mean as f64) * (mean as f64);
+                                        if var < 0.0 {
+                                            var = 0.0;
+                                        }
+                                        let mut std = (var as f32).sqrt();
+                                        if std < 1.0e-5 {
+                                            std = 1.0e-5;
+                                        }
+                                        for t in 0..total_frames {
+                                            let idx = t * n_mels + m;
+                                            feats_tc[idx] = (feats_tc[idx] - mean) / std;
+                                        }
+                                    }
+                                }
+
+                                let mut emitted_final = false;
+                                let mut t = 0usize;
+                                while t < total_frames {
+                                    let frames = (total_frames - t).min(chunk_frames);
+                                    let mut bct_chunk = vec![0.0f32; n_mels * frames];
+                                    for tt in 0..frames {
+                                        let base_tc = (t + tt) * n_mels;
+                                        for m in 0..n_mels {
+                                            bct_chunk[m * frames + tt] = feats_tc[base_tc + m];
+                                        }
+                                    }
+
+                                    if let Err(e) = session.push_features(&bct_chunk, frames) {
+                                        let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                        let ev = SttEvent::error(
+                                            -4,
+                                            format!("push_features failed: {e}"),
+                                            t_ms,
+                                            seq.fetch_add(1, Ordering::Relaxed),
+                                        )
+                                        .with_utterance_seq(utterance_seq);
+                                        let _ = out_tx.send(WorkerOut::Event(ev));
+                                        break;
+                                    }
+
+                                    while let Some(ev) = session.poll_event() {
+                                        match ev {
+                                            parakeet_trt::TranscriptionEvent::PartialText { text, .. } => {
+                                                emitted_partial_pre = emitted_partial_pre.saturating_add(1);
+                                                if current_filter_junk
+                                                    && (text.is_empty() || is_junk(&text))
+                                                {
+                                                    suppressed_junk_partial =
+                                                        suppressed_junk_partial.saturating_add(1);
+                                                    continue;
+                                                }
+                                                emitted_partial_post = emitted_partial_post.saturating_add(1);
+                                                let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                                let stable_prefix_len =
+                                                    common_prefix_len_chars(&last_partial_text, &text);
+                                                let stable_prefix_len =
+                                                    stable_prefix_len.min(text.chars().count());
+                                                last_partial_text = text.clone();
+                                                let ev = SttEvent::partial(
+                                                    text,
+                                                    stable_prefix_len,
+                                                    t_ms,
+                                                    seq.fetch_add(1, Ordering::Relaxed),
+                                                )
+                                                .with_utterance_seq(utterance_seq);
+                                                let _ = out_tx.try_send(WorkerOut::Event(ev));
+                                                post_stop_events = post_stop_events.saturating_add(1);
+                                            }
+                                            parakeet_trt::TranscriptionEvent::FinalText { text, .. } => {
+                                                emitted_final_pre = emitted_final_pre.saturating_add(1);
+                                                if text.trim().is_empty() {
+                                                    emitted_final_empty =
+                                                        emitted_final_empty.saturating_add(1);
+                                                } else {
+                                                    emitted_final_nonempty =
+                                                        emitted_final_nonempty.saturating_add(1);
+                                                }
+                                                if current_filter_junk
+                                                    && (text.is_empty() || is_junk(&text))
+                                                {
+                                                    suppressed_junk_final =
+                                                        suppressed_junk_final.saturating_add(1);
+                                                    continue;
+                                                }
+                                                emitted_final_post = emitted_final_post.saturating_add(1);
+                                                let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                                let ev = SttEvent::final_(
+                                                    text,
+                                                    t_ms,
+                                                    seq.fetch_add(1, Ordering::Relaxed),
+                                                )
+                                                .with_utterance_seq(utterance_seq);
+                                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                                post_stop_events = post_stop_events.saturating_add(1);
+                                                last_partial_text.clear();
+                                                emitted_final = true;
+                                            }
+                                            parakeet_trt::TranscriptionEvent::Error { message } => {
+                                                let ev = SttEvent::error(
+                                                    -3,
+                                                    message,
+                                                    chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000,
+                                                    seq.fetch_add(1, Ordering::Relaxed),
+                                                )
+                                                .with_utterance_seq(utterance_seq);
+                                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                            }
+                                        }
+                                    }
+
+                                    t += frames;
+                                    post_stop_decode_iters += 1;
+                                }
+
+                                if !emitted_final && !last_partial_text.is_empty() {
+                                    let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                    let ev = SttEvent::final_(
+                                        last_partial_text.clone(),
+                                        t_ms,
+                                        seq.fetch_add(1, Ordering::Relaxed),
+                                    )
+                                    .with_utterance_seq(utterance_seq);
+                                    let _ = out_tx.send(WorkerOut::Event(ev));
+                                    post_stop_events = post_stop_events.saturating_add(1);
+                                }
+                            }
+                        } else {
+                            staging_samples = sample_buf_16k.len();
+                            queued_before = queued_chunks(staging_samples);
+                            while sample_buf_16k.len() >= needed_samples {
+                                let t_us = chunk_t0_us.unwrap_or(last_audio_ts_us);
+                                if !process_chunk!(t_us, None, true, &mut post_stop_events) {
+                                    break;
+                                }
+                                post_stop_decode_iters += 1;
+                            }
+                            queued_after = queued_chunks(sample_buf_16k.len());
+
+                            let quiet_iters = 5usize;
+                            let mut padded_once = false;
+                            for _ in 0..quiet_iters {
+                                if sample_buf_16k.len() < needed_samples {
+                                    if !padded_once && sample_buf_16k.len() > 0 {
+                                        tail_flush_decodes = 1;
+                                        padded_once = true;
+                                    }
+                                    sample_buf_16k.resize(needed_samples, 0.0);
+                                }
+                                let t_us = chunk_t0_us.unwrap_or(last_audio_ts_us);
+                                if !process_chunk!(t_us, None, true, &mut post_stop_events) {
+                                    break;
+                                }
+                                post_stop_decode_iters += 1;
+                            }
+                            sample_buf_16k.clear();
+                            // Flush final with last hypothesis (if any).
+                            if !last_partial_text.is_empty() {
+                                let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                let ev = SttEvent::final_(
+                                    last_partial_text.clone(),
+                                    t_ms,
+                                    seq.fetch_add(1, Ordering::Relaxed),
+                                )
+                                .with_utterance_seq(utterance_seq);
+                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                post_stop_events = post_stop_events.saturating_add(1);
+                            } else {
+                                let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                let ev = SttEvent::final_(
+                                    String::new(),
+                                    t_ms,
+                                    seq.fetch_add(1, Ordering::Relaxed),
+                                )
+                                .with_utterance_seq(utterance_seq);
+                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                post_stop_events = post_stop_events.saturating_add(1);
+                            }
+                        }
+                    });
+
+                    let stats = StopStats {
+                        schema_version: 1,
+                        id: if utterance_id.is_empty() {
+                            None
+                        } else {
+                            Some(utterance_id.clone())
+                        },
+                        utterance_seq,
+                        staging_samples,
+                        queued_before,
+                        queued_after,
+                        offline_frames,
+                        tail_flush_decodes,
+                        post_stop_decode_iters,
+                        post_stop_events,
+                        final_blank_penalty_delta,
+                        emitted_partial_pre,
+                        emitted_partial_post,
+                        emitted_final_pre,
+                        emitted_final_post,
+                        emitted_final_empty,
+                        emitted_final_nonempty,
+                        suppressed_junk_partial,
+                        suppressed_junk_final,
+                        filter_junk: current_filter_junk,
+                        offline_mode,
+                        audio_chunks_seen,
+                        audio_samples_seen,
+                        audio_samples_resampled,
+                    };
+                    let _ = out_tx.try_send(WorkerOut::StopStats(stats));
+                    last_partial_text.clear();
+                    sample_buf_16k.clear();
+                    chunk_t0_us = None;
+                    norm_frames = 0;
+                    for v in &mut norm_sum {
+                        *v = 0.0;
+                    }
+                    for v in &mut norm_sumsq {
+                        *v = 0.0;
+                    }
+                    offline_audio.clear();
+                    session.reset();
+                }
+            }
+        })
+        .expect("failed to spawn parakeet_stt worker")
+}
+
+fn extractor_needed_samples(chunk_frames: usize) -> usize {
+    let cfg = FeatureConfig::default();
+    cfg.win_length + cfg.hop_length * (chunk_frames.saturating_sub(1))
+}
+
+fn extractor_advance_samples(chunk_frames: usize) -> usize {
+    let cfg = FeatureConfig::default();
+    cfg.hop_length * chunk_frames
+}
+
+fn common_prefix_len_chars(a: &str, b: &str) -> usize {
+    let mut count = 0usize;
+    for (ca, cb) in a.chars().zip(b.chars()) {
+        if ca != cb {
+            break;
+        }
+        count += 1;
+    }
+    count
+}
+
+fn is_junk(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() {
+        return true;
+    }
+    // If the model emits only punctuation/whitespace (e.g. "..", "..."), treat as junk.
+    // This matches the observed "dots-only" UI symptom.
+    if t.chars().all(|c| !c.is_alphanumeric()) {
+        return true;
+    }
+    let lower = t.to_lowercase();
+    let junk = ["z", "w", "~", ".", ",", "-", "x", "y", " ", "v"];
+    junk.contains(&lower.as_str())
+}
+
+#[async_trait]
+impl Processor for ParakeetSttProcessor {
+    fn name(&self) -> &str {
+        "Parakeet STT"
+    }
+
+    fn schema(&self) -> ModuleSchema {
+        ModuleSchema {
+            id: self.id.clone(),
+            name: "Parakeet STT".to_string(),
+            description: "Streaming speech-to-text (Parakeet TRT) emitting Partial/Final/Error events".to_string(),
+            ports: vec![
+                Port {
+                    id: "audio_in".to_string(),
+                    label: "Audio In".to_string(),
+                    data_type: DataType::Audio,
+                    direction: PortDirection::Input,
+                },
+                Port {
+                    id: "stt_out".to_string(),
+                    label: "STT Events Out".to_string(),
+                    data_type: DataType::Any,
+                    direction: PortDirection::Output,
+                },
+            ],
+            settings_schema: Some(serde_json::json!({
+                "title": "STT Settings",
+                "type": "object",
+                "properties": {
+                    "pre_gain": {
+                        "type": "number",
+                        "description": "Additional gain for STT input",
+                        "default": 1.0
+                    },
+                    "gate_threshold": {
+                        "type": "number",
+                        "description": "RMS threshold for audio gate (0.005 default)",
+                        "default": 0.005
+                    },
+                    "filter_junk": {
+                        "type": "boolean",
+                        "description": "Filter empty/punctuation-only hypotheses (UI smoothing). Disable for testing.",
+                        "default": true
+                    },
+                    "normalize_mode": {
+                        "type": "string",
+                        "description": "Feature normalization mode: per_chunk | running | none",
+                        "default": "per_chunk"
+                    },
+                    "offline_mode": {
+                        "type": "boolean",
+                        "description": "Accumulate full utterance before decoding (offline only).",
+                        "default": false
+                    },
+                    "backpressure": {
+                        "type": "boolean",
+                        "description": "Block audio sender when the worker is behind (deterministic offline).",
+                        "default": false
+                    },
+                    "backpressure_timeout_ms": {
+                        "type": "integer",
+                        "description": "Max time (ms) to wait on backpressure send before returning an error.",
+                        "default": 0
+                    },
+                    "final_blank_penalty_delta": {
+                        "type": "number",
+                        "description": "Blank penalty delta applied only during post-stop finalize.",
+                        "default": 0.0
+                    },
+                    "utterance_id": {
+                        "type": "string",
+                        "description": "Optional utterance identifier for debug logging."
+                    },
+                    "utterance_seq": {
+                        "type": "integer",
+                        "description": "Optional per-utterance sequence number for event correlation."
+                    }
+                }
+            })),
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    async fn process(&mut self, signal: Signal) -> anyhow::Result<Option<Signal>> {
+        if !self.enabled {
+            return Ok(None);
+        }
+
+        self.drain_worker_out();
+        let mut out = self.pending_out.pop_front();
+
+        match signal {
+            Signal::Audio {
+                sample_rate,
+                channels,
+                timestamp_us,
+                data,
+            } => {
+                // #region agent log
+                let n = DBG_STT_AUDIO_N.fetch_add(1, Ordering::Relaxed);
+                let is_tick = data.len() == 1
+                    && timestamp_us == 0
+                    && sample_rate == 16_000
+                    && channels == 1;
+                let chunk_idx = if is_tick {
+                    0
+                } else {
+                    let idx = self.next_chunk_idx;
+                    self.next_chunk_idx = self.next_chunk_idx.saturating_add(1);
+                    idx
+                };
+                let chunk = AudioChunk {
+                    samples: data,
+                    sample_rate,
+                    channels,
+                    timestamp_us,
+                    chunk_idx,
+                    is_tick,
+                    received_at: Instant::now(),
+                };
+                let send_ok = if self.backpressure {
+                    match self.in_tx.try_send(chunk) {
+                        Ok(()) => true,
+                        Err(TrySendError::Full(_)) => {
+                            if let Some(sig) = out.take() {
+                                self.pending_out.push_front(sig);
+                            }
+                            return Err(anyhow::anyhow!("backpressure_full"));
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("failed to send audio chunk: {}", e));
+                        }
+                    }
+                } else {
+                    let res = self.in_tx.try_send(chunk);
+                    if res.is_err() {
+                        let _ = DBG_STT_AUDIO_DROP_N.fetch_add(1, Ordering::Relaxed);
+                    }
+                    res.is_ok()
+                };
+                if (n % 200) == 0 {
+                    dbglog(
+                        "H3",
+                        "crates/parakeet_stt/src/lib.rs:ParakeetSttProcessor:process",
+                        "STT processor got Audio",
+                        serde_json::json!({
+                            "sample_rate": sample_rate,
+                            "channels": channels,
+                            "send_ok": send_ok,
+                            "backpressure": self.backpressure,
+                            "drop_total": DBG_STT_AUDIO_DROP_N.load(Ordering::Relaxed)
+                        }),
+                    );
+                }
+                // #endregion
+            }
+            Signal::Control(ctrl) => match ctrl {
+                magnolia_core::ControlSignal::Settings(v) => {
+                    // Minimal control surface (1C): {"action":"start"|"stop"|"reset"}
+                    let action = v.get("action").and_then(|x| x.as_str()).unwrap_or("");
+                    let mut reset_with_meta = false;
+                    match action {
+                        "start" => {
+                            self.send_ctrl_with_timeout(SttControl::Start, "start")?;
+                        }
+                        "stop" => {
+                            self.send_ctrl_with_timeout(SttControl::Stop, "stop")?;
+                        }
+                        "reset" => {
+                            let offline = v
+                                .get("offline_mode")
+                                .and_then(|x| x.as_bool())
+                                .unwrap_or(self.offline_mode);
+                            let utterance_seq = v
+                                .get("utterance_seq")
+                                .and_then(|x| x.as_u64())
+                                .unwrap_or(self.utterance_seq);
+                            let utterance_id = v
+                                .get("utterance_id")
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string());
+                            self.offline_mode = offline;
+                            self.utterance_seq = utterance_seq;
+                            self.next_chunk_idx = 0;
+                            self.send_ctrl_with_timeout(
+                                SttControl::ResetWithMeta {
+                                    utterance_id,
+                                    utterance_seq,
+                                    offline_mode: offline,
+                                },
+                                "reset",
+                            )?;
+                            reset_with_meta = true;
+                        }
+                        _ => {}
+                    }
+                    
+                    if let Some(g) = v.get("pre_gain").and_then(|x| x.as_f64()) {
+                        self.pre_gain = g as f32;
+                        self.send_ctrl_with_timeout(
+                            SttControl::SetGain(self.pre_gain),
+                            "set_gain",
+                        )?;
+                    }
+                    
+                    if let Some(t) = v.get("gate_threshold").and_then(|x| x.as_f64()) {
+                        self.gate_threshold = t as f32;
+                        self.send_ctrl_with_timeout(
+                            SttControl::SetGateThreshold(self.gate_threshold),
+                            "set_gate_threshold",
+                        )?;
+                    }
+
+                    if let Some(f) = v.get("filter_junk").and_then(|x| x.as_bool()) {
+                        self.filter_junk = f;
+                        self.send_ctrl_with_timeout(
+                            SttControl::SetFilterJunk(self.filter_junk),
+                            "set_filter_junk",
+                        )?;
+                    }
+
+                    if let Some(m) = v.get("normalize_mode").and_then(|x| x.as_str()) {
+                        if let Some(mode) = NormalizeMode::from_str(m) {
+                            self.normalize_mode = mode;
+                            self.send_ctrl_with_timeout(
+                                SttControl::SetNormalizeMode(mode),
+                                "set_normalize_mode",
+                            )?;
+                        }
+                    }
+
+                    if let Some(offline) = v.get("offline_mode").and_then(|x| x.as_bool()) {
+                        self.offline_mode = offline;
+                        if !reset_with_meta {
+                            self.send_ctrl_with_timeout(
+                                SttControl::SetOfflineMode(offline),
+                                "set_offline_mode",
+                            )?;
+                        }
+                    }
+
+                    if let Some(backpressure) = v.get("backpressure").and_then(|x| x.as_bool()) {
+                        self.backpressure = backpressure;
+                    }
+
+                    if let Some(timeout_ms) = v.get("backpressure_timeout_ms").and_then(|x| x.as_u64())
+                    {
+                        self.backpressure_timeout_ms = timeout_ms;
+                    }
+
+                    if let Some(delta) = v.get("final_blank_penalty_delta").and_then(|x| x.as_f64())
+                    {
+                        self.final_blank_penalty_delta = delta as f32;
+                        self.send_ctrl_with_timeout(
+                            SttControl::SetFinalBlankPenaltyDelta(self.final_blank_penalty_delta),
+                            "set_final_blank_penalty_delta",
+                        )?;
+                    }
+
+                    if let Some(id) = v.get("utterance_id").and_then(|x| x.as_str()) {
+                        if !reset_with_meta {
+                            self.send_ctrl_with_timeout(
+                                SttControl::SetUtteranceId(id.to_string()),
+                                "set_utterance_id",
+                            )?;
+                        }
+                    }
+
+                    if let Some(seq) = v.get("utterance_seq").and_then(|x| x.as_u64()) {
+                        self.utterance_seq = seq;
+                        if !reset_with_meta {
+                            self.send_ctrl_with_timeout(
+                                SttControl::SetUtteranceSeq(seq),
+                                "set_utterance_seq",
+                            )?;
+                        }
+                    }
+                }
+                _ => {}
+            }
             _ => {}
         }
+
+        self.drain_worker_out();
+        if out.is_some() {
+            return Ok(out);
+        }
+        out = self.pending_out.pop_front();
+        Ok(out)
     }
-
-    Ok(String::new())
 }
-
-
