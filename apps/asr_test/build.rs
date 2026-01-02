@@ -11,10 +11,10 @@ fn find_parakeet_cpp_build_dir() -> Option<PathBuf> {
 
     // Common dev layout in this workspace:
     //   /home/emmy/git/magnolia/apps/asr_test
-    //   /home/emmy/git/parakeet/cpp/build
+    //   /home/emmy/git/trt-asr-engine/cpp/build
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
     let git_root = manifest_dir.parent()?.parent()?.parent()?; // .../git
-    Some(git_root.join("parakeet").join("cpp").join("build"))
+    Some(git_root.join("trt-asr-engine").join("cpp").join("build"))
 }
 
 fn main() {
@@ -27,7 +27,7 @@ fn main() {
             println!("cargo:rustc-link-arg=-Wl,-rpath,{}", build_dir.display());
         } else {
             println!(
-                "cargo:warning=Parakeet C++ build dir not found at {} (set PARAKEET_CPP_BUILD_DIR or build Parakeet: cmake -S parakeet/cpp -B parakeet/cpp/build && cmake --build parakeet/cpp/build -j)",
+                "cargo:warning=Parakeet C++ build dir not found at {} (set PARAKEET_CPP_BUILD_DIR or build Parakeet: cmake -S trt-asr-engine/cpp -B trt-asr-engine/cpp/build && cmake --build trt-asr-engine/cpp/build -j)",
                 build_dir.display()
             );
         }
@@ -35,6 +35,5 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=PARAKEET_CPP_BUILD_DIR");
 }
-
 
 

@@ -14,8 +14,8 @@ rustfft = "6.2"
 log = "0.4"
 
 # Pull Parakeet's existing Rust bindings + feature extractor via the sibling repo.
-features = { path = "../../../parakeet/rust/features" }
-parakeet_trt = { path = "../../../parakeet/rust/parakeet_trt" }
+features = { path = "../../../trt-asr-engine/rust/features" }
+parakeet_trt = { path = "../../../trt-asr-engine/rust/parakeet_trt" }
 
 magnolia_core = { path = "../../core" }
 
@@ -34,4 +34,3 @@ optional = true
 version = "1.0"
 features = ["sync"]
 optional = true
-

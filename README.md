@@ -37,6 +37,35 @@ Magnolia is a foundational connectivity layer for modular signal-processing syst
 
    See `examples/hello_plugin` to create your own.
 
+## ASR Test Harness (Parakeet TRT)
+
+The ASR smoke harness lives at `apps/asr_test` and depends on the C++ TRT runtime
+now located in `/home/emmy/git/trt-asr-engine`.
+
+1. **Build the C++ runtime**:
+   ```bash
+   cd /home/emmy/git/trt-asr-engine
+   cmake -S cpp -B cpp/build
+   cmake --build cpp/build -j
+   ```
+   If you keep the runtime elsewhere, set `PARAKEET_CPP_BUILD_DIR` accordingly.
+
+2. **Run a smoke sweep (LibriSpeech dev-clean)**:
+   ```bash
+   cd /home/emmy/git/magnolia
+   export LD_LIBRARY_PATH=/home/emmy/git/trt-asr-engine/cpp/build:${LD_LIBRARY_PATH}
+   cargo run --bin asr_test -- \
+     --dataset /home/emmy/git/magnolia/tools/LibriSpeech/dev-clean \
+     --engine parakeet \
+     --mode smoke \
+     --smoke-n 20 \
+     --smoke-seed 123 \
+     --blank-penalty 0.5 \
+     --eos-pad-ms 0 \
+     --utterance-timeout-ms 20000 \
+     --inflight-chunks 1
+   ```
+
 ## Keyboard Controls
 
 Magnolia is keyboard-first with smart tile navigation:
