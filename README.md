@@ -73,6 +73,10 @@ now located in `/home/emmy/git/trt-asr-engine`.
    - `PARAKEET_WORKER_JOIN_TIMEOUT_MS` (default 0): cap worker join during restarts (ms); non-zero exits the process on timeout to avoid stuck CUDA contexts.
    - `PARAKEET_SLOW_ENQUEUE_MS` (default 250): TRT `enqueueV3` slow/error log + cudaMemGetInfo delta (C++).
    - `PARAKEET_DUMP_BINDINGS_ON_SLOW=1`: dump TRT binding pointers/dims on slow/enqueue errors (C++).
+   - `PARAKEET_SLOT_REUSE_CHECK=1`: enable CUDA-event in-flight slot reuse checks (C++).
+   - `PARAKEET_SLOT_REUSE_MODE` (log|wait|fail, default log): action on detected slot reuse.
+   - `PARAKEET_SLOT_REUSE_LOG_THRESHOLD` (default 4): cap reuse logs per engine (0 disables logging).
+   - `PARAKEET_SLOT_REUSE_CAP` (default = engine binding count): override slot ring size used by the reuse checker.
    - `PARAKEET_GPU_TELEMETRY=1`: enable NVML sampling (GPU util/memory/power/temp) per utterance.
    - `PARAKEET_GPU_TELEMETRY_HZ` (default 5): NVML sampling rate.
    - `PARAKEET_GPU_TELEMETRY_DEVICE` (default = device id): NVML device index override.

@@ -1458,6 +1458,12 @@ fn spawn_worker(
                             // NOTE: current Parakeet runtime is chunk-scoped; later todo will make it true token-streaming.
                             StageTimes::mark_if_none(&mut stage_times.first_decode);
                             let t_decode0 = Instant::now();
+                            session.set_debug_context(
+                                &utterance_id,
+                                utterance_seq,
+                                audio_chunk_idx,
+                                feature_chunk_idx,
+                            );
                             // #region agent log
                             let push_idx = DBG_STT_PUSH_OK_N.load(Ordering::Relaxed)
                                 + DBG_STT_PUSH_ERR_N.load(Ordering::Relaxed);
@@ -2367,6 +2373,12 @@ fn spawn_worker(
                                     StageTimes::mark_if_none(&mut stage_times.first_feature);
                                     StageTimes::mark_if_none(&mut stage_times.first_decode);
                                     let t_decode0 = Instant::now();
+                                    session.set_debug_context(
+                                        &utterance_id,
+                                        utterance_seq,
+                                        last_audio_chunk_idx,
+                                        feature_idx,
+                                    );
                                     if let Err(e) = session.push_features(&bct_chunk, frames) {
                                         let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
                                         let ev = SttEvent::error(
