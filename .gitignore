@@ -36,3 +36,4 @@ plugins/*.dll
 
 configs/layout.toml
 screenshots/
+tools/LibriSpeech/

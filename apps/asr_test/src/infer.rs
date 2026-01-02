@@ -75,6 +75,26 @@ pub struct Summary {
     pub sum_ref_words: usize,
 }
 
+#[derive(Debug)]
+struct RunOutcome {
+    result: UtteranceResult,
+    poison_reason: Option<String>,
+}
+
+fn poison_reason_from_error(err: &str) -> Option<String> {
+    let err = err.trim();
+    if err.contains("tick_timeout") {
+        return Some("tick_timeout".to_string());
+    }
+    if err == "stop_stats_timeout" {
+        return Some("stop_stats_timeout".to_string());
+    }
+    if err.starts_with("timeout_") {
+        return Some(err.to_string());
+    }
+    None
+}
+
 fn utterance_error_result(entry: &ManifestEntry, err: anyhow::Error) -> UtteranceResult {
     let hypothesis = String::new();
     let wer_stats = wer::wer(&entry.text, &hypothesis);
@@ -157,6 +177,33 @@ fn reset_settings(utterance_id: &str, utterance_seq: u64, offline_mode: bool) ->
         "utterance_seq": utterance_seq,
         "offline_mode": offline_mode
     })
+}
+
+async fn build_worker(
+    id: &str,
+    engine: &ParakeetEngine,
+    normalize_mode: &str,
+    pre_gain: f32,
+    backpressure: bool,
+    backpressure_timeout_ms: u64,
+    final_blank_penalty_delta: f32,
+) -> anyhow::Result<ParakeetSttProcessor> {
+    let stt_state = Arc::new(Mutex::new(ParakeetSttState::default()));
+    let mut stt = ParakeetSttProcessor::new(
+        id,
+        engine.model_dir.to_string_lossy().to_string(),
+        engine.device_id,
+        stt_state,
+    )?;
+    let static_cfg = static_settings(
+        normalize_mode,
+        pre_gain,
+        backpressure,
+        backpressure_timeout_ms,
+        final_blank_penalty_delta,
+    );
+    send_settings_and_tick(&mut stt, static_cfg, backpressure_timeout_ms).await?;
+    Ok(stt)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -380,29 +427,26 @@ pub async fn run_manifest(
     let mut no_final = 0usize;
     let mut stt_error = 0usize;
     if job_count == 1 {
-        let stt_state = Arc::new(Mutex::new(ParakeetSttState::default()));
-        let mut stt = ParakeetSttProcessor::new(
+        let mut stt = build_worker(
             "asr_test",
-            engine.model_dir.to_string_lossy().to_string(),
-            engine.device_id,
-            stt_state,
-        )?;
-
-        let static_cfg = static_settings(
+            engine,
             normalize_mode,
             pre_gain,
             backpressure,
             backpressure_timeout_ms,
             final_blank_penalty_delta,
-        );
-        send_settings_and_tick(&mut stt, static_cfg, backpressure_timeout_ms).await?;
+        )
+        .await?;
 
         let mut results = Vec::with_capacity(manifest.len());
 
         for (i, entry) in manifest.iter().enumerate() {
             eprintln!("[asr_test] {}/{} {}", i + 1, manifest.len(), entry.id);
             let utterance_seq = i as u64 + 1;
-            let res = run_one(
+            let RunOutcome {
+                result: res,
+                poison_reason,
+            } = run_one(
                 &mut stt,
                 entry,
                 utterance_seq,
@@ -426,6 +470,22 @@ pub async fn run_manifest(
                 realtime_ms,
             )
             .await?;
+            if let Some(reason) = poison_reason {
+                eprintln!(
+                    "[asr_test] worker_restart id={} utt_seq={} reason={}",
+                    entry.id, utterance_seq, reason
+                );
+                stt = build_worker(
+                    "asr_test",
+                    engine,
+                    normalize_mode,
+                    pre_gain,
+                    backpressure,
+                    backpressure_timeout_ms,
+                    final_blank_penalty_delta,
+                )
+                .await?;
+            }
             completed += 1;
             update_progress_counts(
                 res.status.as_str(),
@@ -458,21 +518,17 @@ pub async fn run_manifest(
         let debug_ids = debug_ids.to_vec();
         let normalize_mode = normalize_mode.clone();
         let handle = tokio::spawn(async move {
-            let stt_state = Arc::new(Mutex::new(ParakeetSttState::default()));
-            let mut stt = ParakeetSttProcessor::new(
-                &format!("asr_test_worker_{}", worker_id),
-                engine.model_dir.to_string_lossy().to_string(),
-                engine.device_id,
-                stt_state,
-            )?;
-            let static_cfg = static_settings(
+            let worker_label = format!("asr_test_worker_{}", worker_id);
+            let mut stt = build_worker(
+                &worker_label,
+                &engine,
                 &normalize_mode,
                 pre_gain,
                 backpressure,
                 backpressure_timeout_ms,
                 final_blank_penalty_delta,
-            );
-            send_settings_and_tick(&mut stt, static_cfg, backpressure_timeout_ms).await?;
+            )
+            .await?;
 
             loop {
                 let item = {
@@ -480,7 +536,10 @@ pub async fn run_manifest(
                     guard.recv().await
                 };
                 let Some((idx, entry, utterance_seq)) = item else { break; };
-                let res = run_one(
+                let RunOutcome {
+                    result: res,
+                    poison_reason,
+                } = run_one(
                     &mut stt,
                     &entry,
                     utterance_seq,
@@ -503,8 +562,24 @@ pub async fn run_manifest(
                     eos_pad_ms,
                     realtime_ms,
                 )
-                .await;
-                let _ = res_tx.send((idx, res)).await;
+                .await?;
+                if let Some(reason) = poison_reason {
+                    eprintln!(
+                        "[asr_test] worker_restart worker={} id={} utt_seq={} reason={}",
+                        worker_label, entry.id, utterance_seq, reason
+                    );
+                    stt = build_worker(
+                        &worker_label,
+                        &engine,
+                        &normalize_mode,
+                        pre_gain,
+                        backpressure,
+                        backpressure_timeout_ms,
+                        final_blank_penalty_delta,
+                    )
+                    .await?;
+                }
+                let _ = res_tx.send((idx, Ok(res))).await;
             }
             anyhow::Ok(())
         });
@@ -568,7 +643,7 @@ async fn run_one(
     debug_ids: &[String],
     eos_pad_ms: u32,
     realtime_ms: Option<u32>,
-) -> anyhow::Result<UtteranceResult> {
+) -> anyhow::Result<RunOutcome> {
     let res = run_one_inner(
         stt,
         entry,
@@ -600,8 +675,24 @@ async fn run_one(
         );
     }
     Ok(match res {
-        Ok(result) => result,
-        Err(err) => utterance_error_result(entry, err),
+        Ok(result) => {
+            let poison_reason = result
+                .error
+                .as_deref()
+                .and_then(poison_reason_from_error);
+            RunOutcome {
+                result,
+                poison_reason,
+            }
+        }
+        Err(err) => {
+            let err_str = err.to_string();
+            let poison_reason = poison_reason_from_error(&err_str);
+            RunOutcome {
+                result: utterance_error_result(entry, err),
+                poison_reason,
+            }
+        }
     })
 }
 
@@ -848,18 +939,38 @@ async fn run_one_inner(
     } else {
         "ok"
     };
-
-    let wer_stats = wer::wer(&entry.text, &hypothesis);
-    if status == "ok" {
-        if is_truncation {
-            status = "truncation";
-        }
+    if status == "ok" && is_truncation {
+        status = "truncation";
     }
 
     if (status != "ok" || enable_debug || verbose_stop) && stop_stats.is_none() {
-        wait_for_stop_stats(stt, utterance_seq, &mut stop_stats, stop_stats_timeout_ms, log_mismatch)
-            .await?;
+        wait_for_stop_stats(
+            stt,
+            utterance_seq,
+            &mut stop_stats,
+            stop_stats_timeout_ms,
+            log_mismatch,
+        )
+        .await?;
+        if stop_stats.is_none() && err.is_none() && stop_stats_timeout_ms > 0 {
+            err = Some("stop_stats_timeout".to_string());
+        }
     }
+
+    let mut status = if err.is_some() {
+        "stt_error"
+    } else if final_text.is_none() {
+        "no_final"
+    } else if hypothesis.trim().is_empty() {
+        "empty_hyp"
+    } else {
+        "ok"
+    };
+    if status == "ok" && is_truncation {
+        status = "truncation";
+    }
+
+    let wer_stats = wer::wer(&entry.text, &hypothesis);
 
     eprintln!(
         "[asr_test] timing id={} utt_seq={} first_partial_ms={} first_final_ms={} total_ms={}",
