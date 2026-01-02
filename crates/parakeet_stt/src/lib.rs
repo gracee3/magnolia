@@ -199,6 +199,8 @@ pub struct StopStats {
     pub last_audio_chunk_idx: u64,
     #[serde(default)]
     pub last_feature_chunk_idx: u64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub abort_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +216,34 @@ pub struct ResetAck {
     pub ctrl_queued: usize,
     #[serde(default)]
     pub offline_mode: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlowChunk {
+    pub schema_version: u32,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub utterance_seq: u64,
+    pub feature_idx: u64,
+    pub audio_chunk_idx: u64,
+    pub decode_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub queue_ms: Option<u64>,
+    pub enc_shape: String,
+    pub length_shape: String,
+    pub profile_idx: u32,
+    pub post_stop: bool,
+    pub offline_mode: bool,
+}
+
+impl SlowChunk {
+    pub fn to_signal(self) -> Signal {
+        Signal::Computed {
+            source: "stt_slow_chunk".to_string(),
+            content: serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string()),
+        }
+    }
 }
 
 impl ResetAck {
@@ -773,6 +803,7 @@ enum WorkerOut {
     StopStats(StopStats),
     ResetAck(ResetAck),
     ChunkAck(ChunkAck),
+    SlowChunk(SlowChunk),
 }
 
 impl ParakeetSttProcessor {
@@ -843,6 +874,7 @@ impl ParakeetSttProcessor {
                 WorkerOut::StopStats(s) => s.to_signal(),
                 WorkerOut::ResetAck(a) => a.to_signal(),
                 WorkerOut::ChunkAck(a) => a.to_signal(),
+                WorkerOut::SlowChunk(s) => s.to_signal(),
             };
             // #region agent log
             let k = DBG_STT_OUT_N.fetch_add(1, Ordering::Relaxed);
@@ -1052,6 +1084,7 @@ struct StopStatsSnapshot<'a> {
     slowest_chunk_audio_idx: u64,
     last_audio_chunk_idx: u64,
     last_feature_chunk_idx: u64,
+    abort_reason: Option<&'a str>,
 }
 
 fn build_stop_stats(
@@ -1109,6 +1142,7 @@ fn build_stop_stats(
         slowest_chunk_audio_idx: snapshot.slowest_chunk_audio_idx,
         last_audio_chunk_idx: snapshot.last_audio_chunk_idx,
         last_feature_chunk_idx: snapshot.last_feature_chunk_idx,
+        abort_reason: snapshot.abort_reason.map(|v| v.to_string()),
     }
 }
 
@@ -1217,6 +1251,7 @@ fn spawn_worker(
             let mut slowest_chunk_idx = 0u64;
             let mut slowest_chunk_audio_idx = 0u64;
             let mut abort_utterance = false;
+            let mut abort_reason: Option<String> = None;
             let slow_chunk_threshold_ms: u64 = std::env::var("PARAKEET_SLOW_CHUNK_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -1506,6 +1541,25 @@ fn spawn_worker(
                                         post_stop,
                                         offline_mode
                                     );
+                                    let slow_event = SlowChunk {
+                                        schema_version: 1,
+                                        id: if utterance_id.is_empty() {
+                                            None
+                                        } else {
+                                            Some(utterance_id.clone())
+                                        },
+                                        utterance_seq,
+                                        feature_idx: feature_chunk_idx,
+                                        audio_chunk_idx,
+                                        decode_ms,
+                                        queue_ms,
+                                        enc_shape: enc_shape.clone(),
+                                        length_shape: length_shape.clone(),
+                                        profile_idx,
+                                        post_stop,
+                                        offline_mode,
+                                    };
+                                    let _ = out_tx.try_send(WorkerOut::SlowChunk(slow_event));
                                 }
                             }
                             if abort_slow_chunk_ms > 0
@@ -1531,6 +1585,7 @@ fn spawn_worker(
                                 .with_utterance_seq(utterance_seq);
                                 let _ = out_tx.send(WorkerOut::Event(ev));
                                 abort_utterance = true;
+                                abort_reason = Some("slow_chunk_abort".to_string());
                                 pending_stop = true;
                                 ok = false;
                             }
@@ -1840,6 +1895,8 @@ fn spawn_worker(
                             slowest_chunk_ms = 0;
                             slowest_chunk_idx = 0;
                             slowest_chunk_audio_idx = 0;
+                            abort_utterance = false;
+                            abort_reason = None;
                             stage_times.mark_reset_done();
                         }
                         SttControl::ResetWithMeta {
@@ -1918,6 +1975,8 @@ fn spawn_worker(
                             slowest_chunk_ms = 0;
                             slowest_chunk_idx = 0;
                             slowest_chunk_audio_idx = 0;
+                            abort_utterance = false;
+                            abort_reason = None;
                             utterance_seq = new_seq;
                             utterance_id = new_id.unwrap_or_default();
                             stage_times.mark_reset_done();
@@ -2229,6 +2288,7 @@ fn spawn_worker(
                         slowest_chunk_audio_idx,
                         last_audio_chunk_idx,
                         last_feature_chunk_idx,
+                        abort_reason: abort_reason.as_deref(),
                     };
                     let pre_stats = build_stop_stats(&pre_snapshot, &stage_times, "pre", Instant::now());
                     if let Err(e) = out_tx.try_send(WorkerOut::StopStats(pre_stats)) {
@@ -2351,6 +2411,25 @@ fn spawn_worker(
                                                 profile_idx,
                                                 offline_mode
                                             );
+                                            let slow_event = SlowChunk {
+                                                schema_version: 1,
+                                                id: if utterance_id.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(utterance_id.clone())
+                                                },
+                                                utterance_seq,
+                                                feature_idx,
+                                                audio_chunk_idx: last_audio_chunk_idx,
+                                                decode_ms,
+                                                queue_ms: None,
+                                                enc_shape: enc_shape.clone(),
+                                                length_shape: length_shape.clone(),
+                                                profile_idx,
+                                                post_stop: true,
+                                                offline_mode,
+                                            };
+                                            let _ = out_tx.try_send(WorkerOut::SlowChunk(slow_event));
                                         }
                                     }
                                     if abort_slow_chunk_ms > 0
@@ -2376,6 +2455,7 @@ fn spawn_worker(
                                         .with_utterance_seq(utterance_seq);
                                         let _ = out_tx.send(WorkerOut::Event(ev));
                                         abort_utterance = true;
+                                        abort_reason = Some("slow_chunk_abort".to_string());
                                         pending_stop = true;
                                         break;
                                     }
@@ -2577,6 +2657,7 @@ fn spawn_worker(
                         slowest_chunk_audio_idx,
                         last_audio_chunk_idx,
                         last_feature_chunk_idx,
+                        abort_reason: abort_reason.as_deref(),
                     };
                     let post_stats =
                         build_stop_stats(&post_snapshot, &stage_times, "post", Instant::now());

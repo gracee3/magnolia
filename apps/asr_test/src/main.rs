@@ -1,4 +1,5 @@
 mod dataset;
+mod gpu_telemetry;
 mod infer;
 mod wer;
 

@@ -15,6 +15,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 walkdir = "2.5"
+nvml-wrapper = "0.10"
 
 magnolia_core = { path = "../../core" }
 magnolia_config = { path = "../../crates/magnolia-config" }

@@ -1,4 +1,5 @@
 use crate::dataset::ManifestEntry;
+use crate::gpu_telemetry::GpuTelemetry;
 use crate::wer;
 use anyhow::Context;
 use parakeet_stt::{ParakeetSttProcessor, ParakeetSttState, SttEvent, SttMetrics};
@@ -290,6 +291,8 @@ struct StopStats {
     last_audio_chunk_idx: u64,
     #[serde(default)]
     last_feature_chunk_idx: u64,
+    #[serde(default)]
+    abort_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -316,6 +319,34 @@ struct ChunkAck {
     utterance_seq: u64,
     #[serde(default)]
     chunk_idx: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SlowChunk {
+    #[allow(dead_code)]
+    schema_version: u32,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    utterance_seq: u64,
+    #[serde(default)]
+    feature_idx: u64,
+    #[serde(default)]
+    audio_chunk_idx: u64,
+    #[serde(default)]
+    decode_ms: u64,
+    #[serde(default)]
+    queue_ms: Option<u64>,
+    #[serde(default)]
+    enc_shape: String,
+    #[serde(default)]
+    length_shape: String,
+    #[serde(default)]
+    profile_idx: u32,
+    #[serde(default)]
+    post_stop: bool,
+    #[serde(default)]
+    offline_mode: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -359,6 +390,24 @@ fn fmt_opt_ms(value: Option<u64>) -> String {
     value
         .map(|v| v.to_string())
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn gpu_tick(gpu: &mut Option<GpuTelemetry>) {
+    if let Some(gpu) = gpu.as_mut() {
+        gpu.maybe_sample();
+    }
+}
+
+fn gpu_stage(
+    gpu: &mut Option<GpuTelemetry>,
+    utterance_id: &str,
+    utterance_seq: u64,
+    stage: &str,
+    extra: Option<&str>,
+) {
+    if let Some(gpu) = gpu.as_mut() {
+        gpu.mark_stage(utterance_id, utterance_seq, stage, extra);
+    }
 }
 
 fn stop_stats_is_post(stats: &StopStats) -> bool {
@@ -525,6 +574,7 @@ pub async fn run_manifest(
                 debug_ids,
                 eos_pad_ms,
                 realtime_ms,
+                engine.device_id as u32,
             )
             .await?;
             if let Some(reason) = poison_reason {
@@ -618,6 +668,7 @@ pub async fn run_manifest(
                     &debug_ids,
                     eos_pad_ms,
                     realtime_ms,
+                    engine.device_id as u32,
                 )
                 .await?;
                 if let Some(reason) = poison_reason {
@@ -700,6 +751,7 @@ async fn run_one(
     debug_ids: &[String],
     eos_pad_ms: u32,
     realtime_ms: Option<u32>,
+    gpu_device_id: u32,
 ) -> anyhow::Result<RunOutcome> {
     let res = run_one_inner(
         stt,
@@ -723,6 +775,7 @@ async fn run_one(
         debug_ids,
         eos_pad_ms,
         realtime_ms,
+        gpu_device_id,
     )
     .await;
     if let Err(err) = &res {
@@ -775,6 +828,7 @@ async fn run_one_inner(
     debug_ids: &[String],
     eos_pad_ms: u32,
     realtime_ms: Option<u32>,
+    gpu_device_id: u32,
 ) -> anyhow::Result<UtteranceResult> {
     let enable_debug = debug_ids.iter().any(|id| id == &entry.id);
     let log_mismatch = enable_debug || verbose_stop;
@@ -816,6 +870,7 @@ async fn run_one_inner(
 
     let base_settings = reset_settings(entry.id.as_str(), utterance_seq, offline_mode);
 
+    let pass_label = if offline_mode { "offline" } else { "stream" };
     let (
         mut partials,
         mut final_text,
@@ -843,6 +898,8 @@ async fn run_one_inner(
         inflight_chunks,
         offline_mode,
         log_mismatch,
+        gpu_device_id,
+        pass_label,
     )
     .await?;
 
@@ -888,6 +945,8 @@ async fn run_one_inner(
             inflight_chunks,
             true,
             log_mismatch,
+            gpu_device_id,
+            "offline_retry",
         )
         .await?;
         let mut retry_hyp = if !r_final_parts.is_empty() {
@@ -944,6 +1003,8 @@ async fn run_one_inner(
             inflight_chunks,
             false,
             log_mismatch,
+            gpu_device_id,
+            "stream_retry",
         )
         .await?;
         let mut retry_hyp = if !r_final_parts.is_empty() {
@@ -1001,12 +1062,15 @@ async fn run_one_inner(
     }
 
     if (status != "ok" || enable_debug || verbose_stop) && stop_stats.is_none() {
+        let mut gpu = None;
         wait_for_stop_stats(
             stt,
+            entry.id.as_str(),
             utterance_seq,
             &mut stop_stats,
             stop_stats_timeout_ms,
             log_mismatch,
+            &mut gpu,
         )
         .await?;
         let has_post_stats = stop_stats
@@ -1015,6 +1079,13 @@ async fn run_one_inner(
             .unwrap_or(false);
         if !has_post_stats && err.is_none() && stop_stats_timeout_ms > 0 {
             err = Some("stop_stats_timeout".to_string());
+        }
+    }
+    if err.is_none() {
+        if let Some(stats) = stop_stats.as_ref() {
+            if let Some(reason) = stats.abort_reason.as_deref() {
+                err = Some(reason.to_string());
+            }
         }
     }
 
@@ -1089,7 +1160,7 @@ async fn run_one_inner(
     if status != "ok" || enable_debug || verbose_stop {
         if let Some(stats) = &stop_stats {
             eprintln!(
-                "[asr_test] stop_stats id={} utt_seq={} staging_samples={} queued_before={} queued_after={} offline_frames={} tail_flush_decodes={} post_stop_decode_iters={} post_stop_events={} final_blank_penalty_delta={} emitted_partial_pre={} emitted_partial_post={} emitted_final_pre={} emitted_final_post={} emitted_final_empty={} emitted_final_nonempty={} suppressed_junk_partial={} suppressed_junk_final={} filter_junk={} offline_mode={} audio_chunks_seen={} audio_samples_seen={} audio_samples_resampled={}",
+                "[asr_test] stop_stats id={} utt_seq={} staging_samples={} queued_before={} queued_after={} offline_frames={} tail_flush_decodes={} post_stop_decode_iters={} post_stop_events={} final_blank_penalty_delta={} emitted_partial_pre={} emitted_partial_post={} emitted_final_pre={} emitted_final_post={} emitted_final_empty={} emitted_final_nonempty={} suppressed_junk_partial={} suppressed_junk_final={} filter_junk={} offline_mode={} audio_chunks_seen={} audio_samples_seen={} audio_samples_resampled={} abort_reason={}",
                 stats.id.as_deref().unwrap_or(entry.id.as_str()),
                 stats.utterance_seq,
                 stats.staging_samples,
@@ -1112,7 +1183,8 @@ async fn run_one_inner(
                 stats.offline_mode,
                 stats.audio_chunks_seen,
                 stats.audio_samples_seen,
-                stats.audio_samples_resampled
+                stats.audio_samples_resampled,
+                stats.abort_reason.as_deref().unwrap_or("-")
             );
             if stats.phase.is_some()
                 || stats.slow_chunk_count > 0
@@ -1120,7 +1192,7 @@ async fn run_one_inner(
                 || stats.t_finalize_done_ms.is_some()
             {
                 eprintln!(
-                    "[asr_test] stop_stats_timing id={} utt_seq={} phase={} t_reset_start_ms={} t_reset_done_ms={} t_first_audio_ms={} t_first_feature_ms={} t_first_decode_ms={} t_first_partial_ms={} t_first_final_ms={} t_stop_received_ms={} t_finalize_start_ms={} t_finalize_done_ms={} t_stop_stats_ms={} finalize_ms={} slow_chunk_count={} slowest_chunk_ms={} slowest_chunk_idx={} slowest_chunk_audio_idx={} last_audio_chunk_idx={} last_feature_chunk_idx={}",
+                    "[asr_test] stop_stats_timing id={} utt_seq={} phase={} t_reset_start_ms={} t_reset_done_ms={} t_first_audio_ms={} t_first_feature_ms={} t_first_decode_ms={} t_first_partial_ms={} t_first_final_ms={} t_stop_received_ms={} t_finalize_start_ms={} t_finalize_done_ms={} t_stop_stats_ms={} finalize_ms={} slow_chunk_count={} slowest_chunk_ms={} slowest_chunk_idx={} slowest_chunk_audio_idx={} last_audio_chunk_idx={} last_feature_chunk_idx={} abort_reason={}",
                     stats.id.as_deref().unwrap_or(entry.id.as_str()),
                     stats.utterance_seq,
                     stats.phase.as_deref().unwrap_or("n/a"),
@@ -1141,7 +1213,8 @@ async fn run_one_inner(
                     stats.slowest_chunk_idx,
                     stats.slowest_chunk_audio_idx,
                     stats.last_audio_chunk_idx,
-                    stats.last_feature_chunk_idx
+                    stats.last_feature_chunk_idx,
+                    stats.abort_reason.as_deref().unwrap_or("-")
                 );
             }
         } else {
@@ -1184,6 +1257,8 @@ async fn run_pass(
     inflight_chunks: usize,
     offline_mode: bool,
     log_mismatch: bool,
+    gpu_device_id: u32,
+    pass_label: &str,
 ) -> anyhow::Result<(
     Vec<String>,
     Option<String>,
@@ -1194,6 +1269,7 @@ async fn run_pass(
     TimingStats,
 )> {
     let mut timing = TimingStats::new();
+    let mut gpu = GpuTelemetry::new_if_enabled(gpu_device_id);
     // Reset between utterances (worker only processes control at chunk boundaries, so tick it).
     send_settings_and_tick(stt, settings.clone(), backpressure_timeout_ms).await?;
     let needs_reset_ack = settings
@@ -1203,7 +1279,15 @@ async fn run_pass(
         .unwrap_or(false);
     if needs_reset_ack && stop_stats_timeout_ms > 0 {
         let reset_ack =
-            wait_for_reset_ack(stt, utterance_seq, stop_stats_timeout_ms, log_mismatch).await?;
+            wait_for_reset_ack(
+                stt,
+                utterance_id,
+                utterance_seq,
+                stop_stats_timeout_ms,
+                log_mismatch,
+                &mut gpu,
+            )
+            .await?;
         if reset_ack.is_none() {
             return Err(anyhow::anyhow!("reset_ack_timeout"));
         }
@@ -1233,7 +1317,9 @@ async fn run_pass(
     let mut acked_chunks: u64 = 0;
 
     let mut last_ts_us = 0u64;
+    let mut first_audio_sent = false;
     for (idx, sig) in audio_signals.iter().cloned().enumerate() {
+        gpu_tick(&mut gpu);
         if let Some(limit) = timeout {
             if timing.start.elapsed() >= limit {
                 err = Some("timeout_feeding_audio".to_string());
@@ -1242,6 +1328,10 @@ async fn run_pass(
         }
         if let Signal::Audio { timestamp_us, .. } = sig {
             last_ts_us = timestamp_us;
+        }
+        if !first_audio_sent {
+            gpu_stage(&mut gpu, utterance_id, utterance_seq, "first_audio_send", None);
+            first_audio_sent = true;
         }
         if let Some(limit) = inflight_limit {
             loop {
@@ -1268,11 +1358,14 @@ async fn run_pass(
                     &mut stop_stats,
                     &mut acked_chunks,
                     print_partials,
+                    utterance_id,
+                    &mut gpu,
                 )
                 .await?;
                 if err.is_some() {
                     break;
                 }
+                gpu_tick(&mut gpu);
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
             if err.is_some() {
@@ -1311,6 +1404,8 @@ async fn run_pass(
                     &mut stop_stats,
                     &mut acked_chunks,
                     print_partials,
+                    utterance_id,
+                    &mut gpu,
                 )?;
             }
             Err(e) => {
@@ -1331,8 +1426,11 @@ async fn run_pass(
             &mut stop_stats,
             &mut acked_chunks,
             print_partials,
+            utterance_id,
+            &mut gpu,
         )
         .await?;
+        gpu_tick(&mut gpu);
         if realtime {
             let ms = realtime_ms.unwrap_or(chunk_ms.max(1)) as u64;
             tokio::time::sleep(Duration::from_millis(ms.max(1))).await;
@@ -1387,11 +1485,14 @@ async fn run_pass(
                         &mut stop_stats,
                         &mut acked_chunks,
                         print_partials,
+                        utterance_id,
+                        &mut gpu,
                     )
                     .await?;
                     if err.is_some() {
                         break;
                     }
+                    gpu_tick(&mut gpu);
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 if err.is_some() {
@@ -1430,6 +1531,8 @@ async fn run_pass(
                         &mut stop_stats,
                         &mut acked_chunks,
                         print_partials,
+                        utterance_id,
+                        &mut gpu,
                     )?;
                 }
                 Err(e) => {
@@ -1450,8 +1553,11 @@ async fn run_pass(
                 &mut stop_stats,
                 &mut acked_chunks,
                 print_partials,
+                utterance_id,
+                &mut gpu,
             )
             .await?;
+            gpu_tick(&mut gpu);
             if realtime {
                 let ms = realtime_ms.unwrap_or(chunk_ms.max(1)) as u64;
                 tokio::time::sleep(Duration::from_millis(ms.max(1))).await;
@@ -1507,11 +1613,14 @@ async fn run_pass(
                         &mut stop_stats,
                         &mut acked_chunks,
                         print_partials,
+                        utterance_id,
+                        &mut gpu,
                     )
                     .await?;
                     if err.is_some() {
                         break;
                     }
+                    gpu_tick(&mut gpu);
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 if err.is_some() {
@@ -1550,6 +1659,8 @@ async fn run_pass(
                         &mut stop_stats,
                         &mut acked_chunks,
                         print_partials,
+                        utterance_id,
+                        &mut gpu,
                     )?;
                 }
                 Err(e) => {
@@ -1570,8 +1681,11 @@ async fn run_pass(
                 &mut stop_stats,
                 &mut acked_chunks,
                 print_partials,
+                utterance_id,
+                &mut gpu,
             )
             .await?;
+            gpu_tick(&mut gpu);
             if realtime {
                 let ms = realtime_ms.unwrap_or(chunk_ms.max(1)) as u64;
                 tokio::time::sleep(Duration::from_millis(ms.max(1))).await;
@@ -1584,11 +1698,13 @@ async fn run_pass(
 
     // Flush: stop and tick to ensure worker consumes the control message.
     send_settings_and_tick(stt, json!({ "action": "stop" }), backpressure_timeout_ms).await?;
+    gpu_stage(&mut gpu, utterance_id, utterance_seq, "stop_sent", None);
 
     // Wait for a final/error deterministically (bounded by wall-clock to avoid hangs).
     let mut timed_out_wait = false;
     let mut empty_final_deadline: Option<Instant> = None;
     loop {
+        gpu_tick(&mut gpu);
         if let Some(limit) = timeout {
             if timing.start.elapsed() >= limit {
                 timed_out_wait = true;
@@ -1608,6 +1724,8 @@ async fn run_pass(
             &mut stop_stats,
             &mut acked_chunks,
             print_partials,
+            utterance_id,
+            &mut gpu,
         )
         .await?;
         if err.is_some() {
@@ -1634,6 +1752,9 @@ async fn run_pass(
         err = Some("timeout_waiting_for_final".to_string());
     }
 
+    if let Some(gpu) = gpu.as_mut() {
+        gpu.finish(utterance_id, utterance_seq, pass_label);
+    }
     Ok((partials, final_text, final_parts, metrics, err, stop_stats, timing))
 }
 
@@ -1670,10 +1791,12 @@ async fn send_settings_and_tick(
 
 async fn wait_for_stop_stats(
     stt: &mut ParakeetSttProcessor,
+    utterance_id: &str,
     target_utterance_seq: u64,
     stop_stats: &mut Option<StopStats>,
     timeout_ms: u64,
     log_mismatch: bool,
+    gpu: &mut Option<GpuTelemetry>,
 ) -> anyhow::Result<()> {
     if timeout_ms == 0 {
         return Ok(());
@@ -1681,6 +1804,7 @@ async fn wait_for_stop_stats(
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     while stop_stats.is_none() && Instant::now() < deadline {
         loop {
+            gpu_tick(gpu);
             let out = stt.process(Signal::Pulse).await?;
             let Some(sig) = out else { break; };
             let Signal::Computed { source, content } = sig else { continue; };
@@ -1694,6 +1818,12 @@ async fn wait_for_stop_stats(
                         .map(stop_stats_is_pre)
                         .unwrap_or(true);
                     if replace || stop_stats_is_post(&s) {
+                        let phase = if stop_stats_is_post(&s) {
+                            "stop_stats_post"
+                        } else {
+                            "stop_stats_pre"
+                        };
+                        gpu_stage(gpu, utterance_id, target_utterance_seq, phase, None);
                         *stop_stats = Some(s.clone());
                     }
                     if stop_stats_is_post(&s) {
@@ -1710,6 +1840,7 @@ async fn wait_for_stop_stats(
         if stop_stats.is_some() {
             break;
         }
+        gpu_tick(gpu);
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     Ok(())
@@ -1717,9 +1848,11 @@ async fn wait_for_stop_stats(
 
 async fn wait_for_reset_ack(
     stt: &mut ParakeetSttProcessor,
+    utterance_id: &str,
     target_utterance_seq: u64,
     timeout_ms: u64,
     log_mismatch: bool,
+    gpu: &mut Option<GpuTelemetry>,
 ) -> anyhow::Result<Option<ResetAck>> {
     if timeout_ms == 0 {
         return Ok(None);
@@ -1728,6 +1861,7 @@ async fn wait_for_reset_ack(
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     while reset_ack.is_none() && Instant::now() < deadline {
         loop {
+            gpu_tick(gpu);
             let out = stt.process(Signal::Pulse).await?;
             let Some(sig) = out else { break; };
             let Signal::Computed { source, content } = sig else { continue; };
@@ -1736,6 +1870,7 @@ async fn wait_for_reset_ack(
             }
             if let Ok(a) = serde_json::from_str::<ResetAck>(&content) {
                 if matches_utterance_seq(target_utterance_seq, a.utterance_seq) {
+                    gpu_stage(gpu, utterance_id, target_utterance_seq, "reset_ack", None);
                     reset_ack = Some(a);
                     break;
                 } else if log_mismatch {
@@ -1749,6 +1884,7 @@ async fn wait_for_reset_ack(
         if reset_ack.is_some() {
             break;
         }
+        gpu_tick(gpu);
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     Ok(reset_ack)
@@ -1767,6 +1903,8 @@ async fn drain(
     stop_stats: &mut Option<StopStats>,
     chunk_acks: &mut u64,
     print_partials: bool,
+    utterance_id: &str,
+    gpu: &mut Option<GpuTelemetry>,
 ) -> anyhow::Result<()> {
     loop {
         let out = stt.process(Signal::Pulse).await?;
@@ -1786,6 +1924,8 @@ async fn drain(
             stop_stats,
             chunk_acks,
             print_partials,
+            utterance_id,
+            gpu,
         )?;
     }
     Ok(())
@@ -1804,6 +1944,8 @@ fn handle_outputs(
     stop_stats: &mut Option<StopStats>,
     chunk_acks: &mut u64,
     print_partials: bool,
+    utterance_id: &str,
+    gpu: &mut Option<GpuTelemetry>,
 ) -> anyhow::Result<()> {
     let Some(sig) = out else { return Ok(()); };
     let Signal::Computed { source, content } = sig else { return Ok(()); };
@@ -1838,6 +1980,7 @@ fn handle_outputs(
                 "partial" => {
                     if timing.first_partial_ms.is_none() {
                         timing.first_partial_ms = Some(timing.elapsed_ms());
+                        gpu_stage(gpu, utterance_id, target_utterance_seq, "first_partial", None);
                     }
                     if print_partials {
                         eprintln!("  [partial] {}", ev.text);
@@ -1847,6 +1990,7 @@ fn handle_outputs(
                 "final" => {
                     if timing.first_final_ms.is_none() {
                         timing.first_final_ms = Some(timing.elapsed_ms());
+                        gpu_stage(gpu, utterance_id, target_utterance_seq, "first_final", None);
                     }
                     let trimmed = ev.text.trim();
                     if trimmed.is_empty() {
@@ -1889,6 +2033,36 @@ fn handle_outputs(
                 }
             }
         }
+        "stt_slow_chunk" => {
+            if let Ok(slow) = serde_json::from_str::<SlowChunk>(&content) {
+                if matches_utterance_seq(target_utterance_seq, slow.utterance_seq) {
+                    let extra = format!(
+                        "feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={} enc_shape={} length_shape={} profile_idx={} post_stop={} offline_mode={}",
+                        slow.feature_idx,
+                        slow.audio_chunk_idx,
+                        slow.decode_ms,
+                        slow.queue_ms.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+                        slow.enc_shape,
+                        slow.length_shape,
+                        slow.profile_idx,
+                        slow.post_stop,
+                        slow.offline_mode
+                    );
+                    gpu_stage(
+                        gpu,
+                        utterance_id,
+                        target_utterance_seq,
+                        "slow_chunk",
+                        Some(extra.as_str()),
+                    );
+                } else if log_mismatch {
+                    eprintln!(
+                        "[asr_test] drop_event kind=slow_chunk expected_utt_seq={} event_utt_seq={}",
+                        target_utterance_seq, slow.utterance_seq
+                    );
+                }
+            }
+        }
         "stt_stop_stats" => {
             if let Ok(s) = serde_json::from_str::<StopStats>(&content) {
                 if matches_utterance_seq(target_utterance_seq, s.utterance_seq) {
@@ -1897,7 +2071,18 @@ fn handle_outputs(
                         .map(stop_stats_is_pre)
                         .unwrap_or(true);
                     if replace || stop_stats_is_post(&s) {
+                        let stage = if stop_stats_is_post(&s) {
+                            "stop_stats_post"
+                        } else {
+                            "stop_stats_pre"
+                        };
+                        gpu_stage(gpu, utterance_id, target_utterance_seq, stage, None);
                         *stop_stats = Some(s);
+                    }
+                    if err.is_none() {
+                        if let Some(reason) = stop_stats.as_ref().and_then(|v| v.abort_reason.as_deref()) {
+                            *err = Some(reason.to_string());
+                        }
                     }
                 } else if log_mismatch {
                     eprintln!(

@@ -290,6 +290,7 @@ dependencies = [
  "clap",
  "magnolia_config",
  "magnolia_core",
+ "nvml-wrapper",
  "parakeet_stt",
  "serde",
  "serde_json",
