@@ -67,6 +67,11 @@ now located in `/home/emmy/git/trt-asr-engine`.
      --inflight-chunks 1
    ```
 
+   Debug knobs (optional):
+   - `PARAKEET_SLOW_CHUNK_MS` (default 250): log per-chunk decode calls slower than this threshold.
+   - `PARAKEET_ABORT_SLOW_CHUNK_MS` (default 5000): emit `slow_chunk_abort` error after a slow chunk returns.
+   - `PARAKEET_WORKER_JOIN_TIMEOUT_MS` (default 0): cap worker join during restarts (ms).
+
 ## Keyboard Controls
 
 Magnolia is keyboard-first with smart tile navigation:

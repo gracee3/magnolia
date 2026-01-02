@@ -86,6 +86,9 @@ fn poison_reason_from_error(err: &str) -> Option<String> {
     if err.contains("tick_timeout") {
         return Some("tick_timeout".to_string());
     }
+    if err.contains("slow_chunk_abort") {
+        return Some("slow_chunk_abort".to_string());
+    }
     if err == "stop_stats_timeout" {
         return Some("stop_stats_timeout".to_string());
     }

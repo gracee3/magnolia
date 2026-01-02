@@ -1216,10 +1216,15 @@ fn spawn_worker(
             let mut slowest_chunk_ms = 0u64;
             let mut slowest_chunk_idx = 0u64;
             let mut slowest_chunk_audio_idx = 0u64;
+            let mut abort_utterance = false;
             let slow_chunk_threshold_ms: u64 = std::env::var("PARAKEET_SLOW_CHUNK_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(250);
+            let abort_slow_chunk_ms: u64 = std::env::var("PARAKEET_ABORT_SLOW_CHUNK_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(5000);
 
             let mut norm_sum: Vec<f64> = vec![0.0; n_mels];
             let mut norm_sumsq: Vec<f64> = vec![0.0; n_mels];
@@ -1475,6 +1480,9 @@ fn spawn_worker(
                             }
 
                             let decode_ms = t_decode0.elapsed().as_millis() as u64;
+                            let enc_shape = format!("1x{}x{}", n_mels, chunk_frames);
+                            let length_shape = "1".to_string();
+                            let profile_idx = 0u32;
                             if decode_ms >= slow_chunk_threshold_ms {
                                 slow_chunk_count = slow_chunk_count.saturating_add(1);
                                 if decode_ms > slowest_chunk_ms {
@@ -1485,17 +1493,46 @@ fn spawn_worker(
                                 if slow_chunk_count <= 8 {
                                     let queue_ms = received_at_opt.map(|t| t.elapsed().as_millis() as u64);
                                     eprintln!(
-                                        "[parakeet_stt] slow_chunk id={} utt_seq={} feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={:?} post_stop={} offline_mode={}",
+                                        "[parakeet_stt] slow_chunk id={} utt_seq={} feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={:?} enc_shape={} length_shape={} profile_idx={} post_stop={} offline_mode={}",
                                         utterance_id,
                                         utterance_seq,
                                         feature_chunk_idx,
                                         audio_chunk_idx,
                                         decode_ms,
                                         queue_ms,
+                                        enc_shape,
+                                        length_shape,
+                                        profile_idx,
                                         post_stop,
                                         offline_mode
                                     );
                                 }
+                            }
+                            if abort_slow_chunk_ms > 0
+                                && decode_ms >= abort_slow_chunk_ms
+                                && !abort_utterance
+                            {
+                                let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
+                                let msg = format!(
+                                    "slow_chunk_abort decode_ms={} feature_idx={} audio_chunk_idx={} enc_shape={} length_shape={} profile_idx={}",
+                                    decode_ms,
+                                    feature_chunk_idx,
+                                    audio_chunk_idx,
+                                    enc_shape,
+                                    length_shape,
+                                    profile_idx
+                                );
+                                let ev = SttEvent::error(
+                                    -5,
+                                    msg,
+                                    t_ms,
+                                    seq.fetch_add(1, Ordering::Relaxed),
+                                )
+                                .with_utterance_seq(utterance_seq);
+                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                abort_utterance = true;
+                                pending_stop = true;
+                                ok = false;
                             }
                             if ok {
                                 // Poll runtime events
@@ -2111,34 +2148,36 @@ fn spawn_worker(
                     }
                 }
 
-                if offline_mode {
-                    offline_audio.extend(resampled.iter().copied());
-                    if chunk_t0_us.is_none() {
-                        chunk_t0_us = Some(chunk.timestamp_us);
-                    }
-                } else {
-                    // Feed normalized stream into 16k staging buffer (used for feature extraction).
-                    sample_buf_16k.extend(resampled.iter().copied());
-                    if chunk_t0_us.is_none() {
-                        chunk_t0_us = Some(chunk.timestamp_us);
-                    }
+                if !abort_utterance {
+                    if offline_mode {
+                        offline_audio.extend(resampled.iter().copied());
+                        if chunk_t0_us.is_none() {
+                            chunk_t0_us = Some(chunk.timestamp_us);
+                        }
+                    } else {
+                        // Feed normalized stream into 16k staging buffer (used for feature extraction).
+                        sample_buf_16k.extend(resampled.iter().copied());
+                        if chunk_t0_us.is_none() {
+                            chunk_t0_us = Some(chunk.timestamp_us);
+                        }
 
-                    // Process fixed-size audio windows into exactly `chunk_frames` log-mel frames.
-                    let mut ignored_events = 0u32;
-                    while sample_buf_16k.len() >= needed_samples {
-                        let t_us = chunk_t0_us.unwrap_or(chunk.timestamp_us);
-                        let feature_idx = feature_chunk_idx;
-                        feature_chunk_idx = feature_chunk_idx.saturating_add(1);
-                        last_feature_chunk_idx = feature_idx;
-                        if !process_chunk!(
-                            t_us,
-                            Some(chunk.received_at),
-                            false,
-                            &mut ignored_events,
-                            chunk.chunk_idx,
-                            feature_idx
-                        ) {
-                            break;
+                        // Process fixed-size audio windows into exactly `chunk_frames` log-mel frames.
+                        let mut ignored_events = 0u32;
+                        while sample_buf_16k.len() >= needed_samples {
+                            let t_us = chunk_t0_us.unwrap_or(chunk.timestamp_us);
+                            let feature_idx = feature_chunk_idx;
+                            feature_chunk_idx = feature_chunk_idx.saturating_add(1);
+                            last_feature_chunk_idx = feature_idx;
+                            if !process_chunk!(
+                                t_us,
+                                Some(chunk.received_at),
+                                false,
+                                &mut ignored_events,
+                                chunk.chunk_idx,
+                                feature_idx
+                            ) {
+                                break;
+                            }
                         }
                     }
                 }
@@ -2288,6 +2327,9 @@ fn spawn_worker(
                                         break;
                                     }
                                     let decode_ms = t_decode0.elapsed().as_millis() as u64;
+                                    let enc_shape = format!("1x{}x{}", n_mels, frames);
+                                    let length_shape = "1".to_string();
+                                    let profile_idx = 0u32;
                                     if decode_ms >= slow_chunk_threshold_ms {
                                         slow_chunk_count = slow_chunk_count.saturating_add(1);
                                         if decode_ms > slowest_chunk_ms {
@@ -2297,16 +2339,45 @@ fn spawn_worker(
                                         }
                                         if slow_chunk_count <= 8 {
                                             eprintln!(
-                                                "[parakeet_stt] slow_chunk id={} utt_seq={} feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={:?} post_stop=true offline_mode={}",
+                                                "[parakeet_stt] slow_chunk id={} utt_seq={} feature_idx={} audio_chunk_idx={} decode_ms={} queue_ms={:?} enc_shape={} length_shape={} profile_idx={} post_stop=true offline_mode={}",
                                                 utterance_id,
                                                 utterance_seq,
                                                 feature_idx,
                                                 last_audio_chunk_idx,
                                                 decode_ms,
                                                 Option::<u64>::None,
+                                                enc_shape,
+                                                length_shape,
+                                                profile_idx,
                                                 offline_mode
                                             );
                                         }
+                                    }
+                                    if abort_slow_chunk_ms > 0
+                                        && decode_ms >= abort_slow_chunk_ms
+                                        && !abort_utterance
+                                    {
+                                        let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                        let msg = format!(
+                                            "slow_chunk_abort decode_ms={} feature_idx={} audio_chunk_idx={} enc_shape={} length_shape={} profile_idx={}",
+                                            decode_ms,
+                                            feature_idx,
+                                            last_audio_chunk_idx,
+                                            enc_shape,
+                                            length_shape,
+                                            profile_idx
+                                        );
+                                        let ev = SttEvent::error(
+                                            -5,
+                                            msg,
+                                            t_ms,
+                                            seq.fetch_add(1, Ordering::Relaxed),
+                                        )
+                                        .with_utterance_seq(utterance_seq);
+                                        let _ = out_tx.send(WorkerOut::Event(ev));
+                                        abort_utterance = true;
+                                        pending_stop = true;
+                                        break;
                                     }
 
                                     while let Some(ev) = session.poll_event() {
