@@ -50,6 +50,7 @@ Revision window defaults (overridable by env):
 - `PARAKEET_REVISION_TOKENS=8`
 - `PARAKEET_REVISION_STABLE_UPDATES=3`
 - `PARAKEET_REVISION_MAX_AGE_MS=1500`
+- `PARAKEET_UI_MIN_UPDATE_MS=40` (UI cadence throttle)
 
 Endpoint/VAD emits a segment boundary and commits the current partial.
 

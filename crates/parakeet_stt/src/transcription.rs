@@ -50,6 +50,7 @@ pub struct TranscriptConfig {
     pub revision_tokens: usize,
     pub stable_updates: u32,
     pub max_age_ms: u64,
+    pub min_update_interval_ms: u64,
     pub report_every: usize,
     pub max_samples: usize,
 }
@@ -60,6 +61,7 @@ impl Default for TranscriptConfig {
             revision_tokens: 8,
             stable_updates: 3,
             max_age_ms: 1500,
+            min_update_interval_ms: 40,
             report_every: 20,
             max_samples: 200,
         }
@@ -82,6 +84,11 @@ impl TranscriptConfig {
         if let Ok(v) = std::env::var("PARAKEET_REVISION_MAX_AGE_MS") {
             if let Ok(n) = v.parse::<u64>() {
                 cfg.max_age_ms = n;
+            }
+        }
+        if let Ok(v) = std::env::var("PARAKEET_UI_MIN_UPDATE_MS") {
+            if let Ok(n) = v.parse::<u64>() {
+                cfg.min_update_interval_ms = n;
             }
         }
         if let Ok(v) = std::env::var("PARAKEET_LATENCY_REPORT_EVERY") {
@@ -115,6 +122,9 @@ pub struct TranscriptionState {
     last_partial_text: String,
     stable_updates: u32,
     last_change_at: Instant,
+    last_ui_emit: Instant,
+    pending_partial: Option<String>,
+    pending_partial_t_ms: u64,
     latency_samples: VecDeque<u64>,
     stt_latency_samples: VecDeque<u64>,
     decode_samples: VecDeque<u64>,
@@ -138,6 +148,9 @@ impl TranscriptionState {
             last_partial_text: String::new(),
             stable_updates: 0,
             last_change_at: Instant::now(),
+            last_ui_emit: Instant::now() - Duration::from_secs(1),
+            pending_partial: None,
+            pending_partial_t_ms: 0,
             latency_samples: VecDeque::new(),
             stt_latency_samples: VecDeque::new(),
             decode_samples: VecDeque::new(),
@@ -159,6 +172,9 @@ impl TranscriptionState {
         self.last_partial_text.clear();
         self.stable_updates = 0;
         self.last_change_at = Instant::now();
+        self.last_ui_emit = Instant::now() - Duration::from_secs(1);
+        self.pending_partial = None;
+        self.pending_partial_t_ms = 0;
         self.latency_samples.clear();
         self.stt_latency_samples.clear();
         self.decode_samples.clear();
@@ -170,6 +186,7 @@ impl TranscriptionState {
         self.last_decode_ms = metrics.decode_ms;
         self.push_sample(&mut self.stt_latency_samples, metrics.latency_ms);
         self.push_sample(&mut self.decode_samples, metrics.decode_ms);
+        self.flush_pending_if_due(Instant::now());
     }
 
     pub fn apply_event(&mut self, ev: SttEvent) {
@@ -183,13 +200,13 @@ impl TranscriptionState {
 
         match ev.kind.as_str() {
             "partial" => {
-                self.apply_partial(&ev.text, now);
+                self.apply_partial(&ev.text, ev.t_ms, now);
             }
             "final" => {
-                self.apply_final(&ev.text);
+                self.apply_final(&ev.text, now);
             }
             "endpoint" => {
-                self.commit_segment();
+                self.commit_segment(now);
             }
             "error" => {
                 self.last_error = Some(ev.message);
@@ -208,7 +225,19 @@ impl TranscriptionState {
         }
     }
 
-    fn apply_partial(&mut self, new_full: &str, now: Instant) {
+    fn apply_partial(&mut self, new_full: &str, t_ms: u64, now: Instant) {
+        if self.should_throttle(now) {
+            self.pending_partial = Some(new_full.to_string());
+            self.pending_partial_t_ms = t_ms;
+            return;
+        }
+        self.pending_partial = None;
+        self.pending_partial_t_ms = 0;
+        self.apply_partial_internal(new_full, now);
+        self.last_ui_emit = now;
+    }
+
+    fn apply_partial_internal(&mut self, new_full: &str, now: Instant) {
         let old_display = format!("{}{}", self.committed_text, self.partial_text);
         let new_partial = if self.committed_text.is_empty() {
             new_full
@@ -251,17 +280,22 @@ impl TranscriptionState {
         self.update_patch(&old_display, &new_display);
     }
 
-    fn apply_final(&mut self, text: &str) {
+    fn apply_final(&mut self, text: &str, now: Instant) {
+        self.pending_partial = None;
+        self.pending_partial_t_ms = 0;
         if self.partial_text.is_empty() && !text.trim().is_empty() {
             self.committed_text.push_str(text);
         } else {
-            self.commit_segment();
+            self.commit_segment(now);
         }
         let display = format!("{}{}", self.committed_text, self.partial_text);
         self.update_patch("", &display);
+        self.last_ui_emit = now;
     }
 
-    fn commit_segment(&mut self) {
+    fn commit_segment(&mut self, now: Instant) {
+        self.pending_partial = None;
+        self.pending_partial_t_ms = 0;
         if !self.partial_text.is_empty() {
             self.committed_text.push_str(&self.partial_text);
             self.partial_text.clear();
@@ -271,7 +305,8 @@ impl TranscriptionState {
         }
         self.last_partial_text.clear();
         self.stable_updates = 0;
-        self.last_change_at = Instant::now();
+        self.last_change_at = now;
+        self.last_ui_emit = now;
     }
 
     fn update_patch(&mut self, old_display: &str, new_display: &str) {
@@ -303,6 +338,28 @@ impl TranscriptionState {
             dec_p50,
             dec_p95
         );
+    }
+
+    fn should_throttle(&self, now: Instant) -> bool {
+        if self.cfg.min_update_interval_ms == 0 {
+            return false;
+        }
+        now.duration_since(self.last_ui_emit)
+            < Duration::from_millis(self.cfg.min_update_interval_ms)
+    }
+
+    fn flush_pending_if_due(&mut self, now: Instant) {
+        if self.pending_partial.is_none() {
+            return;
+        }
+        if self.should_throttle(now) {
+            return;
+        }
+        if let Some(text) = self.pending_partial.take() {
+            self.pending_partial_t_ms = 0;
+            self.apply_partial_internal(&text, now);
+            self.last_ui_emit = now;
+        }
     }
 }
 

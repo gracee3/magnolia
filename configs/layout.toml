@@ -17,7 +17,7 @@ power_profile = "Normal"
 model_dir = "/home/emmy/git/trt-asr-engine/models/parakeet-tdt-0.6b-v3"
 device = 0
 streaming_encoder_path = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp32.plan"
-use_fp16 = false
+use_fp16 = true
 chunk_frames = 592
 advance_frames = 8
 
