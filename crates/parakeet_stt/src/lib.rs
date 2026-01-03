@@ -785,6 +785,7 @@ pub struct ParakeetSttProcessor {
     utterance_seq: u64,
     final_blank_penalty_delta: f32,
     next_chunk_idx: u64,
+    total_audio_dropped: u64,
 
     // Ensures the worker thread is cleanly stopped before process exit (avoids FFI teardown races).
     worker_join: Option<std::thread::JoinHandle<()>>,
@@ -885,6 +886,7 @@ impl ParakeetSttProcessor {
             utterance_seq: 0,
             final_blank_penalty_delta: 0.0,
             next_chunk_idx: 0,
+            total_audio_dropped: 0,
             worker_join,
         })
     }
@@ -1265,7 +1267,7 @@ fn spawn_worker(
             let mut auto_flush_silence_ms: u64 = 0;  // 0 = disabled, >0 = flush after N ms silence
             let mut speech_active = false;
             let mut silence_start: Option<Instant> = None;
-            let mut last_speech_time = Instant::now();
+            let mut speech_onset: Option<Instant> = None;  // When non-silent audio first appeared
             let mut endpoint_emitted = false;  // Prevent multiple endpoint events per silence
             let mut total_audio_dropped: u64 = 0;
             let mut running_rms = 0.0f32;
@@ -2260,18 +2262,20 @@ fn spawn_worker(
 
                     // Real-time streaming: VAD/endpoint detection
                     if is_silent {
-                        // Silence detected
+                        // Silence detected - reset speech onset tracking
+                        speech_onset = None;
+                        
                         if speech_active {
                             // Speech was active, start silence timer
                             if silence_start.is_none() {
                                 silence_start = Some(Instant::now());
                             }
-                            // Check if silence has exceeded hangover + auto_flush threshold
+                            // Check if silence has exceeded auto_flush threshold
                             if let Some(start) = silence_start {
                                 let silence_ms = start.elapsed().as_millis() as u64;
                                 // Auto-flush endpoint detection
                                 if auto_flush_silence_ms > 0 
-                                    && silence_ms >= silence_hangover_ms + auto_flush_silence_ms 
+                                    && silence_ms >= auto_flush_silence_ms 
                                     && !endpoint_emitted 
                                 {
                                     endpoint_emitted = true;
@@ -2285,22 +2289,23 @@ fn spawn_worker(
                             }
                         }
                     } else {
-                        // Speech detected
+                        // Speech (non-silent audio) detected
+                        silence_start = None;  // Reset silence tracking
+                        
                         if !speech_active {
-                            // Check hangover before activating
-                            let since_last = last_speech_time.elapsed().as_millis() as u64;
-                            if since_last < silence_hangover_ms {
-                                // Transient, keep tracking
-                                last_speech_time = Instant::now();
-                            } else {
-                                // Speech is now active
-                                speech_active = true;
-                                endpoint_emitted = false;
+                            // Track when speech started
+                            if speech_onset.is_none() {
+                                speech_onset = Some(Instant::now());
+                            }
+                            // Check if speech has been stable for hangover period
+                            if let Some(onset) = speech_onset {
+                                let speech_duration_ms = onset.elapsed().as_millis() as u64;
+                                if speech_duration_ms >= silence_hangover_ms {
+                                    speech_active = true;
+                                    endpoint_emitted = false;
+                                }
                             }
                         }
-                        // Reset silence tracking
-                        last_speech_time = Instant::now();
-                        silence_start = None;
                     }
 
                     // 3. Apply internal boost
@@ -2995,6 +3000,17 @@ impl Processor for ParakeetSttProcessor {
                     let res = self.in_tx.try_send(chunk);
                     if res.is_err() {
                         let _ = DBG_STT_AUDIO_DROP_N.fetch_add(1, Ordering::Relaxed);
+                        self.total_audio_dropped += 1;
+                        // Emit audio_dropped event (throttled: every 10th drop)
+                        if self.total_audio_dropped % 10 == 1 {
+                            let evt = SttEvent::audio_dropped(
+                                1,
+                                self.total_audio_dropped,
+                                timestamp_us / 1000,
+                                0, // seq will be assigned by consumer if needed
+                            );
+                            push_with_backpressure(&mut self.pending_out, evt.to_signal(), 64);
+                        }
                     }
                     res.is_ok()
                 };

@@ -10,6 +10,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use magnolia_core::{ControlSignal, Processor, Signal};
 
+/// Real-time streaming configuration
+#[derive(Debug, Clone, Default)]
+pub struct StreamingSettings {
+    pub min_partial_emit_ms: Option<u64>,
+    pub silence_hangover_ms: Option<u64>,
+    pub auto_flush_silence_ms: Option<u64>,
+    pub gate_threshold: Option<f32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParakeetEngine {
     pub model_dir: PathBuf,
@@ -163,11 +172,15 @@ fn static_settings(
     backpressure: bool,
     backpressure_timeout_ms: u64,
     final_blank_penalty_delta: f32,
+    streaming: &StreamingSettings,
 ) -> serde_json::Value {
-    json!({
+    // Default gate_threshold to 0.0 (disabled) unless streaming settings override
+    let gate_threshold = streaming.gate_threshold.unwrap_or(0.0);
+    
+    let mut settings = json!({
         "action": "configure",
-        // Testing policy: disable RMS gate so low-amplitude LibriSpeech utterances are not zeroed.
-        "gate_threshold": 0.0,
+        // Gate threshold for silence detection (0.0 = disabled for testing, 0.005 = typical for VAD)
+        "gate_threshold": gate_threshold,
         // Slightly higher gain for low-amplitude LibriSpeech samples.
         "pre_gain": pre_gain,
         // Testing policy: do not filter punctuation-only/short hypotheses.
@@ -178,7 +191,20 @@ fn static_settings(
         "backpressure": backpressure,
         "backpressure_timeout_ms": backpressure_timeout_ms,
         "final_blank_penalty_delta": final_blank_penalty_delta
-    })
+    });
+    
+    // Add streaming settings if provided
+    if let Some(ms) = streaming.min_partial_emit_ms {
+        settings["min_partial_emit_ms"] = json!(ms);
+    }
+    if let Some(ms) = streaming.silence_hangover_ms {
+        settings["silence_hangover_ms"] = json!(ms);
+    }
+    if let Some(ms) = streaming.auto_flush_silence_ms {
+        settings["auto_flush_silence_ms"] = json!(ms);
+    }
+    
+    settings
 }
 
 fn reset_settings(utterance_id: &str, utterance_seq: u64, offline_mode: bool) -> serde_json::Value {
@@ -198,6 +224,7 @@ async fn build_worker(
     backpressure: bool,
     backpressure_timeout_ms: u64,
     final_blank_penalty_delta: f32,
+    streaming: &StreamingSettings,
 ) -> anyhow::Result<ParakeetSttProcessor> {
     let stt_state = Arc::new(Mutex::new(ParakeetSttState::default()));
     let mut stt = ParakeetSttProcessor::new(
@@ -212,6 +239,7 @@ async fn build_worker(
         backpressure,
         backpressure_timeout_ms,
         final_blank_penalty_delta,
+        streaming,
     );
     send_settings_and_tick(&mut stt, static_cfg, backpressure_timeout_ms).await?;
     Ok(stt)
@@ -532,6 +560,7 @@ pub async fn run_manifest(
     backpressure_retry_sleep_us: u64,
     inflight_chunks: usize,
     jobs: usize,
+    streaming: &StreamingSettings,
 ) -> anyhow::Result<Vec<UtteranceResult>> {
     if backpressure && std::env::var("PARAKEET_AUDIO_QUEUE_CAP").is_err() {
         std::env::set_var("PARAKEET_AUDIO_QUEUE_CAP", "2");
@@ -555,6 +584,7 @@ pub async fn run_manifest(
             backpressure,
             backpressure_timeout_ms,
             final_blank_penalty_delta,
+            streaming,
         )
         .await?;
 
@@ -604,6 +634,7 @@ pub async fn run_manifest(
                     backpressure,
                     backpressure_timeout_ms,
                     final_blank_penalty_delta,
+                    streaming,
                 )
                 .await?;
             }
@@ -639,6 +670,7 @@ pub async fn run_manifest(
         let engine = engine.clone();
         let debug_ids = debug_ids.to_vec();
         let normalize_mode = normalize_mode.clone();
+        let streaming = streaming.clone();
         let handle = tokio::spawn(async move {
             let worker_label = format!("asr_test_worker_{}", worker_id);
             let mut stt = build_worker(
@@ -649,6 +681,7 @@ pub async fn run_manifest(
                 backpressure,
                 backpressure_timeout_ms,
                 final_blank_penalty_delta,
+                &streaming,
             )
             .await?;
 
@@ -699,6 +732,7 @@ pub async fn run_manifest(
                         backpressure,
                         backpressure_timeout_ms,
                         final_blank_penalty_delta,
+                        &streaming,
                     )
                     .await?;
                 }
@@ -2036,6 +2070,20 @@ fn handle_outputs(
                         target_utterance_seq, a.utterance_seq
                     );
                 }
+            }
+            return Ok(());
+        }
+        "stt_endpoint" => {
+            // VAD endpoint detection event
+            if print_partials {
+                eprintln!("  [endpoint] silence detected");
+            }
+            return Ok(());
+        }
+        "stt_audio_dropped" => {
+            // Backpressure notification
+            if print_partials {
+                eprintln!("  [audio_dropped] chunks dropped due to backpressure");
             }
             return Ok(());
         }

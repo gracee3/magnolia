@@ -152,6 +152,23 @@ pub(crate) struct Args {
     /// Number of worker jobs to process utterances in parallel.
     #[arg(long, default_value_t = 1)]
     jobs: usize,
+
+    // Real-time streaming controls
+    /// Minimum time (ms) between partial hypothesis emissions.
+    #[arg(long)]
+    min_partial_emit_ms: Option<u64>,
+
+    /// Silence hangover (ms) before speech is considered "active".
+    #[arg(long)]
+    silence_hangover_ms: Option<u64>,
+
+    /// Auto-flush after this many ms of silence (0 = disabled).
+    #[arg(long)]
+    auto_flush_silence_ms: Option<u64>,
+
+    /// Energy gate threshold for silence detection (0.0 = disabled, 0.005 = typical).
+    #[arg(long)]
+    gate_threshold: Option<f32>,
 }
 
 #[tokio::main]
@@ -287,6 +304,13 @@ async fn main() -> anyhow::Result<()> {
         args.stop_stats_timeout_ms
     );
 
+    let streaming = infer::StreamingSettings {
+        min_partial_emit_ms: args.min_partial_emit_ms,
+        silence_hangover_ms: args.silence_hangover_ms,
+        auto_flush_silence_ms: args.auto_flush_silence_ms,
+        gate_threshold: args.gate_threshold,
+    };
+
     let results = infer::run_manifest(
         &selected,
         &engine,
@@ -309,6 +333,7 @@ async fn main() -> anyhow::Result<()> {
         args.backpressure_retry_sleep_us,
         args.inflight_chunks,
         args.jobs,
+        &streaming,
     )
     .await?;
 
