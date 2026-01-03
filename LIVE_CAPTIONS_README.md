@@ -54,15 +54,22 @@ Revision window defaults (overridable by env):
 
 Endpoint/VAD emits a segment boundary and commits the current partial.
 
+UI cadence tuning (hot):
+- Transcription tile controls: `Up/Down` adjust cadence in 20ms steps, `R` resets to 40ms.
+- Tile settings: `ui_min_update_ms` (persisted in `configs/layout.toml` when saved).
+
 ## Latency Instrumentation
 
 Metrics emitted/logged:
-- End-to-end latency (`audio timestamp -> UI update`) in `[transcription] latency_ms ...`
+- End-to-end latency (`audio timestamp -> UI update`) plus per-stage breakdown in `[transcription] latency_ms ...`
+- Queue/backpressure + UI throttle counters in `[transcription] queues ...`
+- Per-flush latency traces in `[transcription] latency_trace ...` (enable with `RUST_LOG=debug`)
 - STT latency + decode latency from `stt_metrics`
 - Slow chunk + queue delay warnings via `stt_slow_chunk`
 
 Tuning env vars:
 - `PARAKEET_LATENCY_REPORT_EVERY=20`
+- `PARAKEET_LATENCY_REPORT_INTERVAL_MS=5000`
 - `PARAKEET_LATENCY_MAX_SAMPLES=200`
 
 ## FP16 Toggle

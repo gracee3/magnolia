@@ -17,7 +17,7 @@ audio_input = { path = "../../crates/audio_input", features = ["tile-rendering"]
 audio_dsp = { path = "../../crates/audio_dsp", features = ["tile-rendering"] }
 audio_output = { path = "../../crates/audio_output", features = ["tile-rendering"] }
 parakeet_stt = { path = "../../crates/parakeet_stt", features = ["tile-rendering"] }
-magnolia-config = { path = "../../crates/magnolia-config" }
+magnolia_config = { path = "../../crates/magnolia-config" }
 magnolia_module_api = { path = "../../crates/magnolia-module-api" }
 # nannou_egui = "0.19.0"
 toml = "0.8"

@@ -45,6 +45,13 @@ fn split_by_token_window(text: &str, keep_tokens: usize) -> (&str, &str) {
     (&text[..split_at], &text[split_at..])
 }
 
+fn push_sample(buf: &mut VecDeque<u64>, val: u64, max_samples: usize) {
+    if buf.len() >= max_samples {
+        let _ = buf.pop_front();
+    }
+    buf.push_back(val);
+}
+
 #[derive(Debug, Clone)]
 pub struct TranscriptConfig {
     pub revision_tokens: usize,
@@ -52,6 +59,7 @@ pub struct TranscriptConfig {
     pub max_age_ms: u64,
     pub min_update_interval_ms: u64,
     pub report_every: usize,
+    pub report_interval_ms: u64,
     pub max_samples: usize,
 }
 
@@ -63,6 +71,7 @@ impl Default for TranscriptConfig {
             max_age_ms: 1500,
             min_update_interval_ms: 40,
             report_every: 20,
+            report_interval_ms: 5000,
             max_samples: 200,
         }
     }
@@ -96,6 +105,11 @@ impl TranscriptConfig {
                 cfg.report_every = n.max(1);
             }
         }
+        if let Ok(v) = std::env::var("PARAKEET_LATENCY_REPORT_INTERVAL_MS") {
+            if let Ok(n) = v.parse::<u64>() {
+                cfg.report_interval_ms = n.max(250);
+            }
+        }
         if let Ok(v) = std::env::var("PARAKEET_LATENCY_MAX_SAMPLES") {
             if let Ok(n) = v.parse::<usize>() {
                 cfg.max_samples = n.max(10);
@@ -117,6 +131,16 @@ pub struct TranscriptionState {
     pub last_patch_start: usize,
     pub last_patch_text: String,
     pub dropped_audio_total: u64,
+    pub last_capture_end_ms: u64,
+    pub last_dsp_done_ms: u64,
+    pub last_infer_done_ms: u64,
+    pub last_q_audio_len: usize,
+    pub last_q_audio_age_ms: u64,
+    pub last_q_staging_samples: usize,
+    pub last_q_staging_ms: u64,
+    pub hyp_received: u64,
+    pub hyp_rendered: u64,
+    pub hyp_dropped_throttle: u64,
 
     cfg: TranscriptConfig,
     last_partial_text: String,
@@ -124,10 +148,23 @@ pub struct TranscriptionState {
     last_change_at: Instant,
     last_ui_emit: Instant,
     pending_partial: Option<String>,
-    pending_partial_t_ms: u64,
-    latency_samples: VecDeque<u64>,
+    pending_set_at: Option<Instant>,
+    last_report_at: Instant,
+    last_report_hyp_received: u64,
+    last_report_hyp_rendered: u64,
+    last_report_hyp_dropped: u64,
     stt_latency_samples: VecDeque<u64>,
     decode_samples: VecDeque<u64>,
+    cap_to_dsp_samples: VecDeque<u64>,
+    dsp_to_infer_samples: VecDeque<u64>,
+    infer_to_ui_samples: VecDeque<u64>,
+    e2e_samples: VecDeque<u64>,
+    window_max_audio_queue_len: usize,
+    window_max_audio_queue_age_ms: u64,
+    window_max_staging_samples: usize,
+    window_max_staging_ms: u64,
+    window_max_ui_pending_len: usize,
+    window_max_ui_pending_age_ms: u64,
     update_count: usize,
 }
 
@@ -144,16 +181,39 @@ impl TranscriptionState {
             last_patch_start: 0,
             last_patch_text: String::new(),
             dropped_audio_total: 0,
+            last_capture_end_ms: 0,
+            last_dsp_done_ms: 0,
+            last_infer_done_ms: 0,
+            last_q_audio_len: 0,
+            last_q_audio_age_ms: 0,
+            last_q_staging_samples: 0,
+            last_q_staging_ms: 0,
+            hyp_received: 0,
+            hyp_rendered: 0,
+            hyp_dropped_throttle: 0,
             cfg,
             last_partial_text: String::new(),
             stable_updates: 0,
             last_change_at: Instant::now(),
             last_ui_emit: Instant::now() - Duration::from_secs(1),
             pending_partial: None,
-            pending_partial_t_ms: 0,
-            latency_samples: VecDeque::new(),
+            pending_set_at: None,
+            last_report_at: Instant::now(),
+            last_report_hyp_received: 0,
+            last_report_hyp_rendered: 0,
+            last_report_hyp_dropped: 0,
             stt_latency_samples: VecDeque::new(),
             decode_samples: VecDeque::new(),
+            cap_to_dsp_samples: VecDeque::new(),
+            dsp_to_infer_samples: VecDeque::new(),
+            infer_to_ui_samples: VecDeque::new(),
+            e2e_samples: VecDeque::new(),
+            window_max_audio_queue_len: 0,
+            window_max_audio_queue_age_ms: 0,
+            window_max_staging_samples: 0,
+            window_max_staging_ms: 0,
+            window_max_ui_pending_len: 0,
+            window_max_ui_pending_age_ms: 0,
             update_count: 0,
         }
     }
@@ -169,38 +229,88 @@ impl TranscriptionState {
         self.last_patch_start = 0;
         self.last_patch_text.clear();
         self.dropped_audio_total = 0;
+        self.last_capture_end_ms = 0;
+        self.last_dsp_done_ms = 0;
+        self.last_infer_done_ms = 0;
+        self.last_q_audio_len = 0;
+        self.last_q_audio_age_ms = 0;
+        self.last_q_staging_samples = 0;
+        self.last_q_staging_ms = 0;
+        self.hyp_received = 0;
+        self.hyp_rendered = 0;
+        self.hyp_dropped_throttle = 0;
         self.last_partial_text.clear();
         self.stable_updates = 0;
         self.last_change_at = Instant::now();
         self.last_ui_emit = Instant::now() - Duration::from_secs(1);
         self.pending_partial = None;
-        self.pending_partial_t_ms = 0;
-        self.latency_samples.clear();
+        self.pending_set_at = None;
+        self.last_report_at = Instant::now();
+        self.last_report_hyp_received = 0;
+        self.last_report_hyp_rendered = 0;
+        self.last_report_hyp_dropped = 0;
         self.stt_latency_samples.clear();
         self.decode_samples.clear();
+        self.cap_to_dsp_samples.clear();
+        self.dsp_to_infer_samples.clear();
+        self.infer_to_ui_samples.clear();
+        self.e2e_samples.clear();
+        self.window_max_audio_queue_len = 0;
+        self.window_max_audio_queue_age_ms = 0;
+        self.window_max_staging_samples = 0;
+        self.window_max_staging_ms = 0;
+        self.window_max_ui_pending_len = 0;
+        self.window_max_ui_pending_age_ms = 0;
         self.update_count = 0;
+    }
+
+    pub fn ui_min_update_interval_ms(&self) -> u64 {
+        self.cfg.min_update_interval_ms
+    }
+
+    pub fn set_ui_min_update_interval_ms(&mut self, ms: u64) {
+        self.cfg.min_update_interval_ms = ms;
     }
 
     pub fn apply_metrics(&mut self, metrics: SttMetrics) {
         self.last_stt_latency_ms = metrics.latency_ms;
         self.last_decode_ms = metrics.decode_ms;
-        self.push_sample(&mut self.stt_latency_samples, metrics.latency_ms);
-        self.push_sample(&mut self.decode_samples, metrics.decode_ms);
+        let max_samples = self.cfg.max_samples;
+        push_sample(&mut self.stt_latency_samples, metrics.latency_ms, max_samples);
+        push_sample(&mut self.decode_samples, metrics.decode_ms, max_samples);
         self.flush_pending_if_due(Instant::now());
     }
 
     pub fn apply_event(&mut self, ev: SttEvent) {
         let now = Instant::now();
-        let now_ms = now_ms();
-        self.last_update_ms = now_ms;
-        if ev.t_ms > 0 && now_ms >= ev.t_ms {
-            self.last_latency_ms = now_ms - ev.t_ms;
-            self.push_sample(&mut self.latency_samples, self.last_latency_ms);
+        self.last_update_ms = now_ms();
+        if ev.t_capture_end_ms > 0 {
+            self.last_capture_end_ms = ev.t_capture_end_ms;
+        }
+        if ev.t_dsp_done_ms > 0 {
+            self.last_dsp_done_ms = ev.t_dsp_done_ms;
+        }
+        if ev.t_infer_done_ms > 0 {
+            self.last_infer_done_ms = ev.t_infer_done_ms;
+        }
+        if ev.t_dsp_done_ms > 0 || ev.t_capture_end_ms > 0 || ev.t_infer_done_ms > 0 {
+            self.last_q_audio_len = ev.q_audio_len;
+            self.last_q_audio_age_ms = ev.q_audio_age_ms;
+            self.last_q_staging_samples = ev.q_staging_samples;
+            self.last_q_staging_ms = ev.q_staging_ms;
+            self.window_max_audio_queue_len =
+                self.window_max_audio_queue_len.max(self.last_q_audio_len);
+            self.window_max_audio_queue_age_ms = self
+                .window_max_audio_queue_age_ms
+                .max(self.last_q_audio_age_ms);
+            self.window_max_staging_samples =
+                self.window_max_staging_samples.max(self.last_q_staging_samples);
+            self.window_max_staging_ms = self.window_max_staging_ms.max(self.last_q_staging_ms);
         }
 
         match ev.kind.as_str() {
             "partial" => {
-                self.apply_partial(&ev.text, ev.t_ms, now);
+                self.apply_partial(&ev.text, now);
             }
             "final" => {
                 self.apply_final(&ev.text, now);
@@ -219,25 +329,25 @@ impl TranscriptionState {
             _ => {}
         }
 
-        self.update_count = self.update_count.saturating_add(1);
-        if self.cfg.report_every > 0 && (self.update_count % self.cfg.report_every) == 0 {
-            self.log_latency_stats();
-        }
     }
 
-    fn apply_partial(&mut self, new_full: &str, t_ms: u64, now: Instant) {
+    fn apply_partial(&mut self, new_full: &str, now: Instant) {
+        self.hyp_received = self.hyp_received.saturating_add(1);
         if self.should_throttle(now) {
+            if self.pending_partial.is_some() {
+                self.hyp_dropped_throttle = self.hyp_dropped_throttle.saturating_add(1);
+            }
             self.pending_partial = Some(new_full.to_string());
-            self.pending_partial_t_ms = t_ms;
+            self.pending_set_at = Some(now);
             return;
         }
         self.pending_partial = None;
-        self.pending_partial_t_ms = 0;
-        self.apply_partial_internal(new_full, now);
+        self.pending_set_at = None;
+        self.apply_partial_internal(new_full, now, 0, 0);
         self.last_ui_emit = now;
     }
 
-    fn apply_partial_internal(&mut self, new_full: &str, now: Instant) {
+    fn apply_partial_internal(&mut self, new_full: &str, now: Instant, ui_pending_len: usize, ui_pending_age_ms: u64) {
         let old_display = format!("{}{}", self.committed_text, self.partial_text);
         let new_partial = if self.committed_text.is_empty() {
             new_full
@@ -278,11 +388,13 @@ impl TranscriptionState {
 
         let new_display = format!("{}{}", self.committed_text, self.partial_text);
         self.update_patch(&old_display, &new_display);
+        self.hyp_rendered = self.hyp_rendered.saturating_add(1);
+        self.record_flush(now, ui_pending_len, ui_pending_age_ms);
     }
 
     fn apply_final(&mut self, text: &str, now: Instant) {
         self.pending_partial = None;
-        self.pending_partial_t_ms = 0;
+        self.pending_set_at = None;
         if self.partial_text.is_empty() && !text.trim().is_empty() {
             self.committed_text.push_str(text);
         } else {
@@ -291,11 +403,12 @@ impl TranscriptionState {
         let display = format!("{}{}", self.committed_text, self.partial_text);
         self.update_patch("", &display);
         self.last_ui_emit = now;
+        self.record_flush(now, 0, 0);
     }
 
     fn commit_segment(&mut self, now: Instant) {
         self.pending_partial = None;
-        self.pending_partial_t_ms = 0;
+        self.pending_set_at = None;
         if !self.partial_text.is_empty() {
             self.committed_text.push_str(&self.partial_text);
             self.partial_text.clear();
@@ -315,29 +428,137 @@ impl TranscriptionState {
         self.last_patch_text = new_display.chars().skip(prefix).collect();
     }
 
-    fn push_sample(&mut self, buf: &mut VecDeque<u64>, val: u64) {
-        if buf.len() >= self.cfg.max_samples {
-            let _ = buf.pop_front();
+    fn record_flush(&mut self, now: Instant, ui_pending_len: usize, ui_pending_age_ms: u64) {
+        let now_ms = now_ms();
+        let mut cap_to_dsp_ms = 0;
+        let mut dsp_to_infer_ms = 0;
+        let mut infer_to_ui_ms = 0;
+        let mut e2e_ms = 0;
+        let max_samples = self.cfg.max_samples;
+
+        if self.last_capture_end_ms > 0 && self.last_dsp_done_ms >= self.last_capture_end_ms {
+            cap_to_dsp_ms = self.last_dsp_done_ms - self.last_capture_end_ms;
+            push_sample(&mut self.cap_to_dsp_samples, cap_to_dsp_ms, max_samples);
         }
-        buf.push_back(val);
+        if self.last_dsp_done_ms > 0 && self.last_infer_done_ms >= self.last_dsp_done_ms {
+            dsp_to_infer_ms = self.last_infer_done_ms - self.last_dsp_done_ms;
+            push_sample(&mut self.dsp_to_infer_samples, dsp_to_infer_ms, max_samples);
+        }
+        if self.last_infer_done_ms > 0 && now_ms >= self.last_infer_done_ms {
+            infer_to_ui_ms = now_ms - self.last_infer_done_ms;
+            push_sample(&mut self.infer_to_ui_samples, infer_to_ui_ms, max_samples);
+        }
+        if self.last_capture_end_ms > 0 && now_ms >= self.last_capture_end_ms {
+            e2e_ms = now_ms - self.last_capture_end_ms;
+            self.last_latency_ms = e2e_ms;
+            push_sample(&mut self.e2e_samples, e2e_ms, max_samples);
+        }
+
+        self.window_max_ui_pending_len = self.window_max_ui_pending_len.max(ui_pending_len);
+        self.window_max_ui_pending_age_ms =
+            self.window_max_ui_pending_age_ms.max(ui_pending_age_ms);
+
+        if self.last_capture_end_ms > 0 || self.last_infer_done_ms > 0 {
+            log::debug!(
+                "[transcription] latency_trace cap_to_dsp_ms={} dsp_to_infer_ms={} infer_to_ui_ms={} e2e_ms={} audio_q_len={} audio_q_age_ms={} staging_samples={} staging_ms={} ui_pending_len={} ui_pending_age_ms={}",
+                cap_to_dsp_ms,
+                dsp_to_infer_ms,
+                infer_to_ui_ms,
+                e2e_ms,
+                self.last_q_audio_len,
+                self.last_q_audio_age_ms,
+                self.last_q_staging_samples,
+                self.last_q_staging_ms,
+                ui_pending_len,
+                ui_pending_age_ms
+            );
+        }
+
+        self.update_count = self.update_count.saturating_add(1);
+        self.maybe_report(now);
     }
 
-    fn log_latency_stats(&self) {
-        let p50 = percentile(&self.latency_samples, 0.50);
-        let p95 = percentile(&self.latency_samples, 0.95);
+    fn maybe_report(&mut self, now: Instant) {
+        let due_by_time = self.cfg.report_interval_ms > 0
+            && now.duration_since(self.last_report_at)
+                >= Duration::from_millis(self.cfg.report_interval_ms);
+        let due_by_count =
+            self.cfg.report_every > 0 && (self.update_count % self.cfg.report_every) == 0;
+        if !due_by_time && !due_by_count {
+            return;
+        }
+        self.last_report_at = now;
+        self.log_latency_stats();
+    }
+
+    fn log_latency_stats(&mut self) {
+        let e2e_p50 = percentile(&self.e2e_samples, 0.50);
+        let e2e_p95 = percentile(&self.e2e_samples, 0.95);
+        let e2e_p99 = percentile(&self.e2e_samples, 0.99);
+        let cap_p50 = percentile(&self.cap_to_dsp_samples, 0.50);
+        let cap_p95 = percentile(&self.cap_to_dsp_samples, 0.95);
+        let cap_p99 = percentile(&self.cap_to_dsp_samples, 0.99);
+        let dsp_p50 = percentile(&self.dsp_to_infer_samples, 0.50);
+        let dsp_p95 = percentile(&self.dsp_to_infer_samples, 0.95);
+        let dsp_p99 = percentile(&self.dsp_to_infer_samples, 0.99);
+        let ui_p50 = percentile(&self.infer_to_ui_samples, 0.50);
+        let ui_p95 = percentile(&self.infer_to_ui_samples, 0.95);
+        let ui_p99 = percentile(&self.infer_to_ui_samples, 0.99);
         let stt_p50 = percentile(&self.stt_latency_samples, 0.50);
         let stt_p95 = percentile(&self.stt_latency_samples, 0.95);
+        let stt_p99 = percentile(&self.stt_latency_samples, 0.99);
         let dec_p50 = percentile(&self.decode_samples, 0.50);
         let dec_p95 = percentile(&self.decode_samples, 0.95);
+        let dec_p99 = percentile(&self.decode_samples, 0.99);
         log::info!(
-            "[transcription] latency_ms p50={} p95={} stt_ms p50={} p95={} decode_ms p50={} p95={}",
-            p50,
-            p95,
+            "[transcription] latency_ms e2e_p50={} e2e_p95={} e2e_p99={} cap_dsp_p50={} cap_dsp_p95={} cap_dsp_p99={} dsp_inf_p50={} dsp_inf_p95={} dsp_inf_p99={} inf_ui_p50={} inf_ui_p95={} inf_ui_p99={} stt_p50={} stt_p95={} stt_p99={} decode_p50={} decode_p95={} decode_p99={}",
+            e2e_p50,
+            e2e_p95,
+            e2e_p99,
+            cap_p50,
+            cap_p95,
+            cap_p99,
+            dsp_p50,
+            dsp_p95,
+            dsp_p99,
+            ui_p50,
+            ui_p95,
+            ui_p99,
             stt_p50,
             stt_p95,
+            stt_p99,
             dec_p50,
-            dec_p95
+            dec_p95,
+            dec_p99
         );
+
+        let hyp_recv = self.hyp_received.saturating_sub(self.last_report_hyp_received);
+        let hyp_render = self.hyp_rendered.saturating_sub(self.last_report_hyp_rendered);
+        let hyp_drop = self
+            .hyp_dropped_throttle
+            .saturating_sub(self.last_report_hyp_dropped);
+        log::info!(
+            "[transcription] queues audio_len_max={} audio_age_max_ms={} staging_samples_max={} staging_ms_max={} ui_pending_max={} ui_pending_age_ms={} hyp_recv={} hyp_render={} hyp_drop={}",
+            self.window_max_audio_queue_len,
+            self.window_max_audio_queue_age_ms,
+            self.window_max_staging_samples,
+            self.window_max_staging_ms,
+            self.window_max_ui_pending_len,
+            self.window_max_ui_pending_age_ms,
+            hyp_recv,
+            hyp_render,
+            hyp_drop
+        );
+
+        self.last_report_hyp_received = self.hyp_received;
+        self.last_report_hyp_rendered = self.hyp_rendered;
+        self.last_report_hyp_dropped = self.hyp_dropped_throttle;
+        self.window_max_audio_queue_len = 0;
+        self.window_max_audio_queue_age_ms = 0;
+        self.window_max_staging_samples = 0;
+        self.window_max_staging_ms = 0;
+        self.window_max_ui_pending_len = 0;
+        self.window_max_ui_pending_age_ms = 0;
     }
 
     fn should_throttle(&self, now: Instant) -> bool {
@@ -356,8 +577,12 @@ impl TranscriptionState {
             return;
         }
         if let Some(text) = self.pending_partial.take() {
-            self.pending_partial_t_ms = 0;
-            self.apply_partial_internal(&text, now);
+            let ui_pending_age_ms = self
+                .pending_set_at
+                .map(|t| now.duration_since(t).as_millis() as u64)
+                .unwrap_or(0);
+            self.pending_set_at = None;
+            self.apply_partial_internal(&text, now, 1, ui_pending_age_ms);
             self.last_ui_emit = now;
         }
     }

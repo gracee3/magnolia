@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
 
@@ -19,6 +20,77 @@ pub mod tile;
 pub mod transcription;
 
 pub use transcription::{TranscriptConfig, TranscriptionSink, TranscriptionState};
+
+/// Simple offline WAV transcription for the demo binary.
+pub fn transcribe_wav(
+    model_dir: &std::path::Path,
+    wav_path: &std::path::Path,
+    device_id: i32,
+) -> anyhow::Result<String> {
+    let mut reader = hound::WavReader::open(wav_path)?;
+    let spec = reader.spec();
+    if spec.sample_rate != 16000 || spec.channels != 1 {
+        anyhow::bail!(
+            "WAV must be 16kHz mono (got {} Hz, {} channels)",
+            spec.sample_rate,
+            spec.channels
+        );
+    }
+    let audio: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader.samples::<f32>().map(|s| s.unwrap()).collect(),
+        hound::SampleFormat::Int => {
+            let bits = spec.bits_per_sample;
+            if bits == 0 || bits > 32 {
+                anyhow::bail!("Unsupported PCM bit depth: {}", bits);
+            }
+            let denom = (1u64 << (bits - 1)) as f32;
+            reader
+                .samples::<i32>()
+                .map(|s| s.unwrap() as f32 / denom)
+                .collect()
+        }
+    };
+
+    let config = FeatureConfig::default();
+    let extractor = LogMelExtractor::new(config);
+    let n_mels = extractor.n_mels();
+    let features_tc = extractor.compute(&audio);
+    let num_frames = features_tc.len() / n_mels;
+    if num_frames == 0 {
+        return Ok(String::new());
+    }
+
+    let mut features_bct = vec![0.0f32; n_mels * num_frames];
+    for t in 0..num_frames {
+        for m in 0..n_mels {
+            features_bct[m * num_frames + t] = features_tc[t * n_mels + m];
+        }
+    }
+
+    let model_dir = model_dir
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("model_dir must be valid UTF-8"))?;
+    let session = parakeet_trt::ParakeetSessionSafe::new(model_dir, device_id, true)?;
+    session.push_features(&features_bct, num_frames)?;
+
+    let mut out = String::new();
+    while let Some(event) = session.poll_event() {
+        match event {
+            parakeet_trt::TranscriptionEvent::FinalText { text, .. } => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&text);
+            }
+            parakeet_trt::TranscriptionEvent::Error { message } => {
+                anyhow::bail!("Inference error: {}", message);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(out)
+}
 
 // #region agent log
 fn dbglog(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
@@ -41,6 +113,13 @@ fn dbglog(hypothesis_id: &str, location: &str, message: &str, data: serde_json::
     {
         let _ = writeln!(f, "{}", payload.to_string());
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 static DBG_STT_AUDIO_N: AtomicU64 = AtomicU64::new(0);
@@ -102,10 +181,42 @@ pub struct SttEvent {
     pub stable_prefix_len: usize,
 
     #[serde(default)]
+    pub t_capture_end_ms: u64,
+
+    #[serde(default)]
+    pub t_dsp_done_ms: u64,
+
+    #[serde(default)]
+    pub t_infer_done_ms: u64,
+
+    #[serde(default)]
+    pub q_audio_len: usize,
+
+    #[serde(default)]
+    pub q_audio_age_ms: u64,
+
+    #[serde(default)]
+    pub q_staging_samples: usize,
+
+    #[serde(default)]
+    pub q_staging_ms: u64,
+
+    #[serde(default)]
     pub code: i32,
 
     #[serde(default)]
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SttTrace {
+    pub t_capture_end_ms: u64,
+    pub t_dsp_done_ms: u64,
+    pub t_infer_done_ms: u64,
+    pub q_audio_len: usize,
+    pub q_audio_age_ms: u64,
+    pub q_staging_samples: usize,
+    pub q_staging_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,6 +431,13 @@ impl SttEvent {
             t_ms,
             text,
             stable_prefix_len,
+            t_capture_end_ms: 0,
+            t_dsp_done_ms: 0,
+            t_infer_done_ms: 0,
+            q_audio_len: 0,
+            q_audio_age_ms: 0,
+            q_staging_samples: 0,
+            q_staging_ms: 0,
             code: 0,
             message: String::new(),
         }
@@ -334,6 +452,13 @@ impl SttEvent {
             t_ms,
             text,
             stable_prefix_len: 0,
+            t_capture_end_ms: 0,
+            t_dsp_done_ms: 0,
+            t_infer_done_ms: 0,
+            q_audio_len: 0,
+            q_audio_age_ms: 0,
+            q_staging_samples: 0,
+            q_staging_ms: 0,
             code: 0,
             message: String::new(),
         }
@@ -348,6 +473,13 @@ impl SttEvent {
             t_ms,
             text: String::new(),
             stable_prefix_len: 0,
+            t_capture_end_ms: 0,
+            t_dsp_done_ms: 0,
+            t_infer_done_ms: 0,
+            q_audio_len: 0,
+            q_audio_age_ms: 0,
+            q_staging_samples: 0,
+            q_staging_ms: 0,
             code,
             message,
         }
@@ -364,6 +496,13 @@ impl SttEvent {
             t_ms,
             text: String::new(),
             stable_prefix_len: silence_ms as usize, // Reuse field for silence duration
+            t_capture_end_ms: 0,
+            t_dsp_done_ms: 0,
+            t_infer_done_ms: 0,
+            q_audio_len: 0,
+            q_audio_age_ms: 0,
+            q_staging_samples: 0,
+            q_staging_ms: 0,
             code: 0,
             message: String::new(),
         }
@@ -379,6 +518,13 @@ impl SttEvent {
             t_ms,
             text: String::new(),
             stable_prefix_len: dropped_count as usize,
+            t_capture_end_ms: 0,
+            t_dsp_done_ms: 0,
+            t_infer_done_ms: 0,
+            q_audio_len: 0,
+            q_audio_age_ms: 0,
+            q_staging_samples: 0,
+            q_staging_ms: 0,
             code: total_dropped as i32,
             message: String::new(),
         }
@@ -386,6 +532,17 @@ impl SttEvent {
 
     pub fn with_utterance_seq(mut self, utterance_seq: u64) -> Self {
         self.utterance_seq = utterance_seq;
+        self
+    }
+
+    pub fn with_trace(mut self, trace: SttTrace) -> Self {
+        self.t_capture_end_ms = trace.t_capture_end_ms;
+        self.t_dsp_done_ms = trace.t_dsp_done_ms;
+        self.t_infer_done_ms = trace.t_infer_done_ms;
+        self.q_audio_len = trace.q_audio_len;
+        self.q_audio_age_ms = trace.q_audio_age_ms;
+        self.q_staging_samples = trace.q_staging_samples;
+        self.q_staging_ms = trace.q_staging_ms;
         self
     }
 }
@@ -1392,6 +1549,7 @@ fn spawn_worker(
             macro_rules! process_chunk {
                 (
                     $timestamp_us:expr,
+                    $capture_end_us:expr,
                     $received_at:expr,
                     $post_stop:expr,
                     $post_stop_events:expr,
@@ -1399,6 +1557,7 @@ fn spawn_worker(
                     $feature_chunk_idx:expr
                 ) => {{
                     let timestamp_us: u64 = $timestamp_us;
+                    let capture_end_us: u64 = $capture_end_us;
                     let received_at_opt: Option<Instant> = $received_at;
                     let post_stop: bool = $post_stop;
                     let post_stop_events = $post_stop_events;
@@ -1553,6 +1712,20 @@ fn spawn_worker(
 
                             // Push features to runtime.
                             // NOTE: current Parakeet runtime is chunk-scoped; later todo will make it true token-streaming.
+                            let t_capture_end_ms = if capture_end_us > 0 {
+                                capture_end_us / 1000
+                            } else {
+                                0
+                            };
+                            let t_dsp_done_ms = now_ms();
+                            let q_audio_len = in_rx.len();
+                            let q_audio_age_ms = if t_capture_end_ms > 0 && t_dsp_done_ms >= t_capture_end_ms {
+                                t_dsp_done_ms - t_capture_end_ms
+                            } else {
+                                0
+                            };
+                            let q_staging_samples = sample_buf_16k.len();
+                            let q_staging_ms = ((q_staging_samples as u64) * 1000) / 16_000;
                             StageTimes::mark_if_none(&mut stage_times.first_decode);
                             let t_decode0 = Instant::now();
                             session.set_debug_context(
@@ -1580,6 +1753,7 @@ fn spawn_worker(
                             }
                             // #endregion
 
+                            let mut push_err: Option<String> = None;
                             match session.push_features(&bct, chunk_frames) {
                                 Ok(_) => {
                                     // #region agent log
@@ -1606,17 +1780,33 @@ fn spawn_worker(
                                         );
                                     }
                                     // #endregion
-                                    let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
-                                    let ev = SttEvent::error(
-                                        -4,
-                                        format!("push_features failed: {e}"),
-                                        t_ms,
-                                        seq.fetch_add(1, Ordering::Relaxed),
-                                    )
-                                    .with_utterance_seq(utterance_seq);
-                                    let _ = out_tx.send(WorkerOut::Event(ev));
-                                    ok = false;
+                                    push_err = Some(e.to_string());
                                 }
+                            }
+
+                            let t_infer_done_ms = now_ms();
+                            let trace = SttTrace {
+                                t_capture_end_ms,
+                                t_dsp_done_ms,
+                                t_infer_done_ms,
+                                q_audio_len,
+                                q_audio_age_ms,
+                                q_staging_samples,
+                                q_staging_ms,
+                            };
+
+                            if let Some(err) = push_err {
+                                let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
+                                let ev = SttEvent::error(
+                                    -4,
+                                    format!("push_features failed: {err}"),
+                                    t_ms,
+                                    seq.fetch_add(1, Ordering::Relaxed),
+                                )
+                                .with_utterance_seq(utterance_seq)
+                                .with_trace(trace);
+                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                ok = false;
                             }
 
                             let decode_ms = t_decode0.elapsed().as_millis() as u64;
@@ -1752,7 +1942,8 @@ fn spawn_worker(
                                                 t_ms,
                                                 seq.fetch_add(1, Ordering::Relaxed),
                                             )
-                                            .with_utterance_seq(utterance_seq);
+                                            .with_utterance_seq(utterance_seq)
+                                            .with_trace(trace);
                                             let _ = out_tx.try_send(WorkerOut::Event(ev));
                                             if post_stop {
                                                 *post_stop_events = (*post_stop_events).saturating_add(1);
@@ -1808,7 +1999,8 @@ fn spawn_worker(
                                                 t_ms,
                                                 seq.fetch_add(1, Ordering::Relaxed),
                                             )
-                                            .with_utterance_seq(utterance_seq);
+                                            .with_utterance_seq(utterance_seq)
+                                            .with_trace(trace);
                                             let _ = out_tx.send(WorkerOut::Event(ev));
                                             if post_stop {
                                                 *post_stop_events = (*post_stop_events).saturating_add(1);
@@ -2406,6 +2598,7 @@ fn spawn_worker(
                             last_feature_chunk_idx = feature_idx;
                             if !process_chunk!(
                                 t_us,
+                                chunk.timestamp_us,
                                 Some(chunk.received_at),
                                 false,
                                 &mut ignored_events,
@@ -2743,6 +2936,7 @@ fn spawn_worker(
                                 last_feature_chunk_idx = feature_idx;
                                 if !process_chunk!(
                                     t_us,
+                                    last_audio_ts_us,
                                     None,
                                     true,
                                     &mut post_stop_events,
@@ -2771,6 +2965,7 @@ fn spawn_worker(
                                 last_feature_chunk_idx = feature_idx;
                                 if !process_chunk!(
                                     t_us,
+                                    last_audio_ts_us,
                                     None,
                                     true,
                                     &mut post_stop_events,

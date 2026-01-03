@@ -12,6 +12,7 @@ crossbeam-channel = "0.5"
 realfft = "3.3"
 rustfft = "6.2"
 log = "0.4"
+hound = "3.5"
 
 # Pull Parakeet's existing Rust bindings + feature extractor via the sibling repo.
 features = { path = "../../../trt-asr-engine/rust/features" }

@@ -225,18 +225,20 @@ impl TileRenderer for TranscriptionTile {
             TextAlignment::Center,
         );
 
-        let (committed, partial, latency_ms, stt_ms, decode_ms, err, dropped) = if let Ok(s) = self.state.lock() {
+        let (committed, partial, latency_ms, stt_ms, decode_ms, ui_min_update_ms, err, dropped) =
+            if let Ok(s) = self.state.lock() {
             (
                 s.committed_text.clone(),
                 s.partial_text.clone(),
                 s.last_latency_ms,
                 s.last_stt_latency_ms,
                 s.last_decode_ms,
+                s.ui_min_update_interval_ms(),
                 s.last_error.clone(),
                 s.dropped_audio_total,
             )
         } else {
-            (String::new(), String::new(), 0, 0, 0, None, 0)
+            (String::new(), String::new(), 0, 0, 0, 40, None, 0)
         };
 
         let padding = 12.0;
@@ -282,7 +284,10 @@ impl TileRenderer for TranscriptionTile {
             }
         }
 
-        let stats = format!("E2E: {}ms  STT: {}ms  Dec: {}ms  Drop: {}", latency_ms, stt_ms, decode_ms, dropped);
+        let stats = format!(
+            "E2E: {}ms  STT: {}ms  Dec: {}ms  UI: {}ms  Drop: {}",
+            latency_ms, stt_ms, decode_ms, ui_min_update_ms, dropped
+        );
         draw_text(
             draw,
             FontId::PlexMonoRegular,
@@ -308,7 +313,65 @@ impl TileRenderer for TranscriptionTile {
 
     fn render_controls(&self, draw: &Draw, rect: Rect, ctx: &RenderContext) -> bool {
         self.render_monitor(draw, rect, ctx);
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            "UI cadence: Up/Down adjust, R reset (40ms)",
+            pt2(rect.left() + 12.0, rect.bottom() + 6.0),
+            9.0,
+            srgba(0.4, 0.5, 0.6, 0.7),
+            TextAlignment::Left,
+        );
         false
+    }
+
+    fn handle_key(&mut self, key: Key, _ctrl: bool, _shift: bool) -> bool {
+        let step_ms = 20u64;
+        if let Ok(mut s) = self.state.lock() {
+            let current = s.ui_min_update_interval_ms();
+            let next = match key {
+                Key::Up => Some(current.saturating_add(step_ms)),
+                Key::Down => Some(current.saturating_sub(step_ms)),
+                Key::R => Some(40),
+                _ => None,
+            };
+            if let Some(ms) = next {
+                s.set_ui_min_update_interval_ms(ms);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn settings_schema(&self) -> Option<serde_json::Value> {
+        Some(json!({
+            "type": "object",
+            "properties": {
+                "ui_min_update_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000,
+                    "default": 40
+                }
+            }
+        }))
+    }
+
+    fn apply_settings(&mut self, settings: &serde_json::Value) {
+        if let Some(ms) = settings.get("ui_min_update_ms").and_then(|v| v.as_u64()) {
+            if let Ok(mut s) = self.state.lock() {
+                s.set_ui_min_update_interval_ms(ms);
+            }
+        }
+    }
+
+    fn get_settings(&self) -> serde_json::Value {
+        let ms = if let Ok(s) = self.state.lock() {
+            s.ui_min_update_interval_ms()
+        } else {
+            40
+        };
+        json!({ "ui_min_update_ms": ms })
     }
 
     fn prefers_gpu(&self) -> bool {
