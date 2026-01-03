@@ -7,6 +7,10 @@ pub struct ParakeetSttSettings {
     pub model_dir: PathBuf,
     pub device: u32,
     pub vocab_path: PathBuf,
+    pub streaming_encoder_path: Option<PathBuf>,
+    pub use_fp16: bool,
+    pub chunk_frames: Option<usize>,
+    pub advance_frames: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -14,6 +18,14 @@ struct ParakeetSttToml {
     model_dir: PathBuf,
     #[serde(default = "default_device")]
     device: u32,
+    #[serde(default)]
+    streaming_encoder_path: Option<PathBuf>,
+    #[serde(default)]
+    use_fp16: bool,
+    #[serde(default)]
+    chunk_frames: Option<usize>,
+    #[serde(default)]
+    advance_frames: Option<usize>,
 }
 
 fn default_device() -> u32 {
@@ -86,9 +98,21 @@ pub fn load_parakeet_stt_settings() -> anyhow::Result<ParakeetSttSettings> {
         anyhow::anyhow!("Missing [parakeet_stt] config in layout.toml (needs model_dir, optional device)")
     })?;
     let vocab = validate_parakeet_assets(&cfg.model_dir)?;
+    let streaming_encoder_path = if let Some(path) = cfg.streaming_encoder_path {
+        if !path.exists() {
+            anyhow::bail!("parakeet_stt.streaming_encoder_path does not exist: {}", path.display());
+        }
+        Some(path)
+    } else {
+        None
+    };
     Ok(ParakeetSttSettings {
         model_dir: cfg.model_dir,
         device: cfg.device,
         vocab_path: vocab,
+        streaming_encoder_path,
+        use_fp16: cfg.use_fp16,
+        chunk_frames: cfg.chunk_frames,
+        advance_frames: cfg.advance_frames,
     })
 }

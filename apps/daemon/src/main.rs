@@ -13,6 +13,12 @@ use audio_input::tile::AudioVisTile;
 use audio_input::{AudioInputSettings, AudioInputSource, AudioInputTile, AudioVizRingSink};
 use audio_output::tile::AudioOutputTile;
 use audio_output::{AudioOutputSettings, AudioOutputSink, AudioOutputState};
+use magnolia_config::load_parakeet_stt_settings;
+use parakeet_stt::tile::{ParakeetSttControlTile, TranscriptionTile};
+use parakeet_stt::{
+    ParakeetRuntimeConfig, ParakeetSttProcessor, ParakeetSttState, TranscriptConfig,
+    TranscriptionSink, TranscriptionState,
+};
 // use magnolia_core::ring_buffer; // Removed usage
 
 // Layout editor and visualizer modules
@@ -238,6 +244,65 @@ fn model(app: &App) -> Model {
     patch_bay.register_module(dsp_schema);
     if let Err(e) = module_host.spawn(ProcessorAdapter::new(audio_dsp), 100) {
         log::error!("Failed to spawn audio DSP: {}", e);
+    }
+
+    // Parakeet STT + Transcription modules/tiles
+    let stt_state = std::sync::Arc::new(std::sync::Mutex::new(ParakeetSttState::default()));
+    let transcription_state = std::sync::Arc::new(std::sync::Mutex::new(TranscriptionState::new(
+        TranscriptConfig::from_env(),
+    )));
+    tile_registry.register(TranscriptionTile::new(
+        "transcription",
+        transcription_state.clone(),
+    ));
+
+    match load_parakeet_stt_settings() {
+        Ok(cfg) => {
+            let encoder_override_path = cfg.streaming_encoder_path.map(|p| p.to_string_lossy().to_string());
+            let default_chunk_frames = if encoder_override_path.is_some() { 592usize } else { 256usize };
+            let default_advance_frames = if encoder_override_path.is_some() {
+                8usize
+            } else {
+                (default_chunk_frames / 2).max(1)
+            };
+            let runtime = ParakeetRuntimeConfig {
+                model_dir: cfg.model_dir.to_string_lossy().to_string(),
+                device_id: cfg.device as i32,
+                use_fp16: cfg.use_fp16,
+                encoder_override_path,
+                chunk_frames: cfg.chunk_frames.unwrap_or(default_chunk_frames),
+                advance_frames: cfg.advance_frames.unwrap_or(default_advance_frames),
+            };
+
+            match ParakeetSttProcessor::new("parakeet_stt", runtime, stt_state.clone()) {
+                Ok(stt) => {
+                    let stt_schema = stt.schema();
+                    patch_bay.register_module(stt_schema);
+                    if let Err(e) = module_host.spawn(ProcessorAdapter::new(stt), 100) {
+                        log::error!("Failed to spawn parakeet_stt: {}", e);
+                    } else if let Some(sender) = module_host.get_sender("parakeet_stt") {
+                        tile_registry.register(ParakeetSttControlTile::new(
+                            "parakeet_stt",
+                            sender,
+                            stt_state.clone(),
+                        ));
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to init parakeet_stt: {}", e);
+                }
+            }
+
+            let transcription_sink = TranscriptionSink::new("transcription", transcription_state.clone());
+            let transcription_schema = transcription_sink.schema();
+            patch_bay.register_module(transcription_schema);
+            if let Err(e) = module_host.spawn(SinkAdapter::new(transcription_sink), 100) {
+                log::error!("Failed to spawn transcription sink: {}", e);
+            }
+        }
+        Err(e) => {
+            log::error!("Parakeet STT settings missing: {}", e);
+        }
     }
 
     let audio_viz_sink = AudioVizRingSink::new("audio_viz", viz_tx, vis_latency, vis_sr, vis_ch);

@@ -13,6 +13,14 @@ rows = [
 is_sleeping = false
 power_profile = "Normal"
 
+[parakeet_stt]
+model_dir = "/home/emmy/git/trt-asr-engine/models/parakeet-tdt-0.6b-v3"
+device = 0
+streaming_encoder_path = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp32.plan"
+use_fp16 = false
+chunk_frames = 592
+advance_frames = 8
+
 [[tiles]]
 id = "audio_viz"
 col = 0
@@ -82,6 +90,32 @@ lowpass_hz = 2000.0
 mute = "m"
 
 [[tiles]]
+id = "transcription"
+col = 0
+row = 1
+colspan = 2
+rowspan = 2
+module = "transcription"
+enabled = true
+
+[tiles.settings.config]
+
+[tiles.settings.keybinds]
+
+[[tiles]]
+id = "parakeet_stt"
+col = 3
+row = 1
+colspan = 1
+rowspan = 1
+module = "parakeet_stt"
+enabled = true
+
+[tiles.settings.config]
+
+[tiles.settings.keybinds]
+
+[[tiles]]
 id = "clock"
 col = 2
 row = 0
@@ -119,3 +153,17 @@ source_module = "audio_dsp"
 source_port = "audio_out"
 sink_module = "audio_output"
 sink_port = "audio_in"
+
+[[patches]]
+id = "p4"
+source_module = "audio_dsp"
+source_port = "audio_out"
+sink_module = "parakeet_stt"
+sink_port = "audio_in"
+
+[[patches]]
+id = "p5"
+source_module = "parakeet_stt"
+source_port = "stt_out"
+sink_module = "transcription"
+sink_port = "stt_in"

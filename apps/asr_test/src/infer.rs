@@ -23,6 +23,10 @@ pub struct StreamingSettings {
 pub struct ParakeetEngine {
     pub model_dir: PathBuf,
     pub device_id: i32,
+    pub use_fp16: bool,
+    pub encoder_override_path: Option<PathBuf>,
+    pub chunk_frames: usize,
+    pub advance_frames: usize,
 }
 
 pub fn resolve_parakeet_engine(args: &crate::Args) -> anyhow::Result<ParakeetEngine> {
@@ -43,12 +47,35 @@ pub fn resolve_parakeet_engine(args: &crate::Args) -> anyhow::Result<ParakeetEng
         (None, None) => 0,
     };
 
+    let encoder_override_path = base
+        .as_ref()
+        .and_then(|b| b.streaming_encoder_path.clone());
+    let use_fp16 = base.as_ref().map(|b| b.use_fp16).unwrap_or(false);
+    let default_chunk_frames = if encoder_override_path.is_some() { 592usize } else { 256usize };
+    let default_advance_frames = if encoder_override_path.is_some() {
+        8usize
+    } else {
+        (default_chunk_frames / 2).max(1)
+    };
+    let chunk_frames = base
+        .as_ref()
+        .and_then(|b| b.chunk_frames)
+        .unwrap_or(default_chunk_frames);
+    let advance_frames = base
+        .as_ref()
+        .and_then(|b| b.advance_frames)
+        .unwrap_or(default_advance_frames);
+
     // Validate engines + vocab (even though vocab isn't needed directly here, this matches daemon behavior).
     let _vocab = magnolia_config::validate_parakeet_assets(&model_dir)?;
 
     Ok(ParakeetEngine {
         model_dir,
         device_id: device_u32 as i32,
+        use_fp16,
+        encoder_override_path,
+        chunk_frames,
+        advance_frames,
     })
 }
 
@@ -227,12 +254,18 @@ async fn build_worker(
     streaming: &StreamingSettings,
 ) -> anyhow::Result<ParakeetSttProcessor> {
     let stt_state = Arc::new(Mutex::new(ParakeetSttState::default()));
-    let mut stt = ParakeetSttProcessor::new(
-        id,
-        engine.model_dir.to_string_lossy().to_string(),
-        engine.device_id,
-        stt_state,
-    )?;
+    let runtime = parakeet_stt::ParakeetRuntimeConfig {
+        model_dir: engine.model_dir.to_string_lossy().to_string(),
+        device_id: engine.device_id,
+        use_fp16: engine.use_fp16,
+        encoder_override_path: engine
+            .encoder_override_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
+        chunk_frames: engine.chunk_frames,
+        advance_frames: engine.advance_frames,
+    };
+    let mut stt = ParakeetSttProcessor::new(id, runtime, stt_state)?;
     let static_cfg = static_settings(
         normalize_mode,
         pre_gain,

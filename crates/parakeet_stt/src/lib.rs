@@ -16,6 +16,9 @@ use realfft::num_complex;
 
 #[cfg(feature = "tile-rendering")]
 pub mod tile;
+pub mod transcription;
+
+pub use transcription::{TranscriptConfig, TranscriptionSink, TranscriptionState};
 
 // #region agent log
 fn dbglog(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
@@ -289,6 +292,22 @@ pub struct ParakeetSttState {
     pub decode_ms: u64,
     pub rtf: f32,
     pub last_seq: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParakeetRuntimeConfig {
+    pub model_dir: String,
+    pub device_id: i32,
+    pub use_fp16: bool,
+    pub encoder_override_path: Option<String>,
+    pub chunk_frames: usize,
+    pub advance_frames: usize,
+}
+
+impl ParakeetRuntimeConfig {
+    pub fn is_streaming_encoder(&self) -> bool {
+        self.encoder_override_path.is_some()
+    }
 }
 
 impl SttEvent {
@@ -845,7 +864,7 @@ enum WorkerOut {
 }
 
 impl ParakeetSttProcessor {
-    pub fn new(id: &str, model_dir: String, device_id: i32, state: Arc<Mutex<ParakeetSttState>>) -> anyhow::Result<Self> {
+    pub fn new(id: &str, runtime: ParakeetRuntimeConfig, state: Arc<Mutex<ParakeetSttState>>) -> anyhow::Result<Self> {
         // A slightly larger buffer reduces short-term backpressure drops which can
         // starve the decoder of contiguous audio.
         let mut audio_queue_cap = 256usize;
@@ -860,14 +879,7 @@ impl ParakeetSttProcessor {
         let (ctrl_tx, ctrl_rx) = crossbeam_channel::bounded::<SttControl>(64);
         let (out_tx, out_rx) = crossbeam_channel::bounded::<WorkerOut>(128);
 
-        let worker_join = Some(spawn_worker(
-            model_dir,
-            device_id,
-            in_rx,
-            ctrl_rx,
-            out_tx,
-            state.clone(),
-        ));
+        let worker_join = Some(spawn_worker(runtime, in_rx, ctrl_rx, out_tx, state.clone()));
 
         Ok(Self {
             id: id.to_string(),
@@ -1188,8 +1200,7 @@ fn build_stop_stats(
 }
 
 fn spawn_worker(
-    model_dir: String,
-    device_id: i32,
+    runtime: ParakeetRuntimeConfig,
     in_rx: Receiver<AudioChunk>,
     ctrl_rx: Receiver<SttControl>,
     out_tx: Sender<WorkerOut>,
@@ -1212,7 +1223,13 @@ fn spawn_worker(
             }
 
             let mut utterance_seq = 0u64;
-            let session = match ParakeetSessionSafe::new(&model_dir, device_id, true) {
+            if let Some(path) = runtime.encoder_override_path.as_deref() {
+                std::env::set_var("PARAKEET_STREAMING_ENCODER_PATH", path);
+            } else {
+                std::env::remove_var("PARAKEET_STREAMING_ENCODER_PATH");
+            }
+
+            let session = match ParakeetSessionSafe::new(&runtime.model_dir, runtime.device_id, runtime.use_fp16) {
                 Ok(s) => s,
                 Err(e) => {
                     let ev = SttEvent::error(
@@ -1231,24 +1248,56 @@ fn spawn_worker(
             let mut resampled = Vec::<f32>::new();
             let mut resampler: Option<LinearResampler16k> = None;
 
+            let streaming_encoder = runtime.is_streaming_encoder();
+
             // Tradeoff: chunk size impacts both decoding quality and responsiveness.
-            // 256 frames (~2.56s) provides more context and tends to reduce truncation in offline tests.
-            // 128 frames (~1.28s) is faster but can under-decode for LibriSpeech.
-            // 64 frames  (~0.64s) produced all-blank decoding (T_enc=8) in runtime evidence.
-            let mut chunk_frames: usize = 256;
+            // Streaming encoder uses large context (592/584) with small advance to keep latency low.
+            let mut chunk_frames: usize = runtime.chunk_frames;
+            let mut advance_frames: usize = runtime.advance_frames;
             if let Ok(v) = std::env::var("PARAKEET_CHUNK_FRAMES") {
                 if let Ok(n) = v.parse::<usize>() {
-                    if (16..=256).contains(&n) {
-                        chunk_frames = n;
-                    }
+                    chunk_frames = n;
                 }
+            }
+            if let Ok(v) = std::env::var("PARAKEET_ADVANCE_FRAMES") {
+                if let Ok(n) = v.parse::<usize>() {
+                    advance_frames = n;
+                }
+            }
+            let (min_chunk, max_chunk, default_chunk) = if streaming_encoder {
+                (584usize, 592usize, 592usize)
+            } else {
+                (16usize, 256usize, 256usize)
+            };
+            if chunk_frames < min_chunk || chunk_frames > max_chunk {
+                eprintln!(
+                    "[parakeet_stt] invalid chunk_frames={} (expected {}..={} for {})",
+                    chunk_frames,
+                    min_chunk,
+                    max_chunk,
+                    if streaming_encoder { "streaming encoder" } else { "classic encoder" }
+                );
+                chunk_frames = default_chunk;
+            }
+            if advance_frames == 0 || advance_frames > chunk_frames {
+                let fallback = if streaming_encoder {
+                    8usize
+                } else {
+                    (chunk_frames / 2).max(1)
+                };
+                eprintln!(
+                    "[parakeet_stt] invalid advance_frames={} (chunk_frames={}), using {}",
+                    advance_frames,
+                    chunk_frames,
+                    fallback
+                );
+                advance_frames = fallback;
             }
             let cfg = FeatureConfig::default();
             let n_mels = cfg.n_mels;
             let extractor = LogMelExtractor::new(cfg);
             let needed_samples = extractor_needed_samples(chunk_frames);
-            // Overlap by 50%: decode more often without shrinking context.
-            let advance_samples = (extractor_advance_samples(chunk_frames) / 2).max(1);
+            let advance_samples = extractor_advance_samples(advance_frames).max(1);
 
             let mut bct = vec![0.0f32; n_mels * chunk_frames];
             let mut chunk_t0_us: Option<u64> = None;
@@ -1801,7 +1850,7 @@ fn spawn_worker(
                                 if let Some(received_at) = received_at_opt {
                                     // Telemetry (best-effort): latency and RTF.
                                     if last_metrics_emit.elapsed() >= metrics_interval {
-                                        let audio_chunk_ms = (chunk_frames as u64) * 10; // 64 frames * 10ms hop
+                                        let audio_chunk_ms = (advance_frames as u64) * 10; // advance frames * 10ms hop
                                         let rtf = if audio_chunk_ms > 0 {
                                             decode_ms as f32 / audio_chunk_ms as f32
                                         } else {
@@ -1846,7 +1895,7 @@ fn spawn_worker(
                     }
 
                     if ok {
-                        // Advance by hop_length*chunk_frames samples; keep STFT overlap in buffer.
+                        // Advance by hop_length*advance_frames samples; keep STFT overlap in buffer.
                         for _ in 0..advance_samples {
                             let _ = sample_buf_16k.pop_front();
                         }
