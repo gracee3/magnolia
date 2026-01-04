@@ -133,6 +133,17 @@ fn should_log_throttled(last_ms: &AtomicU64, interval_ms: u64) -> bool {
         .is_ok()
 }
 
+fn log_emit_event(kind: &str, seq: u64, t_ms: u64, text_len: usize, text_preview: &str) {
+    log::info!(
+        "stt_emit kind={} seq={} t_ms={} text_len={} text_preview=\"{}\"",
+        kind,
+        seq,
+        t_ms,
+        text_len,
+        text_preview
+    );
+}
+
 static DBG_STT_AUDIO_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_OUT_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_AUDIO_DROP_N: AtomicU64 = AtomicU64::new(0);
@@ -1413,14 +1424,16 @@ fn spawn_worker(
             let session = match ParakeetSessionSafe::new(&runtime.model_dir, runtime.device_id, runtime.use_fp16) {
                 Ok(s) => s,
                 Err(e) => {
-                    let ev = SttEvent::error(
-                        -1,
-                        format!("failed to create parakeet session: {e}"),
-                        0,
-                        seq.fetch_add(1, Ordering::Relaxed),
-                    )
+                    let msg = format!("failed to create parakeet session: {e}");
+                    let text_len = msg.chars().count();
+                    let text_preview = msg.chars().take(60).collect::<String>();
+                    let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                    let ev = SttEvent::error(-1, msg, 0, ev_seq)
                     .with_utterance_seq(utterance_seq);
-                    let _ = out_tx.send(WorkerOut::Event(ev));
+                    let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                    if sent {
+                        log_emit_event("error", ev_seq, 0, text_len, &text_preview);
+                    }
                     return;
                 }
             };
@@ -1875,15 +1888,17 @@ fn spawn_worker(
 
                             if let Some(err) = push_err {
                                 let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
-                                let ev = SttEvent::error(
-                                    -4,
-                                    format!("push_features failed: {err}"),
-                                    t_ms,
-                                    seq.fetch_add(1, Ordering::Relaxed),
-                                )
+                                let msg = format!("push_features failed: {err}");
+                                let text_len = msg.chars().count();
+                                let text_preview = msg.chars().take(60).collect::<String>();
+                                let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                let ev = SttEvent::error(-4, msg, t_ms, ev_seq)
                                 .with_utterance_seq(utterance_seq)
                                 .with_trace(trace);
-                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                if sent {
+                                    log_emit_event("error", ev_seq, t_ms, text_len, &text_preview);
+                                }
                                 ok = false;
                             }
 
@@ -1948,14 +1963,15 @@ fn spawn_worker(
                                     length_shape,
                                     profile_idx
                                 );
-                                let ev = SttEvent::error(
-                                    -5,
-                                    msg,
-                                    t_ms,
-                                    seq.fetch_add(1, Ordering::Relaxed),
-                                )
+                                let text_len = msg.chars().count();
+                                let text_preview = msg.chars().take(60).collect::<String>();
+                                let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                let ev = SttEvent::error(-5, msg, t_ms, ev_seq)
                                 .with_utterance_seq(utterance_seq);
-                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                if sent {
+                                    log_emit_event("error", ev_seq, t_ms, text_len, &text_preview);
+                                }
                                 abort_utterance = true;
                                 abort_reason = Some("slow_chunk_abort".to_string());
                                 pending_stop = true;
@@ -2013,15 +2029,21 @@ fn spawn_worker(
                                             let stable_prefix_len = stable_prefix_len.min(text.chars().count());
                                             last_partial_text = text.clone();
 
+                                            let text_len = text.chars().count();
+                                            let text_preview = text.chars().take(60).collect::<String>();
+                                            let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                             let ev = SttEvent::partial(
                                                 text,
                                                 stable_prefix_len,
                                                 t_ms,
-                                                seq.fetch_add(1, Ordering::Relaxed),
+                                                ev_seq,
                                             )
                                             .with_utterance_seq(utterance_seq)
                                             .with_trace(trace);
-                                            let _ = out_tx.try_send(WorkerOut::Event(ev));
+                                            let sent = out_tx.try_send(WorkerOut::Event(ev)).is_ok();
+                                            if sent {
+                                                log_emit_event("partial", ev_seq, t_ms, text_len, &text_preview);
+                                            }
                                             if post_stop {
                                                 *post_stop_events = (*post_stop_events).saturating_add(1);
                                             }
@@ -2071,14 +2093,16 @@ fn spawn_worker(
                                             );
                                             // #endregion
                                             let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
-                                            let ev = SttEvent::final_(
-                                                text,
-                                                t_ms,
-                                                seq.fetch_add(1, Ordering::Relaxed),
-                                            )
+                                            let text_len = text.chars().count();
+                                            let text_preview = text.chars().take(60).collect::<String>();
+                                            let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                            let ev = SttEvent::final_(text, t_ms, ev_seq)
                                             .with_utterance_seq(utterance_seq)
                                             .with_trace(trace);
-                                            let _ = out_tx.send(WorkerOut::Event(ev));
+                                            let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                            if sent {
+                                                log_emit_event("final", ev_seq, t_ms, text_len, &text_preview);
+                                            }
                                             if post_stop {
                                                 *post_stop_events = (*post_stop_events).saturating_add(1);
                                             }
@@ -2094,14 +2118,16 @@ fn spawn_worker(
                                                 serde_json::json!({"message_len": message.len()}),
                                             );
                                             // #endregion
-                                            let ev = SttEvent::error(
-                                                -3,
-                                                message,
-                                                chunk_t0_us.unwrap_or(timestamp_us) / 1000,
-                                                seq.fetch_add(1, Ordering::Relaxed),
-                                            )
+                                            let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
+                                            let text_len = message.chars().count();
+                                            let text_preview = message.chars().take(60).collect::<String>();
+                                            let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                            let ev = SttEvent::error(-3, message, t_ms, ev_seq)
                                             .with_utterance_seq(utterance_seq);
-                                            let _ = out_tx.send(WorkerOut::Event(ev));
+                                            let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                            if sent {
+                                                log_emit_event("error", ev_seq, t_ms, text_len, &text_preview);
+                                            }
                                         }
                                     }
                                 }
@@ -2746,14 +2772,22 @@ fn spawn_worker(
                                     );
                                     if let Err(e) = session.push_features(&bct_chunk, frames) {
                                         let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
-                                        let ev = SttEvent::error(
-                                            -4,
-                                            format!("push_features failed: {e}"),
-                                            t_ms,
-                                            seq.fetch_add(1, Ordering::Relaxed),
-                                        )
+                                        let msg = format!("push_features failed: {e}");
+                                        let text_len = msg.chars().count();
+                                        let text_preview = msg.chars().take(60).collect::<String>();
+                                        let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                        let ev = SttEvent::error(-4, msg, t_ms, ev_seq)
                                         .with_utterance_seq(utterance_seq);
-                                        let _ = out_tx.send(WorkerOut::Event(ev));
+                                        let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                        if sent {
+                                            log_emit_event(
+                                                "error",
+                                                ev_seq,
+                                                t_ms,
+                                                text_len,
+                                                &text_preview,
+                                            );
+                                        }
                                         let decode_ms = t_decode0.elapsed().as_millis() as u64;
                                         if decode_ms >= slow_chunk_threshold_ms {
                                             slow_chunk_count = slow_chunk_count.saturating_add(1);
@@ -2825,14 +2859,21 @@ fn spawn_worker(
                                             length_shape,
                                             profile_idx
                                         );
-                                        let ev = SttEvent::error(
-                                            -5,
-                                            msg,
-                                            t_ms,
-                                            seq.fetch_add(1, Ordering::Relaxed),
-                                        )
+                                        let text_len = msg.chars().count();
+                                        let text_preview = msg.chars().take(60).collect::<String>();
+                                        let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                        let ev = SttEvent::error(-5, msg, t_ms, ev_seq)
                                         .with_utterance_seq(utterance_seq);
-                                        let _ = out_tx.send(WorkerOut::Event(ev));
+                                        let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                        if sent {
+                                            log_emit_event(
+                                                "error",
+                                                ev_seq,
+                                                t_ms,
+                                                text_len,
+                                                &text_preview,
+                                            );
+                                        }
                                         abort_utterance = true;
                                         abort_reason = Some("slow_chunk_abort".to_string());
                                         pending_stop = true;
@@ -2858,14 +2899,22 @@ fn spawn_worker(
                                                 let stable_prefix_len =
                                                     stable_prefix_len.min(text.chars().count());
                                                 last_partial_text = text.clone();
-                                                let ev = SttEvent::partial(
-                                                    text,
-                                                    stable_prefix_len,
-                                                    t_ms,
-                                                    seq.fetch_add(1, Ordering::Relaxed),
-                                                )
+                                                let text_len = text.chars().count();
+                                                let text_preview = text.chars().take(60).collect::<String>();
+                                                let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                                let ev =
+                                                    SttEvent::partial(text, stable_prefix_len, t_ms, ev_seq)
                                                 .with_utterance_seq(utterance_seq);
-                                                let _ = out_tx.try_send(WorkerOut::Event(ev));
+                                                let sent = out_tx.try_send(WorkerOut::Event(ev)).is_ok();
+                                                if sent {
+                                                    log_emit_event(
+                                                        "partial",
+                                                        ev_seq,
+                                                        t_ms,
+                                                        text_len,
+                                                        &text_preview,
+                                                    );
+                                                }
                                                 post_stop_events = post_stop_events.saturating_add(1);
                                             }
                                             parakeet_trt::TranscriptionEvent::FinalText { text, .. } => {
@@ -2887,26 +2936,42 @@ fn spawn_worker(
                                                 }
                                                 emitted_final_post = emitted_final_post.saturating_add(1);
                                                 let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
-                                                let ev = SttEvent::final_(
-                                                    text,
-                                                    t_ms,
-                                                    seq.fetch_add(1, Ordering::Relaxed),
-                                                )
+                                                let text_len = text.chars().count();
+                                                let text_preview = text.chars().take(60).collect::<String>();
+                                                let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                                let ev = SttEvent::final_(text, t_ms, ev_seq)
                                                 .with_utterance_seq(utterance_seq);
-                                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                                if sent {
+                                                    log_emit_event(
+                                                        "final",
+                                                        ev_seq,
+                                                        t_ms,
+                                                        text_len,
+                                                        &text_preview,
+                                                    );
+                                                }
                                                 post_stop_events = post_stop_events.saturating_add(1);
                                                 last_partial_text.clear();
                                                 emitted_final = true;
                                             }
                                             parakeet_trt::TranscriptionEvent::Error { message } => {
-                                                let ev = SttEvent::error(
-                                                    -3,
-                                                    message,
-                                                    chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000,
-                                                    seq.fetch_add(1, Ordering::Relaxed),
-                                                )
+                                                let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                                let text_len = message.chars().count();
+                                                let text_preview = message.chars().take(60).collect::<String>();
+                                                let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                                let ev = SttEvent::error(-3, message, t_ms, ev_seq)
                                                 .with_utterance_seq(utterance_seq);
-                                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                                if sent {
+                                                    log_emit_event(
+                                                        "error",
+                                                        ev_seq,
+                                                        t_ms,
+                                                        text_len,
+                                                        &text_preview,
+                                                    );
+                                                }
                                             }
                                         }
                                     }
@@ -2918,13 +2983,26 @@ fn spawn_worker(
                                 if !emitted_final && !last_partial_text.is_empty() {
                                     StageTimes::mark_if_none(&mut stage_times.first_final);
                                     let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
+                                    let text_len = last_partial_text.chars().count();
+                                    let text_preview =
+                                        last_partial_text.chars().take(60).collect::<String>();
+                                    let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                     let ev = SttEvent::final_(
                                         last_partial_text.clone(),
                                         t_ms,
-                                        seq.fetch_add(1, Ordering::Relaxed),
+                                        ev_seq,
                                     )
                                     .with_utterance_seq(utterance_seq);
-                                    let _ = out_tx.send(WorkerOut::Event(ev));
+                                    let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                    if sent {
+                                        log_emit_event(
+                                            "final",
+                                            ev_seq,
+                                            t_ms,
+                                            text_len,
+                                            &text_preview,
+                                        );
+                                    }
                                     post_stop_events = post_stop_events.saturating_add(1);
                                 }
                             }
@@ -2983,24 +3061,34 @@ fn spawn_worker(
                             if !last_partial_text.is_empty() {
                                 StageTimes::mark_if_none(&mut stage_times.first_final);
                                 let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
-                                let ev = SttEvent::final_(
-                                    last_partial_text.clone(),
-                                    t_ms,
-                                    seq.fetch_add(1, Ordering::Relaxed),
-                                )
+                                let text_len = last_partial_text.chars().count();
+                                let text_preview =
+                                    last_partial_text.chars().take(60).collect::<String>();
+                                let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                let ev =
+                                    SttEvent::final_(last_partial_text.clone(), t_ms, ev_seq)
                                 .with_utterance_seq(utterance_seq);
-                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                if sent {
+                                    log_emit_event(
+                                        "final",
+                                        ev_seq,
+                                        t_ms,
+                                        text_len,
+                                        &text_preview,
+                                    );
+                                }
                                 post_stop_events = post_stop_events.saturating_add(1);
                             } else {
                                 StageTimes::mark_if_none(&mut stage_times.first_final);
                                 let t_ms = chunk_t0_us.unwrap_or(last_audio_ts_us) / 1000;
-                                let ev = SttEvent::final_(
-                                    String::new(),
-                                    t_ms,
-                                    seq.fetch_add(1, Ordering::Relaxed),
-                                )
+                                let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
+                                let ev = SttEvent::final_(String::new(), t_ms, ev_seq)
                                 .with_utterance_seq(utterance_seq);
-                                let _ = out_tx.send(WorkerOut::Event(ev));
+                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
+                                if sent {
+                                    log_emit_event("final", ev_seq, t_ms, 0, "");
+                                }
                                 post_stop_events = post_stop_events.saturating_add(1);
                             }
                         }
