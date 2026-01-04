@@ -122,6 +122,17 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn should_log_throttled(last_ms: &AtomicU64, interval_ms: u64) -> bool {
+    let now = now_ms();
+    let prev = last_ms.load(Ordering::Relaxed);
+    if now.saturating_sub(prev) < interval_ms {
+        return false;
+    }
+    last_ms
+        .compare_exchange(prev, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
+
 static DBG_STT_AUDIO_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_OUT_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_AUDIO_DROP_N: AtomicU64 = AtomicU64::new(0);
@@ -133,6 +144,9 @@ static DBG_STT_CHUNK_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_RMS_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_RMS_ACTIVE_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_RMS_SILENT_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_AUDIO_RX_MS: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_FEATURE_MS: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_ENQUEUE_MS: AtomicU64 = AtomicU64::new(0);
 // #endregion
 
 static BLANK_PENALTY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1740,6 +1754,21 @@ fn spawn_worker(
                                 );
                             }
                             // #endregion
+                            if should_log_throttled(&DBG_STT_FEATURE_MS, 1000) {
+                                let mode = if feature_chunk_idx == 0 {
+                                    "first"
+                                } else {
+                                    "steady"
+                                };
+                                log::debug!(
+                                    "parakeet_stt features: shape=[1, {}, {}] length={} mode={} streaming={}",
+                                    n_mels,
+                                    chunk_frames,
+                                    chunk_frames,
+                                    mode,
+                                    streaming_encoder
+                                );
+                            }
 
                             // Push features to runtime.
                             // NOTE: current Parakeet runtime is chunk-scoped; later todo will make it true token-streaming.
@@ -1784,6 +1813,8 @@ fn spawn_worker(
                             }
                             // #endregion
 
+                            let enc_shape = format!("1x{}x{}", n_mels, chunk_frames);
+                            let length_val = chunk_frames;
                             let mut push_err: Option<String> = None;
                             match session.push_features(&bct, chunk_frames) {
                                 Ok(_) => {
@@ -1814,6 +1845,22 @@ fn spawn_worker(
                                     push_err = Some(e.to_string());
                                 }
                             }
+                            if should_log_throttled(&DBG_STT_ENQUEUE_MS, 1000) {
+                                if let Some(err) = push_err.as_deref() {
+                                    log::debug!(
+                                        "parakeet_stt enqueue: ok=false err=\"{}\" enc_shape={} length={}",
+                                        err,
+                                        enc_shape,
+                                        length_val
+                                    );
+                                } else {
+                                    log::debug!(
+                                        "parakeet_stt enqueue: ok=true enc_shape={} length={}",
+                                        enc_shape,
+                                        length_val
+                                    );
+                                }
+                            }
 
                             let t_infer_done_ms = now_ms();
                             let trace = SttTrace {
@@ -1841,7 +1888,6 @@ fn spawn_worker(
                             }
 
                             let decode_ms = t_decode0.elapsed().as_millis() as u64;
-                            let enc_shape = format!("1x{}x{}", n_mels, chunk_frames);
                             let length_shape = "1".to_string();
                             let profile_idx = 0u32;
                             if decode_ms >= slow_chunk_threshold_ms {
@@ -3167,6 +3213,23 @@ impl Processor for ParakeetSttProcessor {
                     && timestamp_us == 0
                     && sample_rate == 16_000
                     && channels == 1;
+                let log_audio_rx = !is_tick && should_log_throttled(&DBG_STT_AUDIO_RX_MS, 1000);
+                let samples_len = data.len();
+                let channels_usize = channels as usize;
+                let samples_per_ch = if channels_usize > 0 {
+                    samples_len / channels_usize
+                } else {
+                    samples_len
+                };
+                let (muted, max_abs) = if log_audio_rx {
+                    let mut max_abs = 0.0f32;
+                    for s in &data {
+                        max_abs = max_abs.max(s.abs());
+                    }
+                    (max_abs <= 1.0e-5, max_abs)
+                } else {
+                    (false, 0.0f32)
+                };
                 let chunk_idx = if is_tick {
                     0
                 } else {
@@ -3214,6 +3277,20 @@ impl Processor for ParakeetSttProcessor {
                     }
                     res.is_ok()
                 };
+                if log_audio_rx {
+                    let dropped = !send_ok && !self.backpressure;
+                    log::debug!(
+                        "parakeet_stt audio rx: samples={} per_ch={} channels={} muted={} max_abs={:.6} dropping={} drop_total={} backpressure={}",
+                        samples_len,
+                        samples_per_ch,
+                        channels,
+                        muted,
+                        max_abs,
+                        dropped,
+                        DBG_STT_AUDIO_DROP_N.load(Ordering::Relaxed),
+                        self.backpressure
+                    );
+                }
                 if (n % 200) == 0 {
                     dbglog(
                         "H3",

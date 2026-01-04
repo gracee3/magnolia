@@ -40,6 +40,7 @@ enabled = true
 color_scheme = "CyanReactive"
 sensitivity = 1.0
 vis_type = "SpectrumBars"
+is_muted = false
 
 [tiles.settings.keybinds]
 next_vis = "v"
@@ -74,6 +75,7 @@ enabled = true
 
 [tiles.settings.config]
 device = "Default"
+is_muted = false
 
 [tiles.settings.keybinds]
 mute = "m"
@@ -91,6 +93,7 @@ enabled = true
 gain = 1.0
 lowpass_enabled = false
 lowpass_hz = 2000.0
+is_muted = false
 
 [tiles.settings.keybinds]
 mute = "m"

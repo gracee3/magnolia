@@ -896,6 +896,10 @@ impl TileRenderer for AudioVisTile {
                     "maximum": 5.0,
                     "default": 1.0,
                     "title": "Sensitivity"
+                },
+                "is_muted": {
+                    "type": "boolean",
+                    "default": true
                 }
             }
         }))
@@ -924,13 +928,17 @@ impl TileRenderer for AudioVisTile {
         if let Some(s) = settings.get("sensitivity").and_then(|v| v.as_f64()) {
             self.sensitivity = (s as f32).clamp(0.1, 5.0);
         }
+        if let Some(muted) = settings.get("is_muted").and_then(|v| v.as_bool()) {
+            self.is_muted = muted;
+        }
     }
 
     fn get_settings(&self) -> serde_json::Value {
         serde_json::json!({
             "vis_type": format!("{:?}", self.vis_type),
             "color_scheme": format!("{:?}", self.color_scheme),
-            "sensitivity": self.sensitivity
+            "sensitivity": self.sensitivity,
+            "is_muted": self.is_muted
         })
     }
 
