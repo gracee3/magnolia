@@ -14,12 +14,14 @@ is_sleeping = false
 power_profile = "Normal"
 
 [parakeet_stt]
-model_dir = "/home/emmy/git/trt-asr-engine/models/parakeet-tdt-0.6b-v3"
+model_dir = "/home/emmy/git/trt-asr-engine/out"
 device = 0
-streaming_encoder_path = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp32.plan"
 use_fp16 = true
-chunk_frames = 592
+first_chunk_frames = 592
+chunk_frames = 584
 advance_frames = 8
+# engine_fp16 = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp16.plan"
+# engine_fp32 = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp32.plan"
 
 [[tiles]]
 id = "audio_viz"
@@ -36,12 +38,12 @@ sensitivity = 1.0
 vis_type = "SpectrumBars"
 
 [tiles.settings.keybinds]
-dec_sens = "minus"
-freeze = "f"
-mute = "m"
 next_vis = "v"
-next_theme = "c"
+freeze = "f"
 inc_sens = "equals"
+dec_sens = "minus"
+mute = "m"
+next_theme = "c"
 
 [[tiles]]
 id = "audio_output"
@@ -99,6 +101,7 @@ module = "transcription"
 enabled = true
 
 [tiles.settings.config]
+ui_min_update_ms = 40
 
 [tiles.settings.keybinds]
 

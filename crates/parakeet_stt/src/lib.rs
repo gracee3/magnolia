@@ -989,7 +989,6 @@ impl NormalizeMode {
 enum SttControl {
     Start,
     Stop,
-    Reset,
     ResetWithMeta {
         utterance_id: Option<String>,
         utterance_seq: u64,
@@ -1475,7 +1474,6 @@ fn spawn_worker(
             let mut silence_start: Option<Instant> = None;
             let mut speech_onset: Option<Instant> = None;  // When non-silent audio first appeared
             let mut endpoint_emitted = false;  // Prevent multiple endpoint events per silence
-            let mut total_audio_dropped: u64 = 0;
             let mut running_rms = 0.0f32;
             let mut running_peak = 0.0f32;
             let mut samples_seen = 0usize;
@@ -2120,81 +2118,6 @@ fn spawn_worker(
                             if let Ok(mut s) = state.lock() {
                                 s.status = "stopping".to_string();
                             }
-                        }
-                        SttControl::Reset => {
-                            stage_times.begin_reset();
-                            let audio_q = in_rx.len();
-                            let ctrl_q = ctrl_rx.len();
-                            let mut drained_audio = 0usize;
-                            while let Ok(_) = in_rx.try_recv() {
-                                drained_audio += 1;
-                            }
-                            let log_reset = matches!(
-                                std::env::var("PARAKEET_LOG_RESET").ok().as_deref(),
-                                Some("1")
-                            );
-                            if log_reset
-                                || audio_q > 0
-                                || ctrl_q > 0
-                                || drained_audio > 0
-                                || pending_stop
-                            {
-                                eprintln!(
-                                    "[parakeet_stt] reset id={} utt_seq={} audio_q={} drained_audio={} ctrl_q={} running={} pending_stop={} offline_mode={}",
-                                    utterance_id,
-                                    utterance_seq,
-                                    audio_q,
-                                    drained_audio,
-                                    ctrl_q,
-                                    is_running,
-                                    pending_stop,
-                                    offline_mode
-                                );
-                            }
-                            reset_seen = true;
-                            reset_drained_audio = drained_audio;
-                            reset_ctrl_q = ctrl_q;
-                            drop_chunk = true;
-                            is_running = true;
-                            pending_stop = false;
-                            utterance_id.clear();
-                            if let Ok(mut s) = state.lock() {
-                                s.status = "running".to_string();
-                            }
-                            last_partial_text.clear();
-                            sample_buf_16k.clear();
-                            chunk_t0_us = None;
-                            norm_frames = 0;
-                            for v in &mut norm_sum {
-                                *v = 0.0;
-                            }
-                            for v in &mut norm_sumsq {
-                                *v = 0.0;
-                            }
-                            offline_audio.clear();
-                            session.reset();
-                            seq.store(1, Ordering::Relaxed);
-                            emitted_partial_pre = 0;
-                            emitted_partial_post = 0;
-                            emitted_final_pre = 0;
-                            emitted_final_post = 0;
-                            emitted_final_empty = 0;
-                            emitted_final_nonempty = 0;
-                            suppressed_junk_partial = 0;
-                            suppressed_junk_final = 0;
-                            audio_chunks_seen = 0;
-                            audio_samples_seen = 0;
-                            audio_samples_resampled = 0;
-                            feature_chunk_idx = 0;
-                            last_feature_chunk_idx = 0;
-                            last_audio_chunk_idx = 0;
-                            slow_chunk_count = 0;
-                            slowest_chunk_ms = 0;
-                            slowest_chunk_idx = 0;
-                            slowest_chunk_audio_idx = 0;
-                            abort_utterance = false;
-                            abort_reason = None;
-                            stage_times.mark_reset_done();
                         }
                         SttControl::ResetWithMeta {
                             utterance_id: new_id,

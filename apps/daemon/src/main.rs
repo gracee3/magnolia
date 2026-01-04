@@ -118,8 +118,19 @@ use magnolia_core::TileConfig;
 
 fn main() {
     // Init Logger
-    // Default: warn for everything, but silence wgpu warnings, info for our crates.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,wgpu_core=error,wgpu_hal=error,nannou=error,daemon=info,text_tools=info,aphrodite=info,logos=info,kamea=info")).init();
+    // Default: warn for everything; silence wgpu/nannou spam; info for our crates.
+    let mut logger = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(
+            "warn,daemon=info,text_tools=info,aphrodite=info,logos=info,kamea=info",
+        ),
+    );
+    logger
+        .filter_module("wgpu_core", log::LevelFilter::Off)
+        .filter_module("wgpu_hal", log::LevelFilter::Off)
+        .filter_module("wgpu", log::LevelFilter::Off)
+        .filter_module("naga", log::LevelFilter::Off)
+        .filter_module("nannou", log::LevelFilter::Off);
+    logger.init();
 
     nannou::app(model).update(update).run();
 }
