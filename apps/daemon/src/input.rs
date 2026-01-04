@@ -190,12 +190,9 @@ impl KeyboardNav {
                 match self.mode {
                     InputMode::Normal | InputMode::Patch => {
                         // Smart tile-to-tile navigation
-                        if let Some(tile_id) = self.navigate_to_adjacent_tile(direction, layout) {
-                            log::debug!("Navigated to tile: {}", tile_id);
-                        } else {
+                        if self.navigate_to_adjacent_tile(direction, layout).is_none() {
                             // No tile found, deselect
                             self.deselect();
-                            log::debug!("No adjacent tile in that direction");
                         }
                     }
                     InputMode::Layout => {

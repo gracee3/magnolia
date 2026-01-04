@@ -9,6 +9,7 @@ pub struct ParakeetSttSettings {
     pub vocab_path: PathBuf,
     pub streaming_encoder_path: Option<PathBuf>,
     pub use_fp16: bool,
+    pub use_streaming_encoder: bool,
     pub chunk_frames: Option<usize>,
     pub advance_frames: Option<usize>,
 }
@@ -21,7 +22,13 @@ struct ParakeetSttToml {
     #[serde(default)]
     streaming_encoder_path: Option<PathBuf>,
     #[serde(default)]
+    engine_fp16: Option<PathBuf>,
+    #[serde(default)]
+    engine_fp32: Option<PathBuf>,
+    #[serde(default)]
     use_fp16: bool,
+    #[serde(default)]
+    use_streaming_encoder: bool,
     #[serde(default)]
     chunk_frames: Option<usize>,
     #[serde(default)]
@@ -97,22 +104,50 @@ pub fn load_parakeet_stt_settings() -> anyhow::Result<ParakeetSttSettings> {
     let cfg = root.parakeet_stt.ok_or_else(|| {
         anyhow::anyhow!("Missing [parakeet_stt] config in layout.toml (needs model_dir, optional device)")
     })?;
-    let vocab = validate_parakeet_assets(&cfg.model_dir)?;
-    let streaming_encoder_path = if let Some(path) = cfg.streaming_encoder_path {
+    let ParakeetSttToml {
+        model_dir,
+        device,
+        streaming_encoder_path,
+        engine_fp16,
+        engine_fp32,
+        use_fp16,
+        use_streaming_encoder,
+        chunk_frames,
+        advance_frames,
+    } = cfg;
+    let vocab = validate_parakeet_assets(&model_dir)?;
+    let mut streaming_encoder_path = streaming_encoder_path;
+    if streaming_encoder_path.is_none() {
+        streaming_encoder_path = if use_fp16 {
+            engine_fp16.or(engine_fp32)
+        } else {
+            engine_fp32.or(engine_fp16)
+        };
+    }
+    if use_streaming_encoder && streaming_encoder_path.is_none() {
+        anyhow::bail!(
+            "parakeet_stt.use_streaming_encoder is true but no streaming encoder path provided (set streaming_encoder_path or engine_fp16/engine_fp32)"
+        );
+    }
+    let streaming_encoder_path = if let Some(path) = streaming_encoder_path {
         if !path.exists() {
-            anyhow::bail!("parakeet_stt.streaming_encoder_path does not exist: {}", path.display());
+            anyhow::bail!(
+                "parakeet_stt streaming encoder path does not exist: {}",
+                path.display()
+            );
         }
         Some(path)
     } else {
         None
     };
     Ok(ParakeetSttSettings {
-        model_dir: cfg.model_dir,
-        device: cfg.device,
+        model_dir,
+        device,
         vocab_path: vocab,
         streaming_encoder_path,
-        use_fp16: cfg.use_fp16,
-        chunk_frames: cfg.chunk_frames,
-        advance_frames: cfg.advance_frames,
+        use_fp16,
+        use_streaming_encoder,
+        chunk_frames,
+        advance_frames,
     })
 }

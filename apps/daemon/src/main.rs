@@ -269,6 +269,15 @@ fn model(app: &App) -> Model {
 
     match load_parakeet_stt_settings() {
         Ok(cfg) => {
+            log::info!(
+                "Parakeet STT settings: model_dir={} streaming_encoder_path={:?} use_streaming_encoder={} use_fp16={} chunk_frames={:?} advance_frames={:?}",
+                cfg.model_dir.display(),
+                cfg.streaming_encoder_path.as_ref().map(|p| p.display().to_string()),
+                cfg.use_streaming_encoder,
+                cfg.use_fp16,
+                cfg.chunk_frames,
+                cfg.advance_frames
+            );
             let encoder_override_path = cfg.streaming_encoder_path.map(|p| p.to_string_lossy().to_string());
             let default_chunk_frames = if encoder_override_path.is_some() { 592usize } else { 256usize };
             let default_advance_frames = if encoder_override_path.is_some() {
@@ -281,6 +290,7 @@ fn model(app: &App) -> Model {
                 device_id: cfg.device as i32,
                 use_fp16: cfg.use_fp16,
                 encoder_override_path,
+                use_streaming_encoder: cfg.use_streaming_encoder,
                 chunk_frames: cfg.chunk_frames.unwrap_or(default_chunk_frames),
                 advance_frames: cfg.advance_frames.unwrap_or(default_advance_frames),
             };
@@ -690,6 +700,18 @@ fn key_pressed(_app: &App, model: &mut Model, key: Key) {
 
     let ctrl = _app.keys.mods.ctrl();
     let shift = _app.keys.mods.shift();
+
+    if log::log_enabled!(log::Level::Debug) {
+        let selected = model.keyboard_nav.selected_tile_id().unwrap_or("-");
+        log::debug!(
+            "Key press: {:?} ctrl={} shift={} mode={:?} selected={}",
+            key,
+            ctrl,
+            shift,
+            model.keyboard_nav.mode,
+            selected
+        );
+    }
 
     // === MAXIMIZED TILE INPUT ROUTING (tile-local controls) ===
     // If a tile is maximized AND it is the top modal, give it input.

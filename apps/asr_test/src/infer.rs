@@ -25,6 +25,7 @@ pub struct ParakeetEngine {
     pub device_id: i32,
     pub use_fp16: bool,
     pub encoder_override_path: Option<PathBuf>,
+    pub use_streaming_encoder: bool,
     pub chunk_frames: usize,
     pub advance_frames: usize,
 }
@@ -51,6 +52,10 @@ pub fn resolve_parakeet_engine(args: &crate::Args) -> anyhow::Result<ParakeetEng
         .as_ref()
         .and_then(|b| b.streaming_encoder_path.clone());
     let use_fp16 = base.as_ref().map(|b| b.use_fp16).unwrap_or(false);
+    let use_streaming_encoder = base
+        .as_ref()
+        .map(|b| b.use_streaming_encoder)
+        .unwrap_or(false);
     let default_chunk_frames = if encoder_override_path.is_some() { 592usize } else { 256usize };
     let default_advance_frames = if encoder_override_path.is_some() {
         8usize
@@ -74,6 +79,7 @@ pub fn resolve_parakeet_engine(args: &crate::Args) -> anyhow::Result<ParakeetEng
         device_id: device_u32 as i32,
         use_fp16,
         encoder_override_path,
+        use_streaming_encoder,
         chunk_frames,
         advance_frames,
     })
@@ -262,6 +268,7 @@ async fn build_worker(
             .encoder_override_path
             .as_ref()
             .map(|p| p.to_string_lossy().to_string()),
+        use_streaming_encoder: engine.use_streaming_encoder,
         chunk_frames: engine.chunk_frames,
         advance_frames: engine.advance_frames,
     };

@@ -411,13 +411,20 @@ pub struct ParakeetRuntimeConfig {
     pub device_id: i32,
     pub use_fp16: bool,
     pub encoder_override_path: Option<String>,
+    pub use_streaming_encoder: bool,
     pub chunk_frames: usize,
     pub advance_frames: usize,
 }
 
 impl ParakeetRuntimeConfig {
     pub fn is_streaming_encoder(&self) -> bool {
-        self.encoder_override_path.is_some()
+        if self.use_streaming_encoder {
+            return true;
+        }
+        self.encoder_override_path
+            .as_deref()
+            .map(|path| path.contains("encoder_streaming"))
+            .unwrap_or(false)
     }
 }
 
@@ -1381,6 +1388,10 @@ fn spawn_worker(
             let mut utterance_seq = 0u64;
             if let Some(path) = runtime.encoder_override_path.as_deref() {
                 std::env::set_var("PARAKEET_STREAMING_ENCODER_PATH", path);
+                log::debug!(
+                    "parakeet_stt streaming encoder override: {}",
+                    path
+                );
             } else {
                 std::env::remove_var("PARAKEET_STREAMING_ENCODER_PATH");
             }
@@ -1420,6 +1431,14 @@ fn spawn_worker(
                     advance_frames = n;
                 }
             }
+            log::debug!(
+                "parakeet_stt runtime resolved: streaming_encoder={} use_streaming_encoder={} model_dir={} chunk_frames={} advance_frames={}",
+                streaming_encoder,
+                runtime.use_streaming_encoder,
+                runtime.model_dir,
+                chunk_frames,
+                advance_frames
+            );
             let (min_chunk, max_chunk, default_chunk) = if streaming_encoder {
                 (584usize, 592usize, 592usize)
             } else {
@@ -1448,6 +1467,20 @@ fn spawn_worker(
                     fallback
                 );
                 advance_frames = fallback;
+            }
+            if streaming_encoder {
+                if chunk_frames != 584 {
+                    eprintln!(
+                        "[parakeet_stt] streaming: expected chunk_frames=584, got {}",
+                        chunk_frames
+                    );
+                }
+                if advance_frames != 8 {
+                    eprintln!(
+                        "[parakeet_stt] streaming: expected advance_frames=8, got {}",
+                        advance_frames
+                    );
+                }
             }
             let cfg = FeatureConfig::default();
             let n_mels = cfg.n_mels;

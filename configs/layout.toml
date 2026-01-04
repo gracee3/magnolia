@@ -14,13 +14,17 @@ is_sleeping = false
 power_profile = "Normal"
 
 [parakeet_stt]
-model_dir = "/home/emmy/git/trt-asr-engine/out"
+# keep this if you still use model_dir for tokenizer/joiner/etc
+model_dir = "/home/emmy/git/trt-asr-engine/models/parakeet-tdt-0.6b-v3"
 device = 0
 use_fp16 = true
+use_streaming_encoder = true
+
 first_chunk_frames = 592
 chunk_frames = 584
 advance_frames = 8
-# engine_fp16 = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp16.plan"
+
+engine_fp16 = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp16.plan"
 # engine_fp32 = "/home/emmy/git/trt-asr-engine/out/trt_engines/encoder_streaming_fp32.plan"
 
 [[tiles]]
