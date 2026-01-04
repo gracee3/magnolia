@@ -133,15 +133,34 @@ fn should_log_throttled(last_ms: &AtomicU64, interval_ms: u64) -> bool {
         .is_ok()
 }
 
-fn log_emit_event(kind: &str, seq: u64, t_ms: u64, text_len: usize, text_preview: &str) {
-    log::info!(
-        "stt_emit kind={} seq={} t_ms={} text_len={} text_preview=\"{}\"",
-        kind,
-        seq,
-        t_ms,
-        text_len,
-        text_preview
-    );
+fn log_emit_event(
+    kind: &str,
+    seq: u64,
+    t_ms: u64,
+    text_len: usize,
+    text_preview: &str,
+    stable_prefix_len: Option<usize>,
+) {
+    if let Some(stable_prefix_len) = stable_prefix_len {
+        log::info!(
+            "stt_emit kind={} seq={} t_ms={} text_len={} stable_prefix_len={} text_preview=\"{}\"",
+            kind,
+            seq,
+            t_ms,
+            text_len,
+            stable_prefix_len,
+            text_preview
+        );
+    } else {
+        log::info!(
+            "stt_emit kind={} seq={} t_ms={} text_len={} text_preview=\"{}\"",
+            kind,
+            seq,
+            t_ms,
+            text_len,
+            text_preview
+        );
+    }
 }
 
 const ERROR_EMIT_THROTTLE_MS: u64 = 500;
@@ -164,7 +183,7 @@ fn emit_error_event(
         out_tx.send(WorkerOut::Event(ev)).is_ok()
     };
     if sent {
-        log_emit_event("error", seq, t_ms, text_len, text_preview);
+        log_emit_event("error", seq, t_ms, text_len, text_preview, None);
     }
 }
 
@@ -1998,17 +2017,31 @@ fn spawn_worker(
                                 // #region agent log
                                 let mut saw_any = false;
                                 // #endregion
+                                let mut chunk_partial_recv = 0u64;
+                                let mut chunk_partial_filtered = 0u64;
+                                let mut chunk_partial_throttled = 0u64;
+                                let mut chunk_partial_sent = 0u64;
+                                let mut chunk_partial_dropped = 0u64;
+                                let mut chunk_final_recv = 0u64;
+                                let mut chunk_final_filtered = 0u64;
+                                let mut chunk_final_sent = 0u64;
+                                let mut chunk_final_dropped = 0u64;
+                                let mut chunk_last_partial_len = 0usize;
+                                let mut chunk_last_partial_stable = 0usize;
                                 while let Some(ev) = session.poll_event() {
                                     // #region agent log
                                     saw_any = true;
                                     // #endregion
                                     match ev {
                                         parakeet_trt::TranscriptionEvent::PartialText { text, .. } => {
+                                            chunk_partial_recv = chunk_partial_recv.saturating_add(1);
                                             StageTimes::mark_if_none(&mut stage_times.first_partial);
                                             emitted_partial_pre = emitted_partial_pre.saturating_add(1);
                                             if current_filter_junk && (text.is_empty() || is_junk(&text)) {
                                                 suppressed_junk_partial =
                                                     suppressed_junk_partial.saturating_add(1);
+                                                chunk_partial_filtered =
+                                                    chunk_partial_filtered.saturating_add(1);
                                                 // #region agent log
                                                 let k = DBG_STT_WORKER_EV_N.fetch_add(1, Ordering::Relaxed);
                                                 if k < 8 {
@@ -2036,6 +2069,9 @@ fn spawn_worker(
                                             // #endregion
                                             let t_ms = chunk_t0_us.unwrap_or(timestamp_us) / 1000;
                                             if last_emit.elapsed() < min_emit {
+                                                chunk_partial_throttled =
+                                                    chunk_partial_throttled.saturating_add(1);
+                                                chunk_last_partial_len = text.chars().count();
                                                 last_partial_text = text;
                                                 continue;
                                             }
@@ -2046,6 +2082,8 @@ fn spawn_worker(
                                             last_partial_text = text.clone();
 
                                             let text_len = text.chars().count();
+                                            chunk_last_partial_len = text_len;
+                                            chunk_last_partial_stable = stable_prefix_len;
                                             let text_preview = text.chars().take(60).collect::<String>();
                                             let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                             let ev = SttEvent::partial(
@@ -2058,7 +2096,18 @@ fn spawn_worker(
                                             .with_trace(trace);
                                             let sent = out_tx.try_send(WorkerOut::Event(ev)).is_ok();
                                             if sent {
-                                                log_emit_event("partial", ev_seq, t_ms, text_len, &text_preview);
+                                                chunk_partial_sent = chunk_partial_sent.saturating_add(1);
+                                                log_emit_event(
+                                                    "partial",
+                                                    ev_seq,
+                                                    t_ms,
+                                                    text_len,
+                                                    &text_preview,
+                                                    Some(stable_prefix_len),
+                                                );
+                                            } else {
+                                                chunk_partial_dropped =
+                                                    chunk_partial_dropped.saturating_add(1);
                                             }
                                             if post_stop {
                                                 *post_stop_events = (*post_stop_events).saturating_add(1);
@@ -2066,6 +2115,7 @@ fn spawn_worker(
                                             last_emit = Instant::now();
                                         }
                                         parakeet_trt::TranscriptionEvent::FinalText { text, .. } => {
+                                            chunk_final_recv = chunk_final_recv.saturating_add(1);
                                             emitted_final_pre = emitted_final_pre.saturating_add(1);
                                             if text.trim().is_empty() {
                                                 emitted_final_empty = emitted_final_empty.saturating_add(1);
@@ -2075,6 +2125,8 @@ fn spawn_worker(
                                             if current_filter_junk && (text.is_empty() || is_junk(&text)) {
                                                 suppressed_junk_final =
                                                     suppressed_junk_final.saturating_add(1);
+                                                chunk_final_filtered =
+                                                    chunk_final_filtered.saturating_add(1);
                                                 // #region agent log
                                                 let alnum = text.chars().filter(|c| c.is_alphanumeric()).count();
                                                 let punct = text.chars().filter(|c| c.is_ascii_punctuation()).count();
@@ -2117,7 +2169,10 @@ fn spawn_worker(
                                             .with_trace(trace);
                                             let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
                                             if sent {
-                                                log_emit_event("final", ev_seq, t_ms, text_len, &text_preview);
+                                                chunk_final_sent = chunk_final_sent.saturating_add(1);
+                                                log_emit_event("final", ev_seq, t_ms, text_len, &text_preview, None);
+                                            } else {
+                                                chunk_final_dropped = chunk_final_dropped.saturating_add(1);
                                             }
                                             if post_stop {
                                                 *post_stop_events = (*post_stop_events).saturating_add(1);
@@ -2152,6 +2207,25 @@ fn spawn_worker(
                                         }
                                     }
                                 }
+                                log::info!(
+                                    "stt_chunk id={} utt_seq={} audio_chunk_idx={} feature_idx={} partial_recv={} partial_sent={} partial_filtered={} partial_throttled={} partial_dropped={} final_recv={} final_sent={} final_filtered={} final_dropped={} last_partial_len={} last_partial_stable={} did_emit_partial={}",
+                                    utterance_id,
+                                    utterance_seq,
+                                    audio_chunk_idx,
+                                    feature_chunk_idx,
+                                    chunk_partial_recv,
+                                    chunk_partial_sent,
+                                    chunk_partial_filtered,
+                                    chunk_partial_throttled,
+                                    chunk_partial_dropped,
+                                    chunk_final_recv,
+                                    chunk_final_sent,
+                                    chunk_final_filtered,
+                                    chunk_final_dropped,
+                                    chunk_last_partial_len,
+                                    chunk_last_partial_stable,
+                                    chunk_partial_sent > 0
+                                );
                                 // #region agent log
                                 if chunk_n < 6 && !saw_any {
                                     dbglog(
@@ -2932,6 +3006,7 @@ fn spawn_worker(
                                                         t_ms,
                                                         text_len,
                                                         &text_preview,
+                                                        Some(stable_prefix_len),
                                                     );
                                                 }
                                                 post_stop_events = post_stop_events.saturating_add(1);
@@ -2968,6 +3043,7 @@ fn spawn_worker(
                                                         t_ms,
                                                         text_len,
                                                         &text_preview,
+                                                        None,
                                                     );
                                                 }
                                                 post_stop_events = post_stop_events.saturating_add(1);
@@ -3019,6 +3095,7 @@ fn spawn_worker(
                                             t_ms,
                                             text_len,
                                             &text_preview,
+                                            None,
                                         );
                                     }
                                     post_stop_events = post_stop_events.saturating_add(1);
@@ -3094,6 +3171,7 @@ fn spawn_worker(
                                         t_ms,
                                         text_len,
                                         &text_preview,
+                                        None,
                                     );
                                 }
                                 post_stop_events = post_stop_events.saturating_add(1);
@@ -3105,7 +3183,7 @@ fn spawn_worker(
                                 .with_utterance_seq(utterance_seq);
                                 let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
                                 if sent {
-                                    log_emit_event("final", ev_seq, t_ms, 0, "");
+                                    log_emit_event("final", ev_seq, t_ms, 0, "", None);
                                 }
                                 post_stop_events = post_stop_events.saturating_add(1);
                             }
