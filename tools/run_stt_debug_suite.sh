@@ -221,14 +221,16 @@ extract_max_field() {
   local log="$1"
   local field="$2"
   local pattern="$3"
-  rg -n "$pattern" "$log" 2>/dev/null | sed -n "s/.*${field}=\\([0-9]\\+\\).*/\\1/p" | awk 'max<$1{max=$1} END{if (max=="") max=0; print max}'
+  { rg -n "$pattern" "$log" 2>/dev/null || true; } \
+    | sed -n "s/.*${field}=\\([0-9]\\+\\).*/\\1/p" \
+    | awk 'max<$1{max=$1} END{if (max=="") max=0; print max}'
 }
 
 extract_last_field() {
   local log="$1"
   local field="$2"
   local pattern="$3"
-  rg -n "$pattern" "$log" 2>/dev/null | tail -1 | sed -n "s/.*${field}=\\([0-9]\\+\\).*/\\1/p"
+  { rg -n "$pattern" "$log" 2>/dev/null || true; } | tail -1 | sed -n "s/.*${field}=\\([0-9]\\+\\).*/\\1/p"
 }
 
 pick_latest_feature_json() {
