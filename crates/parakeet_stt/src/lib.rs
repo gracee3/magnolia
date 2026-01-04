@@ -144,11 +144,36 @@ fn log_emit_event(kind: &str, seq: u64, t_ms: u64, text_len: usize, text_preview
     );
 }
 
+const ERROR_EMIT_THROTTLE_MS: u64 = 500;
+
+fn emit_error_event(
+    out_tx: &Sender<WorkerOut>,
+    ev: SttEvent,
+    t_ms: u64,
+    seq: u64,
+    text_len: usize,
+    text_preview: &str,
+    try_send: bool,
+) {
+    if !should_log_throttled(&DBG_STT_ERR_EMIT_MS, ERROR_EMIT_THROTTLE_MS) {
+        return;
+    }
+    let sent = if try_send {
+        out_tx.try_send(WorkerOut::Event(ev)).is_ok()
+    } else {
+        out_tx.send(WorkerOut::Event(ev)).is_ok()
+    };
+    if sent {
+        log_emit_event("error", seq, t_ms, text_len, text_preview);
+    }
+}
+
 static DBG_STT_AUDIO_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_OUT_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_AUDIO_DROP_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_PUSH_OK_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_PUSH_ERR_N: AtomicU64 = AtomicU64::new(0);
+static DBG_STT_ERR_EMIT_MS: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_GATE_FLIP_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_WORKER_EV_N: AtomicU64 = AtomicU64::new(0);
 static DBG_STT_CHUNK_N: AtomicU64 = AtomicU64::new(0);
@@ -1430,10 +1455,7 @@ fn spawn_worker(
                     let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                     let ev = SttEvent::error(-1, msg, 0, ev_seq)
                     .with_utterance_seq(utterance_seq);
-                    let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
-                    if sent {
-                        log_emit_event("error", ev_seq, 0, text_len, &text_preview);
-                    }
+                    emit_error_event(&out_tx, ev, 0, ev_seq, text_len, &text_preview, false);
                     return;
                 }
             };
@@ -1895,10 +1917,7 @@ fn spawn_worker(
                                 let ev = SttEvent::error(-4, msg, t_ms, ev_seq)
                                 .with_utterance_seq(utterance_seq)
                                 .with_trace(trace);
-                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
-                                if sent {
-                                    log_emit_event("error", ev_seq, t_ms, text_len, &text_preview);
-                                }
+                                emit_error_event(&out_tx, ev, t_ms, ev_seq, text_len, &text_preview, false);
                                 ok = false;
                             }
 
@@ -1968,10 +1987,7 @@ fn spawn_worker(
                                 let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                 let ev = SttEvent::error(-5, msg, t_ms, ev_seq)
                                 .with_utterance_seq(utterance_seq);
-                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
-                                if sent {
-                                    log_emit_event("error", ev_seq, t_ms, text_len, &text_preview);
-                                }
+                                emit_error_event(&out_tx, ev, t_ms, ev_seq, text_len, &text_preview, false);
                                 abort_utterance = true;
                                 abort_reason = Some("slow_chunk_abort".to_string());
                                 pending_stop = true;
@@ -2124,10 +2140,15 @@ fn spawn_worker(
                                             let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                             let ev = SttEvent::error(-3, message, t_ms, ev_seq)
                                             .with_utterance_seq(utterance_seq);
-                                            let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
-                                            if sent {
-                                                log_emit_event("error", ev_seq, t_ms, text_len, &text_preview);
-                                            }
+                                            emit_error_event(
+                                                &out_tx,
+                                                ev,
+                                                t_ms,
+                                                ev_seq,
+                                                text_len,
+                                                &text_preview,
+                                                false,
+                                            );
                                         }
                                     }
                                 }
@@ -2778,16 +2799,15 @@ fn spawn_worker(
                                         let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                         let ev = SttEvent::error(-4, msg, t_ms, ev_seq)
                                         .with_utterance_seq(utterance_seq);
-                                        let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
-                                        if sent {
-                                            log_emit_event(
-                                                "error",
-                                                ev_seq,
-                                                t_ms,
-                                                text_len,
-                                                &text_preview,
-                                            );
-                                        }
+                                        emit_error_event(
+                                            &out_tx,
+                                            ev,
+                                            t_ms,
+                                            ev_seq,
+                                            text_len,
+                                            &text_preview,
+                                            false,
+                                        );
                                         let decode_ms = t_decode0.elapsed().as_millis() as u64;
                                         if decode_ms >= slow_chunk_threshold_ms {
                                             slow_chunk_count = slow_chunk_count.saturating_add(1);
@@ -2864,16 +2884,15 @@ fn spawn_worker(
                                         let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                         let ev = SttEvent::error(-5, msg, t_ms, ev_seq)
                                         .with_utterance_seq(utterance_seq);
-                                        let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
-                                        if sent {
-                                            log_emit_event(
-                                                "error",
-                                                ev_seq,
-                                                t_ms,
-                                                text_len,
-                                                &text_preview,
-                                            );
-                                        }
+                                        emit_error_event(
+                                            &out_tx,
+                                            ev,
+                                            t_ms,
+                                            ev_seq,
+                                            text_len,
+                                            &text_preview,
+                                            false,
+                                        );
                                         abort_utterance = true;
                                         abort_reason = Some("slow_chunk_abort".to_string());
                                         pending_stop = true;
@@ -2962,16 +2981,15 @@ fn spawn_worker(
                                                 let ev_seq = seq.fetch_add(1, Ordering::Relaxed);
                                                 let ev = SttEvent::error(-3, message, t_ms, ev_seq)
                                                 .with_utterance_seq(utterance_seq);
-                                                let sent = out_tx.send(WorkerOut::Event(ev)).is_ok();
-                                                if sent {
-                                                    log_emit_event(
-                                                        "error",
-                                                        ev_seq,
-                                                        t_ms,
-                                                        text_len,
-                                                        &text_preview,
-                                                    );
-                                                }
+                                                emit_error_event(
+                                                    &out_tx,
+                                                    ev,
+                                                    t_ms,
+                                                    ev_seq,
+                                                    text_len,
+                                                    &text_preview,
+                                                    false,
+                                                );
                                             }
                                         }
                                     }
