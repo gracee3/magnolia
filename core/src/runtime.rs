@@ -70,9 +70,14 @@ pub struct RoutedSignal {
 /// Handle to a running module instance
 pub struct ModuleHandle {
     pub id: String,
-    pub thread: Option<JoinHandle<()>>,
+    task: Option<ModuleTask>,
     pub inbox: mpsc::Sender<Signal>,
     _shutdown_tx: mpsc::Sender<()>,
+}
+
+enum ModuleTask {
+    Async(tokio::task::JoinHandle<()>),
+    Thread(JoinHandle<()>),
 }
 
 impl ModuleHandle {
@@ -100,6 +105,7 @@ use crate::resources::gpu_map::{GpuBufferMap, GpuTextureMap, GpuTextureViewMap};
 pub struct ModuleHost {
     modules: HashMap<String, ModuleHandle>,
     router_tx: mpsc::Sender<RoutedSignal>,
+    runtime: Arc<tokio::runtime::Runtime>,
     pub audio_pool: Arc<AudioBufferPool>,
     pub blob_pool: Arc<BlobBufferPool>,
     #[cfg(feature = "gpu-resources")]
@@ -116,6 +122,9 @@ impl ModuleHost {
         Self {
             modules: HashMap::new(),
             router_tx,
+            runtime: Arc::new(
+                tokio::runtime::Runtime::new().expect("Failed to create Magnolia runtime"),
+            ),
             audio_pool: Arc::new(AudioBufferPool::new()),
             blob_pool: Arc::new(BlobBufferPool::new()),
             #[cfg(feature = "gpu-resources")]
@@ -145,39 +154,26 @@ impl ModuleHost {
         let outbox = self.router_tx.clone();
 
         // Spawn based on execution model
-        let handle = match module.execution_model() {
+        let task = match module.execution_model() {
             ExecutionModel::Async => {
-                // Spawn on tokio runtime in a new thread to isolate panics
+                // Async modules share one runtime so each module does not create
+                // an OS thread and a Tokio scheduler of its own.
                 let module_name_clone = module_name.clone();
-                thread::spawn(move || {
-                    let rt =
-                        tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-                    let result = catch_unwind(AssertUnwindSafe(|| {
-                        rt.block_on(async move {
-                            tokio::select! {
-                                _ = shutdown_rx.recv() => {
-                                    log::info!("Module {} received shutdown signal", module_name_clone);
-                                }
-                            _ = module.run(inbox_rx, outbox) => {
-                                log::info!("Module {} exited normally", module_name_clone);
-                            }
+                let runtime = self.runtime.clone();
+                ModuleTask::Async(runtime.spawn(async move {
+                    tokio::select! {
+                        _ = shutdown_rx.recv() => {
+                            log::info!("Module {} received shutdown signal", module_name_clone);
                         }
-                    });
-                    }));
-
-                    match result {
-                        Ok(_) => log::info!("Module {} thread exited cleanly", module_name),
-                        Err(e) => {
-                            log::error!("Module {} panicked: {:?}", module_name, e);
-                            // TODO: Auto-restart logic could go here
+                        _ = module.run(inbox_rx, outbox) => {
+                            log::info!("Module {} exited normally", module_name_clone);
                         }
                     }
-                })
+                }))
             }
             ExecutionModel::DedicatedThread => {
                 // Direct OS thread with its own runtime
-                thread::spawn(move || {
+                ModuleTask::Thread(thread::spawn(move || {
                     let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
                     let result = catch_unwind(AssertUnwindSafe(|| {
                         rt.block_on(async {
@@ -191,12 +187,12 @@ impl ModuleHost {
                             log::error!("Module {} panicked: {:?}", module_name, e);
                         }
                     }
-                })
+                }))
             }
             ExecutionModel::ThreadPool { .. } => {
                 // For now, treat as dedicated thread
                 // TODO: Implement rayon integration
-                thread::spawn(move || {
+                ModuleTask::Thread(thread::spawn(move || {
                     let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
                     let result = catch_unwind(AssertUnwindSafe(|| {
                         rt.block_on(async {
@@ -210,13 +206,13 @@ impl ModuleHost {
                             log::error!("Module {} panicked: {:?}", module_name, e);
                         }
                     }
-                })
+                }))
             }
         };
 
         let module_handle = ModuleHandle {
             id: module_id.clone(),
-            thread: Some(handle),
+            task: Some(task),
             inbox: inbox_tx,
             _shutdown_tx: shutdown_tx,
         };
@@ -244,8 +240,8 @@ impl ModuleHost {
     pub fn shutdown_module(&mut self, module_id: &str) -> Result<(), String> {
         if let Some(mut handle) = self.modules.remove(module_id) {
             handle.shutdown();
-            if let Some(thread) = handle.thread.take() {
-                let _ = thread.join();
+            if let Some(task) = handle.task.take() {
+                Self::join_task(&self.runtime, task);
             }
             Ok(())
         } else {
@@ -264,14 +260,28 @@ impl ModuleHost {
         }
 
         // Wait for all threads to finish
+        let runtime = self.runtime.clone();
         for (id, mut handle) in self.modules.drain() {
-            if let Some(thread) = handle.thread.take() {
+            if let Some(task) = handle.task.take() {
                 log::debug!("Waiting for {} to finish", id);
-                let _ = thread.join();
+                Self::join_task(&runtime, task);
             }
         }
 
         log::info!("All modules shut down");
+    }
+
+    fn join_task(runtime: &tokio::runtime::Runtime, task: ModuleTask) {
+        match task {
+            ModuleTask::Async(task) => {
+                if let Err(error) = runtime.block_on(task) {
+                    log::error!("Async module task failed during shutdown: {error}");
+                }
+            }
+            ModuleTask::Thread(thread) => {
+                let _ = thread.join();
+            }
+        }
     }
     /// Send a signal to a specific module (non-blocking)
     pub fn send_signal(&self, module_id: &str, signal: Signal) -> Result<(), String> {
