@@ -1,0 +1,8 @@
+[package]
+name = "caption_demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+caption_state = { path = "../../crates/caption_state" }
+speech_to_text = { path = "../../crates/speech_to_text" }
