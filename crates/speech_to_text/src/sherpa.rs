@@ -94,9 +94,14 @@ impl SttBackend for LocalSherpaBackend {
         while recognizer.is_ready(stream) {
             recognizer.decode(stream);
         }
+        let endpoint = recognizer.is_endpoint(stream);
         self.segment_end =
             audio.timestamp + Duration::from_secs_f32(audio.samples.len() as f32 / 16_000.0);
-        self.emit_hypothesis(self.segment_end);
+        if endpoint {
+            self.finish_utterance()?;
+        } else {
+            self.emit_hypothesis(self.segment_end);
+        }
         Ok(())
     }
 

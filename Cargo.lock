@@ -1012,6 +1012,7 @@ dependencies = [
  "audio_dsp",
  "audio_input",
  "audio_output",
+ "caption_state",
  "chrono",
  "env_logger",
  "log",
@@ -1024,6 +1025,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "speech_to_text",
  "sysinfo",
  "tokio",
  "toml 0.8.23",
@@ -4000,7 +4002,10 @@ name = "speech_to_text"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "magnolia_core",
  "serde",
+ "serde_json",
  "sherpa-onnx",
 ]
 

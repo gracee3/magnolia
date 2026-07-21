@@ -13,6 +13,8 @@ use audio_input::tile::AudioVisTile;
 use audio_input::{AudioInputSettings, AudioInputSource, AudioInputTile, AudioVizRingSink};
 use audio_output::tile::AudioOutputTile;
 use audio_output::{AudioOutputSettings, AudioOutputSink, AudioOutputState};
+use caption_state::CaptionState;
+use speech_to_text::{LocalSherpaBackend, SherpaConfig, SttEvent, SttProcessor};
 // use magnolia_core::ring_buffer; // Removed usage
 
 // Layout editor and visualizer modules
@@ -72,6 +74,7 @@ struct Model {
 
     // Shared Settings Handles
     audio_input_settings: std::sync::Arc<AudioInputSettings>,
+    caption_state: std::sync::Arc<std::sync::Mutex<CaptionState>>,
 
     // Modal animation states (for fullscreen modals)
     modal_anims: std::collections::HashMap<ModalAnimKey, ModalAnim>,
@@ -176,6 +179,7 @@ fn model(app: &App) -> Model {
     // Audio device settings
     let audio_input_settings = AudioInputSettings::new();
     let audio_output_settings = AudioOutputSettings::new();
+    let caption_state = std::sync::Arc::new(std::sync::Mutex::new(CaptionState::default()));
 
     // Audio input tile (device selection)
     tile_registry.register(AudioInputTile::new(
@@ -231,6 +235,43 @@ fn model(app: &App) -> Model {
         }
     } else {
         log::error!("Audio input source failed to initialize");
+    }
+
+    // Live STT is opt-in until a model is installed. The four paths should
+    // point at one compatible Sherpa streaming Zipformer model directory.
+    let sherpa_paths = [
+        std::env::var("MAGNOLIA_SHERPA_ENCODER"),
+        std::env::var("MAGNOLIA_SHERPA_DECODER"),
+        std::env::var("MAGNOLIA_SHERPA_JOINER"),
+        std::env::var("MAGNOLIA_SHERPA_TOKENS"),
+    ];
+    if sherpa_paths.iter().all(|path| path.is_ok()) {
+        let config = SherpaConfig {
+            encoder: sherpa_paths[0].as_ref().unwrap().into(),
+            decoder: sherpa_paths[1].as_ref().unwrap().into(),
+            joiner: sherpa_paths[2].as_ref().unwrap().into(),
+            tokens: sherpa_paths[3].as_ref().unwrap().into(),
+            num_threads: std::env::var("MAGNOLIA_SHERPA_THREADS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1),
+            endpointing: true,
+        };
+        let stt = SttProcessor::new("speech_to_text", Box::new(LocalSherpaBackend::new(config)));
+        patch_bay.register_module(stt.schema());
+        if let Err(e) = module_host.spawn(ProcessorAdapter::new(stt), 64) {
+            log::error!("Failed to spawn speech-to-text processor: {e}");
+        } else if let Err(e) =
+            patch_bay.connect("audio_input", "audio_out", "speech_to_text", "audio_in")
+        {
+            log::error!("Failed to connect microphone to speech-to-text: {e}");
+        } else {
+            log::info!("Live Sherpa captions enabled");
+        }
+    } else {
+        log::info!(
+            "Sherpa captions disabled; set MAGNOLIA_SHERPA_ENCODER/DECODER/JOINER/TOKENS to enable"
+        );
     }
 
     let audio_dsp = AudioDspProcessor::new("audio_dsp", dsp_state.clone());
@@ -366,6 +407,7 @@ fn model(app: &App) -> Model {
         frame_count: 0,
         keyboard_nav: KeyboardNav::new(),
         audio_input_settings: audio_input_settings.clone(),
+        caption_state,
         modal_anims: std::collections::HashMap::new(),
     };
 
@@ -530,6 +572,15 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Process Router Signals (From Plugins)
     while let Ok(routed) = model.router_rx.try_recv() {
+        if routed.source_id == "speech_to_text" {
+            if let Signal::Computed { content, .. } = &routed.signal {
+                if let Ok(event) = serde_json::from_str::<SttEvent>(content) {
+                    if let Ok(mut captions) = model.caption_state.lock() {
+                        captions.apply(event);
+                    }
+                }
+            }
+        }
         // Handle host-level signals before routing
         if let Signal::Texture {
             handle,
@@ -955,6 +1006,41 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     tiles::render_error_overlay(&draw, rect, &error);
                 }
             }
+        }
+    }
+
+    // Live caption monitor. Provisional text is dimmed and replaced in place;
+    // finalized segments remain stable in the caption reducer.
+    if let Ok(captions) = model.caption_state.lock() {
+        if !captions.committed.is_empty() || captions.provisional.is_some() {
+            let win = app.window_rect();
+            let caption_rect = Rect::from_x_y_w_h(win.x(), win.top() - 42.0, win.w() * 0.82, 64.0);
+            draw.rect()
+                .xy(caption_rect.xy())
+                .wh(caption_rect.wh())
+                .color(rgba(0.02, 0.02, 0.04, 0.92));
+            draw_text(
+                &draw,
+                FontId::PlexSansBold,
+                "LIVE CAPTION",
+                pt2(caption_rect.left() + 14.0, caption_rect.top() - 14.0),
+                10.0,
+                srgba(0.0, 1.0, 1.0, 0.85),
+                TextAlignment::Left,
+            );
+            draw_text(
+                &draw,
+                FontId::PlexSansRegular,
+                &captions.display_text(),
+                pt2(caption_rect.x(), caption_rect.y() - 8.0),
+                18.0,
+                if captions.provisional.is_some() {
+                    srgba(0.75, 0.75, 0.8, 0.9)
+                } else {
+                    srgba(0.95, 0.95, 1.0, 1.0)
+                },
+                TextAlignment::Center,
+            );
         }
     }
 

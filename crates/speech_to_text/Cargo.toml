@@ -5,9 +5,13 @@ edition = "2021"
 
 [features]
 default = []
-sherpa = ["dep:sherpa-onnx"]
+magnolia = ["dep:magnolia_core"]
+sherpa = ["dep:sherpa-onnx", "magnolia"]
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sherpa-onnx = { version = "1.13.4", optional = true }
+magnolia_core = { path = "../../core", optional = true }

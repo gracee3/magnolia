@@ -6,11 +6,16 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::time::Duration;
 
+#[cfg(feature = "magnolia")]
+mod processor;
 #[cfg(feature = "sherpa")]
 mod sherpa;
 
+#[cfg(feature = "magnolia")]
+pub use processor::SttProcessor;
 #[cfg(feature = "sherpa")]
 pub use sherpa::{LocalSherpaBackend, SherpaConfig};
 
@@ -65,7 +70,76 @@ pub enum SttEvent {
     },
 }
 
-pub trait SttBackend: Send {
+impl SttEvent {
+    /// Partial hypotheses may be replaced or dropped under backpressure;
+    /// finals, status, and errors are loss-sensitive.
+    pub fn is_replaceable(&self) -> bool {
+        matches!(self, Self::Partial { .. })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SttQueueError {
+    FullLossSensitive,
+}
+
+/// A bounded event queue that protects durable transcript and lifecycle events
+/// from being displaced by an unbounded stream of partial hypotheses.
+pub struct SttEventQueue {
+    capacity: usize,
+    events: VecDeque<SttEvent>,
+    dropped_partials: u64,
+}
+
+impl SttEventQueue {
+    pub fn new(capacity: usize) -> Self {
+        assert!(capacity > 0, "STT event queue capacity must be positive");
+        Self {
+            capacity,
+            events: VecDeque::with_capacity(capacity),
+            dropped_partials: 0,
+        }
+    }
+
+    pub fn push(&mut self, event: SttEvent) -> Result<(), SttQueueError> {
+        if self.events.len() < self.capacity {
+            self.events.push_back(event);
+            return Ok(());
+        }
+
+        if event.is_replaceable() {
+            self.dropped_partials += 1;
+            return Ok(());
+        }
+
+        if let Some(index) = self.events.iter().position(SttEvent::is_replaceable) {
+            self.events.remove(index);
+            self.dropped_partials += 1;
+            self.events.push_back(event);
+            Ok(())
+        } else {
+            Err(SttQueueError::FullLossSensitive)
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    pub fn dropped_partials(&self) -> u64 {
+        self.dropped_partials
+    }
+
+    pub fn drain_into(&mut self, output: &mut Vec<SttEvent>) {
+        output.extend(self.events.drain(..));
+    }
+}
+
+pub trait SttBackend: Send + Sync {
     fn start(&mut self, session_id: &str) -> Result<()>;
     fn push_audio(&mut self, audio: AudioChunk) -> Result<()>;
     fn finish_utterance(&mut self) -> Result<()>;
@@ -132,5 +206,70 @@ mod tests {
         backend.poll_events(&mut events).unwrap();
         assert_eq!(events.len(), 1);
         assert!(backend.events.is_empty());
+    }
+
+    fn partial(sequence: u64) -> SttEvent {
+        SttEvent::Partial {
+            session_id: "s".into(),
+            segment_id: 1,
+            text: format!("p{sequence}"),
+            audio_end_ms: sequence,
+            sequence,
+        }
+    }
+
+    fn final_event(sequence: u64) -> SttEvent {
+        SttEvent::Final {
+            session_id: "s".into(),
+            segment_id: 1,
+            text: "done".into(),
+            start_ms: 0,
+            end_ms: sequence,
+            sequence,
+        }
+    }
+
+    #[test]
+    fn queue_drops_incoming_partials_when_full() {
+        let mut queue = SttEventQueue::new(2);
+        queue.push(partial(1)).unwrap();
+        queue.push(partial(2)).unwrap();
+        queue.push(partial(3)).unwrap();
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.dropped_partials(), 1);
+    }
+
+    #[test]
+    fn queue_evicts_partial_for_loss_sensitive_event() {
+        let mut queue = SttEventQueue::new(2);
+        queue.push(partial(1)).unwrap();
+        queue
+            .push(SttEvent::Status {
+                status: SttStatus::Listening,
+            })
+            .unwrap();
+        queue.push(final_event(3)).unwrap();
+
+        let mut events = Vec::new();
+        queue.drain_into(&mut events);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], SttEvent::Status { .. }));
+        assert!(matches!(events[1], SttEvent::Final { .. }));
+        assert_eq!(queue.dropped_partials(), 1);
+    }
+
+    #[test]
+    fn queue_rejects_when_only_loss_sensitive_events_remain() {
+        let mut queue = SttEventQueue::new(2);
+        queue.push(final_event(1)).unwrap();
+        queue
+            .push(SttEvent::Status {
+                status: SttStatus::Listening,
+            })
+            .unwrap();
+        assert_eq!(
+            queue.push(final_event(2)),
+            Err(SttQueueError::FullLossSensitive)
+        );
     }
 }
