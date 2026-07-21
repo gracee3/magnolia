@@ -651,6 +651,7 @@ mod tests {
         enabled: bool,
         ran: Arc<AtomicBool>,
         slow_shutdown: bool,
+        ports: Vec<crate::Port>,
     }
 
     impl TestModule {
@@ -662,6 +663,7 @@ mod tests {
                     enabled: true,
                     ran: ran.clone(),
                     slow_shutdown: false,
+                    ports: vec![],
                 },
                 ran,
             )
@@ -673,6 +675,17 @@ mod tests {
                 enabled: true,
                 ran: Arc::new(AtomicBool::new(false)),
                 slow_shutdown: true,
+                ports: vec![],
+            }
+        }
+
+        fn with_ports(id: &str, ports: Vec<crate::Port>) -> Self {
+            Self {
+                id: id.to_string(),
+                enabled: true,
+                ran: Arc::new(AtomicBool::new(false)),
+                slow_shutdown: false,
+                ports,
             }
         }
     }
@@ -697,7 +710,7 @@ mod tests {
                 id: self.id.clone(),
                 name: self.id.clone(),
                 description: "Test module".to_string(),
-                ports: vec![],
+                ports: self.ports.clone(),
                 settings_schema: None,
             }
         }
@@ -767,6 +780,48 @@ mod tests {
         let report = host.shutdown_all_with_timeout(Duration::from_millis(1));
         assert_eq!(report.completed, Vec::<String>::new());
         assert_eq!(report.timed_out, vec!["slow_module".to_string()]);
+    }
+
+    #[test]
+    fn route_signal_fanout_is_delivered_and_counted() {
+        let (router_tx, _router_rx) = mpsc::channel(10);
+        let mut host = ModuleHost::new(router_tx);
+        let mut patch_bay = crate::PatchBay::new();
+        let output = crate::Port {
+            id: "out".to_string(),
+            label: "Out".to_string(),
+            data_type: crate::DataType::Any,
+            direction: crate::PortDirection::Output,
+        };
+        let input = crate::Port {
+            id: "in".to_string(),
+            label: "In".to_string(),
+            data_type: crate::DataType::Any,
+            direction: crate::PortDirection::Input,
+        };
+        let source = TestModule::with_ports("source", vec![output]);
+        let sink_one = TestModule::with_ports("sink_one", vec![input.clone()]);
+        let sink_two = TestModule::with_ports("sink_two", vec![input]);
+        patch_bay.register_module(source.schema());
+        patch_bay.register_module(sink_one.schema());
+        patch_bay.register_module(sink_two.schema());
+        patch_bay
+            .connect("source", "out", "sink_one", "in")
+            .unwrap();
+        patch_bay
+            .connect("source", "out", "sink_two", "in")
+            .unwrap();
+        host.spawn(source, 10).unwrap();
+        host.spawn(sink_one, 10).unwrap();
+        host.spawn(sink_two, 10).unwrap();
+
+        let result = host.route_signal(
+            &patch_bay,
+            RoutedSignal::new("source", "out", Signal::Pulse),
+        );
+        assert_eq!(result.delivered, 2);
+        assert!(!result.dropped);
+        assert_eq!(host.routing_metrics().snapshot().fanout_clones, 1);
     }
 
     #[test]
