@@ -40,11 +40,14 @@ id = "captions"
 col = 0
 row = 1
 colspan = 2
-rowspan = 1
+rowspan = 2
 module = "captions"
 enabled = true
 
 [tiles.settings.config]
+
+[tiles.settings.keybinds]
+clear = "c"
 
 [[tiles]]
 id = "audio_output"
@@ -88,6 +91,7 @@ enabled = true
 
 [tiles.settings.config]
 gain = 1.0
+agc_enabled = true
 lowpass_enabled = false
 lowpass_hz = 2000.0
 is_muted = false

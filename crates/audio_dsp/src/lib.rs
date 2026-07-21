@@ -19,6 +19,7 @@ fn store_f32(atom: &AtomicU32, value: f32) {
 #[derive(Default)]
 pub struct AudioDspState {
     gain: AtomicU32,
+    agc_enabled: AtomicBool,
     lowpass_hz: AtomicU32,
     lowpass_enabled: AtomicBool,
     is_muted: AtomicBool,
@@ -28,6 +29,7 @@ impl AudioDspState {
     pub fn new() -> Arc<Self> {
         let state = Arc::new(Self::default());
         store_f32(&state.gain, 1.0);
+        state.agc_enabled.store(true, Ordering::Relaxed);
         store_f32(&state.lowpass_hz, 2000.0);
         state.is_muted.store(false, Ordering::Relaxed);
         state
@@ -39,6 +41,14 @@ impl AudioDspState {
 
     pub fn set_gain(&self, gain: f32) {
         store_f32(&self.gain, gain);
+    }
+
+    pub fn agc_enabled(&self) -> bool {
+        self.agc_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_agc_enabled(&self, enabled: bool) {
+        self.agc_enabled.store(enabled, Ordering::Relaxed);
     }
 
     pub fn lowpass_hz(&self) -> f32 {
@@ -72,6 +82,7 @@ pub struct AudioDspProcessor {
     enabled: bool,
     state: Arc<AudioDspState>,
     last_samples: Vec<f32>,
+    agc_gain: f32,
 }
 
 impl AudioDspProcessor {
@@ -81,6 +92,7 @@ impl AudioDspProcessor {
             enabled: true,
             state,
             last_samples: Vec::new(),
+            agc_gain: 1.0,
         }
     }
 }
@@ -134,6 +146,7 @@ impl Processor for AudioDspProcessor {
         };
 
         let gain = self.state.gain();
+        let agc_enabled = self.state.agc_enabled();
         let lowpass_enabled = self.state.lowpass_enabled();
         let lowpass_hz = self.state.lowpass_hz().max(10.0);
 
@@ -153,20 +166,49 @@ impl Processor for AudioDspProcessor {
             self.last_samples = vec![0.0; channels as usize];
         }
 
+        if !agc_enabled {
+            self.agc_gain = 1.0;
+        }
+
         let dt = 1.0 / sample_rate as f32;
         let rc = 1.0 / (2.0 * std::f32::consts::PI * lowpass_hz);
         let alpha = dt / (rc + dt);
 
-        for (i, sample) in data.iter_mut().enumerate() {
-            let mut x = *sample * gain;
-            if lowpass_enabled {
-                let ch = i % channels as usize;
-                let y_prev = self.last_samples[ch];
-                let y = y_prev + alpha * (x - y_prev);
-                self.last_samples[ch] = y;
-                x = y;
+        let channel_count = channels as usize;
+        for frame in data.chunks_exact_mut(channel_count) {
+            let frame_rms = (frame.iter().map(|sample| *sample * *sample).sum::<f32>()
+                / channel_count as f32)
+                .sqrt();
+            let desired_agc_gain = if agc_enabled {
+                // Keep silence near unity so room noise is not aggressively amplified.
+                if frame_rms < 0.003 {
+                    1.0
+                } else {
+                    (0.10 / frame_rms).clamp(0.5, 8.0)
+                }
+            } else {
+                1.0
+            };
+            let smoothing = if desired_agc_gain < self.agc_gain {
+                // Fast attack, slower release: speech becomes audible quickly without
+                // pumping badly between words.
+                0.08
+            } else {
+                0.015
+            };
+            self.agc_gain += (desired_agc_gain - self.agc_gain) * smoothing;
+            let frame_gain = if agc_enabled { self.agc_gain } else { 1.0 };
+
+            for (channel, sample) in frame.iter_mut().enumerate() {
+                let mut x = *sample * frame_gain * gain;
+                if lowpass_enabled {
+                    let y_prev = self.last_samples[channel];
+                    let y = y_prev + alpha * (x - y_prev);
+                    self.last_samples[channel] = y;
+                    x = y;
+                }
+                *sample = x.clamp(-1.0, 1.0);
             }
-            *sample = x;
         }
 
         Ok(Some(Signal::Audio {
@@ -175,5 +217,19 @@ impl Processor for AudioDspProcessor {
             timestamp_us,
             data,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AudioDspState;
+
+    #[test]
+    fn automatic_gain_control_is_enabled_by_default_and_toggleable() {
+        let state = AudioDspState::new();
+        assert!(state.agc_enabled());
+
+        state.set_agc_enabled(false);
+        assert!(!state.agc_enabled());
     }
 }

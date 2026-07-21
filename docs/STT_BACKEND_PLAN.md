@@ -1,6 +1,6 @@
 # Magnolia STT Backend Plan
 
-Status: accepted direction; implementation pending  
+Status: local streaming implementation complete; cloud/reconciliation follow-up pending
 Last reviewed: 2026-07-21  
 Target machine: Lenovo ThinkPad T14, Intel Core i5-1145G7, Iris Xe, 16 GB RAM, no NVIDIA CUDA GPU
 
@@ -16,6 +16,28 @@ Implement providers in this order:
 The initial/default backend for the T14 should be `LocalSherpa`. It is a true streaming recognizer and should provide more responsive partial captions at lower CPU cost than repeatedly decoding overlapping Whisper windows. Accuracy and latency must be measured on this machine before making it the permanent default.
 
 `OpenAiRealtime` is the first fallback when local recognition is unavailable, unhealthy, or explicitly disabled. Automatic fallback must be opt-in because it sends microphone audio off-device and can incur cost. `LocalWhisper`, Google Chirp, and other providers are deferred evaluation candidates, not part of the initial implementation.
+
+## Current implementation snapshot
+
+The first local slice is now running in the daemon:
+
+- `LocalSherpaBackend` uses the CPU/int8 streaming Zipformer model.
+- `SttProcessor` emits replaceable partial events and loss-sensitive final events.
+- `CaptionState` keeps committed and provisional text separate, so live partials
+  update in place and endpoint results remain stable.
+- The daemon renders captions in a dedicated 2x2 tile; `C` clears the visible
+  transcript while preserving event ordering.
+- `apps/stt_bench` and the LibriSpeech `test-clean` scripts measure WER, first
+  partial latency, first final latency, and real-time factor.
+- `config/transcription.toml` now records source priority/trust, future
+  reconciliation policy, and technical-context inputs. Only local Sherpa is
+  active; the cloud source and reconciler are explicit follow-up work.
+
+The initial clean-corpus sample measured WER `0.071`, first partial at `53 ms`,
+first final at `501 ms`, and real-time factor `0.048` on the target ThinkPad.
+Those numbers are a baseline, not a production guarantee; live microphone
+latency still needs measurement across endpointing, capture timestamps, and
+resampling conditions.
 
 ## Current repository state
 

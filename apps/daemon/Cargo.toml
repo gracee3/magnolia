@@ -19,6 +19,7 @@ audio_output = { path = "../../crates/audio_output", features = ["tile-rendering
 caption_state = { path = "../../crates/caption_state" }
 speech_to_text = { path = "../../crates/speech_to_text", features = ["sherpa", "magnolia"] }
 magnolia_module_api = { path = "../../crates/magnolia-module-api" }
+magnolia_config = { path = "../../crates/magnolia-config" }
 # nannou_egui = "0.19.0"
 toml = "0.8"
 log = "0.4"

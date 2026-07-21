@@ -1018,6 +1018,7 @@ dependencies = [
  "env_logger",
  "log",
  "magnolia-ui",
+ "magnolia_config",
  "magnolia_core",
  "magnolia_module_api",
  "magnolia_signals",
@@ -2337,6 +2338,8 @@ name = "magnolia_config"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]

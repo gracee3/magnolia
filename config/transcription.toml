@@ -1,0 +1,60 @@
+version = 1
+
+# Sources are ranked by priority first, then trust. Cloud sources remain
+# explicitly disabled until their backend and credentials are configured.
+[[sources]]
+id = "sherpa_local"
+provider = "local_sherpa"
+enabled = true
+priority = 100
+trust = 0.80
+mode = "realtime"
+language = "en"
+model = "streaming-zipformer-en-2023-06-26-int8"
+model_dir = "models/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+num_threads = 2
+endpointing = true
+
+[[sources]]
+id = "openai_realtime"
+provider = "openai_realtime"
+enabled = false
+priority = 80
+trust = 0.95
+mode = "correction"
+language = "en"
+model = "gpt-realtime-whisper"
+delay = "medium"
+
+[reconciliation]
+# The schema is checked in now; reconciliation becomes active when a second
+# backend is implemented. Until then CaptionState uses Sherpa partial/final data.
+enabled = false
+strategy = "priority_weighted_alignment"
+provisional_min_trust = 0.0
+final_min_trust = 0.80
+correction_window_ms = 4000
+deleted_word_linger_ms = 800
+
+[context]
+# Context extraction is deliberately disabled until its bounded scanner is
+# implemented. Explicit terms document the initial technical vocabulary.
+enabled = false
+project_root = "."
+include = [
+    "README.md",
+    "docs/**/*.md",
+    "Cargo.toml",
+    "crates/**/*.rs",
+    "apps/**/*.rs",
+]
+explicit_terms = [
+    "Magnolia",
+    "Sherpa-ONNX",
+    "Zipformer",
+    "PipeWire",
+    "Tokio",
+    "WebSocket",
+    "LibriSpeech",
+]
+max_terms = 2000

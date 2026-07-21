@@ -120,7 +120,7 @@ impl TileRenderer for CaptionTile {
         draw_text(
             draw,
             FontId::PlexMonoRegular,
-            "Partial text is dimmed; endpoint text is committed",
+            "C: clear text  |  partial text is dimmed; endpoint text is committed",
             pt2(rect.x(), rect.bottom() + 22.0),
             11.0,
             srgba(0.45, 0.48, 0.55, 1.0),
@@ -134,6 +134,17 @@ impl TileRenderer for CaptionTile {
     }
 
     fn bindable_actions(&self) -> Vec<BindableAction> {
-        Vec::new()
+        vec![BindableAction::new("clear", "Clear Captions", false)]
+    }
+
+    fn execute_action(&mut self, action: &str) -> bool {
+        if action != "clear" {
+            return false;
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state.clear();
+            return true;
+        }
+        false
     }
 }

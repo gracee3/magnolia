@@ -184,6 +184,25 @@ fn model(app: &App) -> Model {
     let caption_state = std::sync::Arc::new(std::sync::Mutex::new(CaptionState::default()));
     let mut tile_registry = tiles::create_default_registry(caption_state.clone());
     let mut stt_metrics = None;
+    let mut sherpa_ready = false;
+    let transcription_config = match magnolia_config::read_transcription_config() {
+        Ok(config) => config,
+        Err(error) => {
+            log::warn!("Could not load transcription config: {error}; using environment defaults");
+            magnolia_config::TranscriptionConfig::default()
+        }
+    };
+    for source in transcription_config
+        .sources
+        .iter()
+        .filter(|source| source.enabled && source.provider != "local_sherpa")
+    {
+        log::warn!(
+            "Transcription source '{}' is enabled but provider '{}' is not implemented yet",
+            source.id,
+            source.provider
+        );
+    }
 
     // Audio input tile (device selection)
     tile_registry.register(AudioInputTile::new(
@@ -243,7 +262,12 @@ fn model(app: &App) -> Model {
 
     // Live STT is opt-in until a model is installed. The four paths should
     // point at one compatible Sherpa streaming Zipformer model directory.
-    let model_dir = std::env::var("MAGNOLIA_SHERPA_MODEL_DIR").ok();
+    let sherpa_source = transcription_config.source("sherpa_local");
+    let model_dir = std::env::var("MAGNOLIA_SHERPA_MODEL_DIR").ok().or_else(|| {
+        sherpa_source
+            .and_then(|source| source.model_dir.as_ref())
+            .map(|path| path.display().to_string())
+    });
     let model_path = |variable: &str, filename: &str| {
         std::env::var(variable).ok().or_else(|| {
             model_dir.as_ref().map(|dir| {
@@ -276,7 +300,7 @@ fn model(app: &App) -> Model {
                 "0" | "false" | "off" | "no"
             )
         })
-        .unwrap_or(true);
+        .unwrap_or_else(|_| sherpa_source.map(|source| source.enabled).unwrap_or(true));
     let sherpa_paths_complete = sherpa_paths.iter().all(|path| {
         path.as_deref()
             .map(std::path::Path::new)
@@ -296,8 +320,11 @@ fn model(app: &App) -> Model {
             num_threads: std::env::var("MAGNOLIA_SHERPA_THREADS")
                 .ok()
                 .and_then(|value| value.parse().ok())
+                .or_else(|| sherpa_source.and_then(|source| source.num_threads))
                 .unwrap_or(1),
-            endpointing: true,
+            endpointing: sherpa_source
+                .and_then(|source| source.endpointing)
+                .unwrap_or(true),
         };
         let stt = SttProcessor::new("speech_to_text", Box::new(LocalSherpaBackend::new(config)));
         stt_metrics = Some(stt.metrics());
@@ -309,11 +336,8 @@ fn model(app: &App) -> Model {
                     status: speech_to_text::SttStatus::Failed,
                 });
             }
-        } else if let Err(e) =
-            patch_bay.connect("audio_input", "audio_out", "speech_to_text", "audio_in")
-        {
-            log::error!("Failed to connect microphone to speech-to-text: {e}");
         } else {
+            sherpa_ready = true;
             log::info!("Live Sherpa captions enabled");
         }
     } else if !sherpa_enabled {
@@ -337,6 +361,11 @@ fn model(app: &App) -> Model {
     patch_bay.register_module(dsp_schema);
     if let Err(e) = module_host.spawn(ProcessorAdapter::new(audio_dsp), 100) {
         log::error!("Failed to spawn audio DSP: {}", e);
+    }
+    if sherpa_ready {
+        if let Err(e) = patch_bay.connect("audio_dsp", "audio_out", "speech_to_text", "audio_in") {
+            log::error!("Failed to connect processed audio to speech-to-text: {e}");
+        }
     }
 
     let audio_viz_sink = AudioVizRingSink::new("audio_viz", viz_tx, vis_latency, vis_sr, vis_ch);

@@ -10,6 +10,7 @@ pub struct AudioDspTile {
     id: String,
     state: Arc<AudioDspState>,
     gain: Mutex<f32>,
+    agc_enabled: Mutex<bool>,
     lowpass_hz: Mutex<f32>,
     lowpass_enabled: Mutex<bool>,
     is_muted: Mutex<bool>,
@@ -21,6 +22,7 @@ impl AudioDspTile {
             id: id.to_string(),
             state,
             gain: Mutex::new(1.0),
+            agc_enabled: Mutex::new(true),
             lowpass_hz: Mutex::new(2000.0),
             lowpass_enabled: Mutex::new(false),
             is_muted: Mutex::new(false),
@@ -44,6 +46,7 @@ impl TileRenderer for AudioDspTile {
             .color(srgba(0.03, 0.03, 0.06, 0.95));
 
         let gain = self.gain.lock().map(|v| *v).unwrap_or(1.0);
+        let agc = self.agc_enabled.lock().map(|v| *v).unwrap_or(true);
         let lowpass = self.lowpass_enabled.lock().map(|v| *v).unwrap_or(false);
         let cutoff = self.lowpass_hz.lock().map(|v| *v).unwrap_or(2000.0);
         let muted = self.is_muted.lock().map(|v| *v).unwrap_or(true);
@@ -55,6 +58,16 @@ impl TileRenderer for AudioDspTile {
             pt2(rect.x(), rect.top() - 18.0),
             12.0,
             srgba(0.6, 0.8, 0.9, 1.0),
+            TextAlignment::Center,
+        );
+
+        draw_text(
+            draw,
+            FontId::PlexMonoRegular,
+            &format!("AGC: {}", if agc { "On" } else { "Off" }),
+            pt2(rect.x(), rect.y() + 26.0),
+            11.0,
+            srgba(0.5, 0.7, 0.9, 1.0),
             TextAlignment::Center,
         );
 
@@ -110,6 +123,7 @@ impl TileRenderer for AudioDspTile {
 
         let muted = self.is_muted.lock().map(|v| *v).unwrap_or(true);
         let gain = self.gain.lock().map(|v| *v).unwrap_or(1.0);
+        let agc = self.agc_enabled.lock().map(|v| *v).unwrap_or(true);
         let lowpass = self.lowpass_enabled.lock().map(|v| *v).unwrap_or(false);
         let cutoff = self.lowpass_hz.lock().map(|v| *v).unwrap_or(2000.0);
 
@@ -156,6 +170,16 @@ impl TileRenderer for AudioDspTile {
         draw_text(
             draw,
             FontId::PlexSansRegular,
+            &format!("AGC: {} [G]", if agc { "Enabled" } else { "Disabled" }),
+            pt2(rect.left() + 100.0, y),
+            14.0,
+            srgba(0.7, 0.7, 0.7, 1.0),
+            TextAlignment::Left,
+        );
+        y -= spacing;
+        draw_text(
+            draw,
+            FontId::PlexSansRegular,
             &format!("Lowpass: {}", if lowpass { "Enabled" } else { "Disabled" }),
             pt2(rect.left() + 100.0, y),
             14.0,
@@ -182,7 +206,10 @@ impl TileRenderer for AudioDspTile {
     }
 
     fn bindable_actions(&self) -> Vec<BindableAction> {
-        vec![BindableAction::new("mute", "Toggle Mute", true)]
+        vec![
+            BindableAction::new("mute", "Toggle Mute", true),
+            BindableAction::new("agc", "Toggle Automatic Gain Control", true),
+        ]
     }
 
     fn execute_action(&mut self, action: &str) -> bool {
@@ -191,6 +218,12 @@ impl TileRenderer for AudioDspTile {
                 let mut muted = self.is_muted.lock().unwrap();
                 *muted = !*muted;
                 self.state.set_muted(*muted);
+                true
+            }
+            "agc" => {
+                let mut enabled = self.agc_enabled.lock().unwrap();
+                *enabled = !*enabled;
+                self.state.set_agc_enabled(*enabled);
                 true
             }
             _ => false,
@@ -204,6 +237,12 @@ impl TileRenderer for AudioDspTile {
             self.state.set_muted(*muted);
             return true;
         }
+        if key == Key::G {
+            let mut enabled = self.agc_enabled.lock().unwrap();
+            *enabled = !*enabled;
+            self.state.set_agc_enabled(*enabled);
+            return true;
+        }
         false
     }
 
@@ -212,6 +251,7 @@ impl TileRenderer for AudioDspTile {
             "type": "object",
             "properties": {
                 "gain": { "type": "number", "default": 1.0, "minimum": 0.0, "maximum": 4.0 },
+                "agc_enabled": { "type": "boolean", "default": true, "title": "Automatic Gain Control" },
                 "lowpass_enabled": { "type": "boolean", "default": false },
                 "lowpass_hz": { "type": "number", "default": 2000.0, "minimum": 80.0, "maximum": 8000.0 },
                 "is_muted": { "type": "boolean", "default": false }
@@ -226,6 +266,12 @@ impl TileRenderer for AudioDspTile {
                 *current = gain;
             }
             self.state.set_gain(gain);
+        }
+        if let Some(enabled) = settings.get("agc_enabled").and_then(|v| v.as_bool()) {
+            if let Ok(mut current) = self.agc_enabled.lock() {
+                *current = enabled;
+            }
+            self.state.set_agc_enabled(enabled);
         }
         if let Some(enabled) = settings.get("lowpass_enabled").and_then(|v| v.as_bool()) {
             if let Ok(mut current) = self.lowpass_enabled.lock() {
@@ -250,11 +296,13 @@ impl TileRenderer for AudioDspTile {
 
     fn get_settings(&self) -> serde_json::Value {
         let gain = self.gain.lock().map(|v| *v).unwrap_or(1.0);
+        let agc_enabled = self.agc_enabled.lock().map(|v| *v).unwrap_or(true);
         let lowpass_enabled = self.lowpass_enabled.lock().map(|v| *v).unwrap_or(false);
         let lowpass_hz = self.lowpass_hz.lock().map(|v| *v).unwrap_or(2000.0);
         let is_muted = self.is_muted.lock().map(|v| *v).unwrap_or(true);
         serde_json::json!({
             "gain": gain,
+            "agc_enabled": agc_enabled,
             "lowpass_enabled": lowpass_enabled,
             "lowpass_hz": lowpass_hz,
             "is_muted": is_muted,

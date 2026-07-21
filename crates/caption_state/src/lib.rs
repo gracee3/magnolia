@@ -31,6 +31,14 @@ impl Default for CaptionState {
 }
 
 impl CaptionState {
+    /// Remove visible transcript text without resetting the active recognizer.
+    /// Future events must continue after `last_sequence` so stale queued
+    /// updates cannot repopulate the cleared view.
+    pub fn clear(&mut self) {
+        self.committed.clear();
+        self.provisional = None;
+    }
+
     pub fn apply(&mut self, event: SttEvent) {
         let sequence = match &event {
             SttEvent::Partial { sequence, .. } | SttEvent::Final { sequence, .. } => *sequence,
@@ -141,5 +149,26 @@ mod tests {
             sequence: 1,
         });
         assert_eq!(state.display_text(), "new");
+    }
+
+    #[test]
+    fn clear_preserves_sequence_guard() {
+        let mut state = CaptionState::default();
+        state.apply(SttEvent::Partial {
+            session_id: "s".into(),
+            segment_id: 1,
+            text: "visible".into(),
+            audio_end_ms: 1,
+            sequence: 4,
+        });
+        state.clear();
+        state.apply(SttEvent::Partial {
+            session_id: "s".into(),
+            segment_id: 1,
+            text: "stale".into(),
+            audio_end_ms: 1,
+            sequence: 3,
+        });
+        assert!(state.display_text().is_empty());
     }
 }
