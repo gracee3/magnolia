@@ -1,6 +1,38 @@
 use super::{AudioChunk, SttBackend, SttEvent, SttEventQueue, SttQueueError};
 use async_trait::async_trait;
 use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+#[derive(Default)]
+pub struct SttMetrics {
+    pub audio_chunks: AtomicU64,
+    pub emitted_events: AtomicU64,
+    pub dropped_partials: AtomicU64,
+    pub backend_errors: AtomicU64,
+    pub queue_overflows: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SttMetricsSnapshot {
+    pub audio_chunks: u64,
+    pub emitted_events: u64,
+    pub dropped_partials: u64,
+    pub backend_errors: u64,
+    pub queue_overflows: u64,
+}
+
+impl SttMetrics {
+    pub fn snapshot(&self) -> SttMetricsSnapshot {
+        SttMetricsSnapshot {
+            audio_chunks: self.audio_chunks.load(Ordering::Relaxed),
+            emitted_events: self.emitted_events.load(Ordering::Relaxed),
+            dropped_partials: self.dropped_partials.load(Ordering::Relaxed),
+            backend_errors: self.backend_errors.load(Ordering::Relaxed),
+            queue_overflows: self.queue_overflows.load(Ordering::Relaxed),
+        }
+    }
+}
 
 /// Magnolia adapter for a streaming STT backend.
 ///
@@ -13,6 +45,7 @@ pub struct SttProcessor {
     backend: Box<dyn SttBackend>,
     started: bool,
     events: SttEventQueue,
+    metrics: Arc<SttMetrics>,
 }
 
 impl SttProcessor {
@@ -23,7 +56,12 @@ impl SttProcessor {
             backend,
             started: false,
             events: SttEventQueue::new(64),
+            metrics: Arc::new(SttMetrics::default()),
         }
+    }
+
+    pub fn metrics(&self) -> Arc<SttMetrics> {
+        self.metrics.clone()
     }
 
     fn event_signal(event: SttEvent) -> anyhow::Result<Signal> {
@@ -81,26 +119,47 @@ impl Processor for SttProcessor {
         else {
             return Ok(None);
         };
+        self.metrics.audio_chunks.fetch_add(1, Ordering::Relaxed);
         if !self.started {
-            self.backend.start(&self.id)?;
+            if let Err(error) = self.backend.start(&self.id) {
+                self.metrics.backend_errors.fetch_add(1, Ordering::Relaxed);
+                return Err(error);
+            }
             self.started = true;
         }
         let audio = normalize_audio(sample_rate, channels, &data, timestamp_us)?;
-        self.backend.push_audio(audio)?;
-        let mut polled = Vec::new();
-        self.backend.poll_events(&mut polled)?;
-        for event in polled {
-            self.events.push(event).map_err(|error| match error {
-                SttQueueError::FullLossSensitive => {
-                    anyhow::anyhow!("STT event queue full of loss-sensitive events")
-                }
-            })?;
+        if let Err(error) = self.backend.push_audio(audio) {
+            self.metrics.backend_errors.fetch_add(1, Ordering::Relaxed);
+            return Err(error);
         }
+        let mut polled = Vec::new();
+        if let Err(error) = self.backend.poll_events(&mut polled) {
+            self.metrics.backend_errors.fetch_add(1, Ordering::Relaxed);
+            return Err(error);
+        }
+        for event in polled {
+            let result = self.events.push(event);
+            if let Err(error) = result {
+                self.metrics.queue_overflows.fetch_add(1, Ordering::Relaxed);
+                return Err(match error {
+                    SttQueueError::FullLossSensitive => {
+                        anyhow::anyhow!("STT event queue full of loss-sensitive events")
+                    }
+                });
+            }
+        }
+        self.metrics
+            .dropped_partials
+            .store(self.events.dropped_partials(), Ordering::Relaxed);
         let mut events = Vec::new();
         self.events.drain_into(&mut events);
         // Keep the newest event. The backend emits partials frequently, and
         // the router/display treats them as replaceable state.
-        events.pop().map(Self::event_signal).transpose()
+        let signal = events.pop().map(Self::event_signal).transpose()?;
+        if signal.is_some() {
+            self.metrics.emitted_events.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(signal)
     }
 }
 

@@ -15,7 +15,7 @@ mod processor;
 mod sherpa;
 
 #[cfg(feature = "magnolia")]
-pub use processor::SttProcessor;
+pub use processor::{SttMetrics, SttMetricsSnapshot, SttProcessor};
 #[cfg(feature = "sherpa")]
 pub use sherpa::{LocalSherpaBackend, SherpaConfig};
 
