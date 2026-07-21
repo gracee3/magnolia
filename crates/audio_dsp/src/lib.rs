@@ -29,7 +29,7 @@ impl AudioDspState {
         let state = Arc::new(Self::default());
         store_f32(&state.gain, 1.0);
         store_f32(&state.lowpass_hz, 2000.0);
-        state.is_muted.store(true, Ordering::Relaxed);
+        state.is_muted.store(false, Ordering::Relaxed);
         state
     }
 

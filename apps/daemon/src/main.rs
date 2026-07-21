@@ -178,12 +178,11 @@ fn model(app: &App) -> Model {
     // Apply patches from layout config (after plugins register their schemas)
     // This will be re-applied after plugin loading
 
-    let mut tile_registry = tiles::create_default_registry();
-
     // Audio device settings
     let audio_input_settings = AudioInputSettings::new();
     let audio_output_settings = AudioOutputSettings::new();
     let caption_state = std::sync::Arc::new(std::sync::Mutex::new(CaptionState::default()));
+    let mut tile_registry = tiles::create_default_registry(caption_state.clone());
     let mut stt_metrics = None;
 
     // Audio input tile (device selection)
@@ -1047,41 +1046,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
                     tiles::render_error_overlay(&draw, rect, &error);
                 }
             }
-        }
-    }
-
-    // Live caption monitor. Provisional text is dimmed and replaced in place;
-    // finalized segments remain stable in the caption reducer.
-    if let Ok(captions) = model.caption_state.lock() {
-        if !captions.committed.is_empty() || captions.provisional.is_some() {
-            let win = app.window_rect();
-            let caption_rect = Rect::from_x_y_w_h(win.x(), win.top() - 42.0, win.w() * 0.82, 64.0);
-            draw.rect()
-                .xy(caption_rect.xy())
-                .wh(caption_rect.wh())
-                .color(rgba(0.02, 0.02, 0.04, 0.92));
-            draw_text(
-                &draw,
-                FontId::PlexSansBold,
-                "LIVE CAPTION",
-                pt2(caption_rect.left() + 14.0, caption_rect.top() - 14.0),
-                10.0,
-                srgba(0.0, 1.0, 1.0, 0.85),
-                TextAlignment::Left,
-            );
-            draw_text(
-                &draw,
-                FontId::PlexSansRegular,
-                &captions.display_text(),
-                pt2(caption_rect.x(), caption_rect.y() - 8.0),
-                18.0,
-                if captions.provisional.is_some() {
-                    srgba(0.75, 0.75, 0.8, 0.9)
-                } else {
-                    srgba(0.95, 0.95, 1.0, 1.0)
-                },
-                TextAlignment::Center,
-            );
         }
     }
 

@@ -23,7 +23,7 @@ impl AudioDspTile {
             gain: Mutex::new(1.0),
             lowpass_hz: Mutex::new(2000.0),
             lowpass_enabled: Mutex::new(false),
-            is_muted: Mutex::new(true),
+            is_muted: Mutex::new(false),
         }
     }
 }
@@ -214,7 +214,7 @@ impl TileRenderer for AudioDspTile {
                 "gain": { "type": "number", "default": 1.0, "minimum": 0.0, "maximum": 4.0 },
                 "lowpass_enabled": { "type": "boolean", "default": false },
                 "lowpass_hz": { "type": "number", "default": 2000.0, "minimum": 80.0, "maximum": 8000.0 },
-                "is_muted": { "type": "boolean", "default": true }
+                "is_muted": { "type": "boolean", "default": false }
             }
         }))
     }

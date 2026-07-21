@@ -22,7 +22,7 @@ impl AudioInputTile {
             settings,
             selected: Mutex::new(selected),
             focus: Mutex::new(0),
-            is_muted: Mutex::new(true),
+            is_muted: Mutex::new(false),
         }
     }
 }
@@ -297,7 +297,7 @@ impl TileRenderer for AudioInputTile {
                 },
                 "is_muted": {
                     "type": "boolean",
-                    "default": true
+                    "default": false
                 }
             }
         }))

@@ -11,6 +11,7 @@
 // Local tile implementations (remaining - clock is still local)
 pub mod schema_tile;
 pub use schema_tile::SchemaTile;
+pub mod caption;
 pub mod clock;
 pub mod compositor;
 pub mod system_monitor;
@@ -25,12 +26,15 @@ pub use compositor::Compositor;
 
 /// Create the default tile registry with local tiles only
 /// External tiles must be loaded via PluginManager
-pub fn create_default_registry() -> TileRegistry {
+pub fn create_default_registry(
+    caption_state: std::sync::Arc<std::sync::Mutex<caption_state::CaptionState>>,
+) -> TileRegistry {
     let mut registry = TileRegistry::new();
 
     // Register local system tiles
     registry.register(clock::ClockTile::new());
     registry.register(system_monitor::SystemMonitorTile::new());
+    registry.register(caption::CaptionTile::new("captions", caption_state));
 
     registry
 }

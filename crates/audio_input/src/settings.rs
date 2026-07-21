@@ -31,7 +31,7 @@ impl AudioInputSettings {
             active_device: Mutex::new(None),
             sample_rate: AtomicU32::new(0),
             channels: AtomicU32::new(0),
-            is_muted: AtomicBool::new(true),
+            is_muted: AtomicBool::new(false),
             frame_samples: AtomicU32::new(256),
             max_batch_wait_ms: AtomicU32::new(3),
         })

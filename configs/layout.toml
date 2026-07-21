@@ -36,6 +36,17 @@ next_theme = "c"
 inc_sens = "equals"
 
 [[tiles]]
+id = "captions"
+col = 0
+row = 1
+colspan = 2
+rowspan = 1
+module = "captions"
+enabled = true
+
+[tiles.settings.config]
+
+[[tiles]]
 id = "audio_output"
 col = 2
 row = 2
@@ -45,6 +56,7 @@ module = "audio_output"
 enabled = true
 
 [tiles.settings.config]
+is_muted = false
 
 [tiles.settings.keybinds]
 mute = "m"
@@ -60,6 +72,7 @@ enabled = true
 
 [tiles.settings.config]
 device = "Default"
+is_muted = false
 
 [tiles.settings.keybinds]
 mute = "m"
@@ -77,6 +90,7 @@ enabled = true
 gain = 1.0
 lowpass_enabled = false
 lowpass_hz = 2000.0
+is_muted = false
 
 [tiles.settings.keybinds]
 mute = "m"
