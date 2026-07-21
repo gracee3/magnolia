@@ -547,7 +547,14 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
         }
 
         // Route signals through PatchBay
-        let outgoing = model.patch_bay.get_outgoing_patches(&routed.source_id);
+        let outgoing = model
+            .patch_bay
+            .get_outgoing_patches(&routed.source_id)
+            .into_iter()
+            .filter(|patch| {
+                routed.source_port == "default" || patch.source_port == routed.source_port
+            })
+            .collect::<Vec<_>>();
         if outgoing.is_empty() {
             continue;
         }

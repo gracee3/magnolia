@@ -333,10 +333,7 @@ impl ModuleRuntime for PluginModuleAdapter {
             };
 
             if let Some(signal) = maybe_signal {
-                let routed = RoutedSignal {
-                    source_id: self.id_cache.clone(),
-                    signal,
-                };
+                let routed = RoutedSignal::new(self.id_cache.clone(), "default", signal);
                 let _ = outbox.send(routed).await;
             }
 
@@ -397,10 +394,7 @@ impl ModuleRuntime for PluginModuleAdapter {
 
                 // Send any output signal from consume_signal
                 if let Some(output) = maybe_output {
-                    let routed = RoutedSignal {
-                        source_id: self.id_cache.clone(),
-                        signal: output,
-                    };
+                    let routed = RoutedSignal::new(self.id_cache.clone(), "default", output);
                     let _ = outbox.send(routed).await;
                 }
             }

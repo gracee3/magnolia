@@ -18,7 +18,7 @@ pub mod host;
 pub use host::{ModuleHandle, ModuleImpl};
 
 pub mod runtime;
-pub use runtime::RoutedSignal;
+pub use runtime::{default_output_port, RoutedSignal};
 pub use runtime::{ExecutionModel, ModuleHost, ModuleRuntime, ModuleState, Priority};
 
 pub mod adapters;

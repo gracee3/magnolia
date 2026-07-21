@@ -99,7 +99,36 @@ pub trait ModuleRuntime: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct RoutedSignal {
     pub source_id: String,
+    pub source_port: String,
+    pub schema_version: u32,
     pub signal: Signal,
+}
+
+impl RoutedSignal {
+    pub const SCHEMA_VERSION: u32 = 1;
+
+    pub fn new(
+        source_id: impl Into<String>,
+        source_port: impl Into<String>,
+        signal: Signal,
+    ) -> Self {
+        Self {
+            source_id: source_id.into(),
+            source_port: source_port.into(),
+            schema_version: Self::SCHEMA_VERSION,
+            signal,
+        }
+    }
+}
+
+/// Select the first output port for adapters that emit one logical stream.
+pub fn default_output_port(schema: &ModuleSchema) -> String {
+    schema
+        .ports
+        .iter()
+        .find(|port| port.direction == crate::PortDirection::Output)
+        .map(|port| port.id.clone())
+        .unwrap_or_else(|| "default".to_string())
 }
 
 /// Outcome of a bounded host shutdown request.

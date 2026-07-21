@@ -1,6 +1,6 @@
 use crate::{
-    ExecutionModel, ModuleRuntime, ModuleSchema, Priority, Processor, RoutedSignal, Signal, Sink,
-    Source,
+    default_output_port, ExecutionModel, ModuleRuntime, ModuleSchema, Priority, Processor,
+    RoutedSignal, Signal, Sink, Source,
 };
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -56,6 +56,8 @@ impl<S: Source + 'static> ModuleRuntime for SourceAdapter<S> {
                 Some(signal) => {
                     let routed = RoutedSignal {
                         source_id: self.schema.id.clone(),
+                        source_port: default_output_port(&self.schema),
+                        schema_version: RoutedSignal::SCHEMA_VERSION,
                         signal,
                     };
                     if outbox.send(routed).await.is_err() {
@@ -188,6 +190,8 @@ impl<P: Processor + 'static> ModuleRuntime for ProcessorAdapter<P> {
                 Ok(Some(output)) => {
                     let routed = RoutedSignal {
                         source_id: self.schema.id.clone(),
+                        source_port: default_output_port(&self.schema),
+                        schema_version: RoutedSignal::SCHEMA_VERSION,
                         signal: output,
                     };
                     if outbox.send(routed).await.is_err() {
