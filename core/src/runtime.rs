@@ -651,6 +651,7 @@ mod tests {
         enabled: bool,
         ran: Arc<AtomicBool>,
         slow_shutdown: bool,
+        blocked: bool,
         ports: Vec<crate::Port>,
     }
 
@@ -663,6 +664,7 @@ mod tests {
                     enabled: true,
                     ran: ran.clone(),
                     slow_shutdown: false,
+                    blocked: false,
                     ports: vec![],
                 },
                 ran,
@@ -675,6 +677,7 @@ mod tests {
                 enabled: true,
                 ran: Arc::new(AtomicBool::new(false)),
                 slow_shutdown: true,
+                blocked: false,
                 ports: vec![],
             }
         }
@@ -685,6 +688,18 @@ mod tests {
                 enabled: true,
                 ran: Arc::new(AtomicBool::new(false)),
                 slow_shutdown: false,
+                blocked: false,
+                ports,
+            }
+        }
+
+        fn blocked(id: &str, ports: Vec<crate::Port>) -> Self {
+            Self {
+                id: id.to_string(),
+                enabled: true,
+                ran: Arc::new(AtomicBool::new(false)),
+                slow_shutdown: false,
+                blocked: true,
                 ports,
             }
         }
@@ -728,6 +743,10 @@ mod tests {
         ) {
             self.ran.store(true, Ordering::SeqCst);
             if self.slow_shutdown {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                return;
+            }
+            if self.blocked {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 return;
             }
@@ -822,6 +841,48 @@ mod tests {
         assert_eq!(result.delivered, 2);
         assert!(!result.dropped);
         assert_eq!(host.routing_metrics().snapshot().fanout_clones, 1);
+    }
+
+    #[test]
+    fn route_signal_reports_bounded_queue_overload() {
+        let (router_tx, _router_rx) = mpsc::channel(10);
+        let mut host = ModuleHost::new(router_tx);
+        let mut patch_bay = crate::PatchBay::new();
+        let output = crate::Port {
+            id: "out".to_string(),
+            label: "Out".to_string(),
+            data_type: crate::DataType::Any,
+            direction: crate::PortDirection::Output,
+        };
+        let input = crate::Port {
+            id: "in".to_string(),
+            label: "In".to_string(),
+            data_type: crate::DataType::Any,
+            direction: crate::PortDirection::Input,
+        };
+        let source = TestModule::with_ports("source", vec![output]);
+        let sink = TestModule::blocked("blocked_sink", vec![input]);
+        patch_bay.register_module(source.schema());
+        patch_bay.register_module(sink.schema());
+        patch_bay
+            .connect("source", "out", "blocked_sink", "in")
+            .unwrap();
+        host.spawn(source, 10).unwrap();
+        host.spawn(sink, 1).unwrap();
+        thread::sleep(Duration::from_millis(10));
+
+        let first = host.route_signal(
+            &patch_bay,
+            RoutedSignal::new("source", "out", Signal::Pulse),
+        );
+        let second = host.route_signal(
+            &patch_bay,
+            RoutedSignal::new("source", "out", Signal::Pulse),
+        );
+        assert_eq!(first.delivered, 1);
+        assert_eq!(second.delivered, 0);
+        assert!(second.dropped);
+        assert_eq!(host.routing_metrics().snapshot().send_failures, 1);
     }
 
     #[test]
