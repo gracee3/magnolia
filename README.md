@@ -56,6 +56,9 @@ cargo run -p daemon
 Use `MAGNOLIA_SHERPA_THREADS=1`, `2`, and `4` when benchmarking. Two threads
 is the initial setting for the ThinkPad T14.
 
+Set `MAGNOLIA_SHERPA_ENABLED=false` to keep the model configured but disable
+the live recognizer.
+
 2. **Add a Plugin**:
    Drop a compiled plugin (`.so` or `.dll`) into the `./plugins` directory. The daemon will detect and load it automatically.
 

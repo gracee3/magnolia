@@ -269,7 +269,20 @@ fn model(app: &App) -> Model {
         ),
         model_path("MAGNOLIA_SHERPA_TOKENS", "tokens.txt"),
     ];
-    if sherpa_paths.iter().all(|path| path.is_some()) {
+    let sherpa_enabled = std::env::var("MAGNOLIA_SHERPA_ENABLED")
+        .map(|value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "no"
+            )
+        })
+        .unwrap_or(true);
+    let sherpa_paths_complete = sherpa_paths.iter().all(|path| {
+        path.as_deref()
+            .map(std::path::Path::new)
+            .is_some_and(std::path::Path::exists)
+    });
+    if sherpa_enabled && sherpa_paths_complete {
         let config = SherpaConfig {
             encoder: sherpa_paths[0].as_ref().unwrap().into(),
             decoder: sherpa_paths[1].as_ref().unwrap().into(),
@@ -293,9 +306,19 @@ fn model(app: &App) -> Model {
         } else {
             log::info!("Live Sherpa captions enabled");
         }
+    } else if !sherpa_enabled {
+        log::info!("Sherpa captions disabled by MAGNOLIA_SHERPA_ENABLED");
     } else {
+        let labels = ["encoder", "decoder", "joiner", "tokens"];
+        for (label, path) in labels.iter().zip(sherpa_paths.iter()) {
+            match path {
+                Some(path) if std::path::Path::new(path).exists() => {}
+                Some(path) => log::warn!("Sherpa {label} path does not exist: {path}"),
+                None => log::info!("Sherpa {label} path is not configured"),
+            }
+        }
         log::info!(
-            "Sherpa captions disabled; set MAGNOLIA_SHERPA_ENCODER/DECODER/JOINER/TOKENS to enable"
+            "Sherpa captions disabled; configure MAGNOLIA_SHERPA_MODEL_DIR or explicit model paths to enable"
         );
     }
 
