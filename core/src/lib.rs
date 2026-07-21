@@ -50,9 +50,11 @@ pub use plugin_signing::PluginVerifier;
 
 pub mod resources {
     pub mod buffer_pool;
+    #[cfg(feature = "gpu-resources")]
     pub mod gpu_map;
 }
 pub use resources::buffer_pool::{AudioBufferPool, BlobBufferPool, BufferPool};
+#[cfg(feature = "gpu-resources")]
 pub use resources::gpu_map::{GpuBufferMap, GpuResourceMap, GpuTextureMap, GpuTextureViewMap};
 
 /// Symbolic Kamea grid size names mapped to dimensions

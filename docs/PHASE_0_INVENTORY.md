@@ -7,7 +7,7 @@ This inventory describes migration intent, not implementation maturity.
 
 | Area | Classification | Phase 0 treatment |
 | --- | --- | --- |
-| `core` | Replace incrementally | Keep compiling while the headless runtime contract supersedes UI and domain leakage. |
+| `core` | Replace incrementally | Its default build is headless; rendering and GPU resource maps are opt-in while the runtime contract supersedes remaining UI and domain leakage. |
 | `magnolia-module-api`, `magnolia-signals` | Extract/review | Keep as candidate protocol boundaries; do not deepen the global signal enum. |
 | `audio_input`, `audio_output`, `audio_dsp`, `audio_replay` | Retain/rework | Keep available, but exclude hardware-facing crates from the default baseline until opt-in tests exist. |
 | `magnolia-config` | Retain | Remove provider-specific TensorRT configuration; keep shared configuration helpers. |

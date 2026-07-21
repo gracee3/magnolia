@@ -5,12 +5,13 @@ edition = "2021"
 
 [features]
 default = []
-tile-rendering = ["dep:nannou"]
+gpu-resources = ["dep:wgpu"]
+tile-rendering = ["gpu-resources", "dep:magnolia-ui", "dep:nannou"]
 
 [dependencies]
 magnolia_signals = { path = "../crates/magnolia-signals" }
 magnolia_module_api = { path = "../crates/magnolia-module-api" }
-magnolia-ui = { path = "../crates/magnolia-ui", features = ["tile-rendering"] }
+magnolia-ui = { path = "../crates/magnolia-ui", features = ["tile-rendering"], optional = true }
 async-trait = "0.1"
 slab = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -30,7 +31,7 @@ hex = "0.4"
 # Optional rendering dependencies (enabled by tile-rendering feature)
 nannou = { version = "0.19", optional = true }
 # nannou_egui removed
-wgpu = "0.17.1"
+wgpu = { version = "0.17.1", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 seccompiler = "0.4"
