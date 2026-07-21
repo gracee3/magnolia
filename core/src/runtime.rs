@@ -104,6 +104,13 @@ pub struct RoutedSignal {
     pub signal: Signal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutedSignalError {
+    UnsupportedSchemaVersion { received: u32, expected: u32 },
+    MissingSourceId,
+    MissingSourcePort,
+}
+
 impl RoutedSignal {
     pub const SCHEMA_VERSION: u32 = 1;
 
@@ -118,6 +125,23 @@ impl RoutedSignal {
             schema_version: Self::SCHEMA_VERSION,
             signal,
         }
+    }
+
+    /// Validate metadata before a signal enters the patch graph.
+    pub fn validate(&self) -> Result<(), RoutedSignalError> {
+        if self.schema_version != Self::SCHEMA_VERSION {
+            return Err(RoutedSignalError::UnsupportedSchemaVersion {
+                received: self.schema_version,
+                expected: Self::SCHEMA_VERSION,
+            });
+        }
+        if self.source_id.trim().is_empty() {
+            return Err(RoutedSignalError::MissingSourceId);
+        }
+        if self.source_port.trim().is_empty() {
+            return Err(RoutedSignalError::MissingSourcePort);
+        }
+        Ok(())
     }
 }
 
@@ -612,5 +636,28 @@ mod tests {
         let report = host.shutdown_all_with_timeout(Duration::from_millis(1));
         assert_eq!(report.completed, Vec::<String>::new());
         assert_eq!(report.timed_out, vec!["slow_module".to_string()]);
+    }
+
+    #[test]
+    fn routed_signal_metadata_is_validated() {
+        let routed = RoutedSignal::new("source", "audio_out", Signal::Pulse);
+        assert_eq!(routed.validate(), Ok(()));
+
+        let mut invalid = routed.clone();
+        invalid.schema_version = 99;
+        assert_eq!(
+            invalid.validate(),
+            Err(RoutedSignalError::UnsupportedSchemaVersion {
+                received: 99,
+                expected: RoutedSignal::SCHEMA_VERSION,
+            })
+        );
+
+        invalid.schema_version = RoutedSignal::SCHEMA_VERSION;
+        invalid.source_port.clear();
+        assert_eq!(
+            invalid.validate(),
+            Err(RoutedSignalError::MissingSourcePort)
+        );
     }
 }

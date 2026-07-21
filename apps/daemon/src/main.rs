@@ -530,6 +530,15 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Process Router Signals (From Plugins)
     while let Ok(routed) = model.router_rx.try_recv() {
+        if let Err(error) = routed.validate() {
+            log::warn!(
+                "Dropping invalid routed signal from '{}': {:?}",
+                routed.source_id,
+                error
+            );
+            continue;
+        }
+
         // Handle host-level signals before routing
         if let Signal::Texture {
             handle,
