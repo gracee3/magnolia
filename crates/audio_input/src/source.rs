@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use log::{info, warn};
 use tokio::time::Instant;
 
-use crate::AudioInputSettings;
 use crate::backend::{default_backend, AudioInputBackend, BackendStream};
 use crate::settings::AudioDeviceEntry;
+use crate::AudioInputSettings;
 use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source};
 use magnolia_signals::ring_buffer::{self, RingBufferReceiver};
 
@@ -67,7 +67,10 @@ impl AudioInputSource {
             Ok(devs) => {
                 let entries = devs
                     .into_iter()
-                    .map(|d| AudioDeviceEntry { id: d.id, name: d.name })
+                    .map(|d| AudioDeviceEntry {
+                        id: d.id,
+                        name: d.name,
+                    })
                     .collect::<Vec<_>>();
                 self.settings.set_devices(entries);
             }
@@ -114,7 +117,9 @@ impl Source for AudioInputSource {
         ModuleSchema {
             id: self.id.clone(),
             name: "Audio Input".to_string(),
-            description: "Captures audio from the system input device (PipeWire on Linux, CPAL elsewhere)".to_string(),
+            description:
+                "Captures audio from the system input device (PipeWire on Linux, CPAL elsewhere)"
+                    .to_string(),
             ports: vec![Port {
                 id: "audio_out".to_string(),
                 label: "Audio Out".to_string(),

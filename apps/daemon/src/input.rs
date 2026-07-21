@@ -4,8 +4,8 @@
 //! Arrow keys work in all modes, ESC cascades through navigation hierarchy.
 
 use crate::tiles::TileRegistry;
-use nannou::prelude::Key;
 use magnolia_core::{LayoutConfig, TileConfig};
+use nannou::prelude::Key;
 
 /// Top-level input mode
 #[derive(Debug, Clone, PartialEq)]

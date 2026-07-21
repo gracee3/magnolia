@@ -1,5 +1,5 @@
 use magnolia_plugin_helper::{
-    export_plugin, SignalBuffer, SignalType, SignalValue, MagnoliaPlugin,
+    export_plugin, MagnoliaPlugin, SignalBuffer, SignalType, SignalValue,
 };
 use magnolia_signals::AstrologyData;
 

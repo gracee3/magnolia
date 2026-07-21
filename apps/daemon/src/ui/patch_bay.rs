@@ -3,9 +3,9 @@ use crate::ui::fullscreen_modal::{
     calculate_modal_rect, draw_modal_background, draw_modal_header, ModalAnim,
 };
 use crate::ui::modals::{PatchBayModalState, PatchBayPane};
-use nannou::prelude::*;
 use magnolia_core::{PatchBay, PortDirection};
 use magnolia_ui::{draw_text, FontId, TextAlignment};
+use nannou::prelude::*;
 
 pub fn render(
     draw: &Draw,

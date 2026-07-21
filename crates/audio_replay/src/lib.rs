@@ -7,7 +7,7 @@ use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Signal, Source}
 /// Deterministic WAV replay source for demos/tests.
 ///
 /// Emits `Signal::Audio` chunks with the WAV's sample rate/channels.
-/// (Downstream modules can resample; e.g. parakeet_stt handles it internally.)
+/// Downstream modules are responsible for any required resampling.
 pub struct WavReplaySource {
     id: String,
     enabled: bool,
@@ -174,4 +174,3 @@ impl Source for WavReplaySource {
         })
     }
 }
-

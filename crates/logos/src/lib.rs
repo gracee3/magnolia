@@ -1,10 +1,10 @@
+use magnolia_plugin_helper::{
+    export_plugin, MagnoliaPlugin, SignalBuffer, SignalType, SignalValue,
+};
 use std::collections::VecDeque;
 use std::io::{self, BufRead};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use magnolia_plugin_helper::{
-    export_plugin, SignalBuffer, SignalType, SignalValue, MagnoliaPlugin,
-};
 
 struct LogosPlugin {
     queue: Arc<Mutex<VecDeque<String>>>,

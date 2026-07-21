@@ -3,8 +3,8 @@ use crate::ui::fullscreen_modal::{
     calculate_modal_rect, draw_modal_background, draw_modal_header, ModalAnim,
 };
 use crate::ui::modals::GlobalSettingsState;
-use nannou::prelude::*;
 use magnolia_ui::{draw_text, FontId, TextAlignment};
+use nannou::prelude::*;
 
 pub fn render(draw: &Draw, rect: Rect, state: &GlobalSettingsState, anim: &ModalAnim) {
     // Calculate animated modal rect
@@ -49,11 +49,7 @@ pub fn render(draw: &Draw, rect: Rect, state: &GlobalSettingsState, anim: &Modal
 
     form.toggle_row(draw, "Show Debug Stats", state.show_debug_stats);
 
-    form.stepper_row(
-        draw,
-        "Power Profile",
-        &format!("{:?}", state.power_profile),
-    );
+    form.stepper_row(draw, "Power Profile", &format!("{:?}", state.power_profile));
 }
 
 pub fn handle_key(key: Key, state: &mut GlobalSettingsState) -> bool {

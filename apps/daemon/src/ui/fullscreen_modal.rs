@@ -5,8 +5,8 @@
 
 #![allow(dead_code)] // Framework functions used progressively during migration
 
-use nannou::prelude::*;
 use magnolia_ui::{draw_text, FontId, TextAlignment};
+use nannou::prelude::*;
 
 /// Animation speed for modal open/close (per frame)
 pub const ANIM_SPEED: f32 = 0.12;

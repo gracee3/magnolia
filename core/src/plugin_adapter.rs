@@ -1,7 +1,7 @@
 use crate::{ControlSignal, ModuleRuntime, ModuleSchema, PluginLibrary, RoutedSignal, Signal};
 use async_trait::async_trait;
-use std::ffi::CStr;
 use magnolia_plugin_abi::*;
+use std::ffi::CStr;
 use tokio::sync::mpsc;
 
 pub struct PluginModuleAdapter {

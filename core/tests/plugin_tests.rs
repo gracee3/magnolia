@@ -12,6 +12,7 @@ fn test_plugin_discovery() {
 }
 
 #[test]
+#[ignore = "requires a prebuilt platform-specific plugin; run explicitly after building hello_plugin"]
 fn test_plugin_loading() {
     let mut loader = PluginLoader::new();
 

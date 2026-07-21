@@ -1,9 +1,9 @@
-#[cfg(feature = "tile-rendering")]
-use nannou::prelude::*;
 pub use magnolia_core::KameaGrid;
 #[cfg(feature = "tile-rendering")]
 use magnolia_plugin_helper::SignalValue;
-use magnolia_plugin_helper::{export_plugin, SignalBuffer, SignalType, MagnoliaPlugin};
+use magnolia_plugin_helper::{export_plugin, MagnoliaPlugin, SignalBuffer, SignalType};
+#[cfg(feature = "tile-rendering")]
+use nannou::prelude::*;
 
 #[cfg(feature = "tile-rendering")]
 use nannou::wgpu; // Access nannou's re-exported wgpu

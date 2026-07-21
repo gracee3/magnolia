@@ -12,8 +12,8 @@
 pub mod schema_tile;
 pub use schema_tile::SchemaTile;
 pub mod clock;
-pub mod system_monitor;
 pub mod compositor;
+pub mod system_monitor;
 
 // Re-export main types from magnolia_core
 pub use magnolia_core::{

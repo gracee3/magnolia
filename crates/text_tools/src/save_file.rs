@@ -1,9 +1,9 @@
 use async_trait::async_trait;
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
 
 /// Output format for SaveFileSink
 #[derive(Clone, Debug, Default)]

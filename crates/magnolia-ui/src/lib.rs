@@ -1,3 +1,6 @@
+// Generated font coordinates are measurements, not mathematical constants.
+#![allow(clippy::approx_constant)]
+
 #[cfg(feature = "tile-rendering")]
 use nannou::lyon::math::point as lpoint;
 #[cfg(feature = "tile-rendering")]

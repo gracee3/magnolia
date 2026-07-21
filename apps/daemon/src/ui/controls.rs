@@ -5,8 +5,8 @@
 //! (or by the daemon for global modals).
 #![allow(dead_code)] // Used progressively across tiles/modals; keep available without warning spam.
 
-use nannou::prelude::*;
 use magnolia_ui::{draw_text, FontId, TextAlignment};
+use nannou::prelude::*;
 
 /// Spacing constants tuned for fullscreen "control mode" UIs.
 pub const ROW_H: f32 = 34.0;

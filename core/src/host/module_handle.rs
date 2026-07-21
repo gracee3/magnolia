@@ -1,6 +1,6 @@
 use crate::plugin_adapter::PluginModuleAdapter;
-use std::sync::{Arc, Mutex};
 use magnolia_module_api::{ControlCx, ControlMsg, Manifest, PortDesc, StaticModule, TickCx};
+use std::sync::{Arc, Mutex};
 
 /// A unified wrapper for both static and dynamic modules.
 pub enum ModuleImpl {

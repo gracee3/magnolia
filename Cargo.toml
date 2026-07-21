@@ -1,8 +1,34 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/*",
-    "apps/*",
     "core",
+    "crates/aphrodite",
+    "crates/audio_dsp",
+    "crates/audio_input",
+    "crates/audio_output",
+    "crates/audio_replay",
+    "crates/kamea",
+    "crates/logos",
+    "crates/magnolia-config",
+    "crates/magnolia-module-api",
+    "crates/magnolia-plugin-abi",
+    "crates/magnolia-plugin-helper",
+    "crates/magnolia-signals",
+    "crates/magnolia-ui",
+    "crates/text_tools",
+    "apps/daemon",
+    "examples/hello_plugin",
+]
+default-members = [
+    "core",
+    "crates/audio_dsp",
+    "crates/audio_replay",
+    "crates/logos",
+    "crates/magnolia-config",
+    "crates/magnolia-module-api",
+    "crates/magnolia-plugin-abi",
+    "crates/magnolia-plugin-helper",
+    "crates/magnolia-signals",
+    "crates/text_tools",
     "examples/hello_plugin",
 ]
