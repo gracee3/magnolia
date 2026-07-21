@@ -185,6 +185,12 @@ pub struct RoutingMetricsSnapshot {
     pub fanout_clones: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RoutingResult {
+    pub delivered: usize,
+    pub dropped: bool,
+}
+
 impl RoutingMetrics {
     pub fn snapshot(&self) -> RoutingMetricsSnapshot {
         let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
@@ -257,6 +263,7 @@ pub struct ModuleHost {
     modules: HashMap<String, ModuleHandle>,
     router_tx: mpsc::Sender<RoutedSignal>,
     runtime: Arc<tokio::runtime::Runtime>,
+    routing_metrics: Arc<RoutingMetrics>,
     pub audio_pool: Arc<AudioBufferPool>,
     pub blob_pool: Arc<BlobBufferPool>,
     #[cfg(feature = "gpu-resources")]
@@ -276,6 +283,7 @@ impl ModuleHost {
             runtime: Arc::new(
                 tokio::runtime::Runtime::new().expect("Failed to create Magnolia runtime"),
             ),
+            routing_metrics: Arc::new(RoutingMetrics::default()),
             audio_pool: Arc::new(AudioBufferPool::new()),
             blob_pool: Arc::new(BlobBufferPool::new()),
             #[cfg(feature = "gpu-resources")]
@@ -530,6 +538,91 @@ impl ModuleHost {
     /// Get a direct sender to a module's inbox (for UI/Tiles)
     pub fn get_sender(&self, module_id: &str) -> Option<mpsc::Sender<Signal>> {
         self.modules.get(module_id).map(|h| h.inbox.clone())
+    }
+
+    pub fn routing_metrics(&self) -> Arc<RoutingMetrics> {
+        self.routing_metrics.clone()
+    }
+
+    /// Route an envelope through the patch graph and deliver it to module inboxes.
+    pub fn route_signal(&self, patch_bay: &crate::PatchBay, routed: RoutedSignal) -> RoutingResult {
+        self.routing_metrics
+            .received
+            .fetch_add(1, Ordering::Relaxed);
+        if let Err(error) = routed.validate() {
+            self.routing_metrics
+                .invalid_dropped
+                .fetch_add(1, Ordering::Relaxed);
+            log::warn!(
+                "Dropping invalid routed signal from '{}': {:?}",
+                routed.source_id,
+                error
+            );
+            return RoutingResult {
+                dropped: true,
+                ..Default::default()
+            };
+        }
+        let outgoing = patch_bay
+            .get_outgoing_patches(&routed.source_id)
+            .into_iter()
+            .filter(|patch| {
+                routed.source_port == "default" || patch.source_port == routed.source_port
+            })
+            .collect::<Vec<_>>();
+        if outgoing.is_empty() {
+            self.routing_metrics
+                .unroutable
+                .fetch_add(1, Ordering::Relaxed);
+            return RoutingResult {
+                dropped: true,
+                ..Default::default()
+            };
+        }
+        let active_sinks = outgoing
+            .into_iter()
+            .filter(|patch| {
+                if patch_bay.is_module_disabled(&patch.sink_module) {
+                    self.routing_metrics
+                        .disabled
+                        .fetch_add(1, Ordering::Relaxed);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect::<Vec<_>>();
+        let delivery_count = if matches!(&routed.signal, Signal::AudioStream { .. }) {
+            active_sinks.len().min(1)
+        } else {
+            active_sinks.len()
+        };
+        let mut signal = Some(routed.signal);
+        let mut delivered = 0;
+        for (index, patch) in active_sinks.into_iter().take(delivery_count).enumerate() {
+            let payload = if index + 1 == delivery_count {
+                signal.take().expect("signal payload already taken")
+            } else {
+                self.routing_metrics
+                    .fanout_clones
+                    .fetch_add(1, Ordering::Relaxed);
+                signal.as_ref().expect("signal payload missing").clone()
+            };
+            if self.send_signal(&patch.sink_module, payload).is_ok() {
+                delivered += 1;
+                self.routing_metrics
+                    .delivered
+                    .fetch_add(1, Ordering::Relaxed);
+            } else {
+                self.routing_metrics
+                    .send_failures
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        RoutingResult {
+            delivered,
+            dropped: delivered == 0,
+        }
     }
 
     /// Return the lifecycle state of a registered module.

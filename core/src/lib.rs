@@ -20,6 +20,7 @@ pub use host::{ModuleHandle, ModuleImpl};
 pub mod runtime;
 pub use runtime::{
     default_output_port, RoutedSignal, RoutedSignalError, RoutingMetrics, RoutingMetricsSnapshot,
+    RoutingResult,
 };
 pub use runtime::{ExecutionModel, ModuleHost, ModuleRuntime, ModuleState, Priority};
 
