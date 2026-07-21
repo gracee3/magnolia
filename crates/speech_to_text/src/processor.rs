@@ -1,4 +1,4 @@
-use super::{AudioChunk, SttBackend, SttEvent};
+use super::{AudioChunk, SttBackend, SttEvent, SttEventQueue, SttQueueError};
 use async_trait::async_trait;
 use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
 
@@ -12,6 +12,7 @@ pub struct SttProcessor {
     enabled: bool,
     backend: Box<dyn SttBackend>,
     started: bool,
+    events: SttEventQueue,
 }
 
 impl SttProcessor {
@@ -21,6 +22,7 @@ impl SttProcessor {
             enabled: true,
             backend,
             started: false,
+            events: SttEventQueue::new(64),
         }
     }
 
@@ -85,8 +87,17 @@ impl Processor for SttProcessor {
         }
         let audio = normalize_audio(sample_rate, channels, &data, timestamp_us)?;
         self.backend.push_audio(audio)?;
+        let mut polled = Vec::new();
+        self.backend.poll_events(&mut polled)?;
+        for event in polled {
+            self.events.push(event).map_err(|error| match error {
+                SttQueueError::FullLossSensitive => {
+                    anyhow::anyhow!("STT event queue full of loss-sensitive events")
+                }
+            })?;
+        }
         let mut events = Vec::new();
-        self.backend.poll_events(&mut events)?;
+        self.events.drain_into(&mut events);
         // Keep the newest event. The backend emits partials frequently, and
         // the router/display treats them as replaceable state.
         events.pop().map(Self::event_signal).transpose()

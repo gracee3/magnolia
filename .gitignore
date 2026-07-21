@@ -37,3 +37,8 @@ plugins/*.dll
 configs/layout.toml
 screenshots/
 tools/LibriSpeech/
+
+# Local speech models and machine-specific environment configuration
+models/
+.env
+.env.local

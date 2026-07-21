@@ -114,6 +114,9 @@ fn make_unique_tile_id(layout: &magnolia_core::LayoutConfig, base: &str) -> Stri
 use magnolia_core::TileConfig;
 
 fn main() {
+    // Load machine-local configuration when present. The checked-in template
+    // is config/magnolia.env.example; secrets and model paths stay local.
+    let _ = dotenvy::dotenv();
     // Init Logger
     // Default: warn for everything, but silence wgpu warnings, info for our crates.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,wgpu_core=error,wgpu_hal=error,nannou=error,daemon=info,text_tools=info,aphrodite=info,logos=info,kamea=info")).init();
@@ -239,13 +242,33 @@ fn model(app: &App) -> Model {
 
     // Live STT is opt-in until a model is installed. The four paths should
     // point at one compatible Sherpa streaming Zipformer model directory.
+    let model_dir = std::env::var("MAGNOLIA_SHERPA_MODEL_DIR").ok();
+    let model_path = |variable: &str, filename: &str| {
+        std::env::var(variable).ok().or_else(|| {
+            model_dir.as_ref().map(|dir| {
+                std::path::Path::new(dir)
+                    .join(filename)
+                    .display()
+                    .to_string()
+            })
+        })
+    };
     let sherpa_paths = [
-        std::env::var("MAGNOLIA_SHERPA_ENCODER"),
-        std::env::var("MAGNOLIA_SHERPA_DECODER"),
-        std::env::var("MAGNOLIA_SHERPA_JOINER"),
-        std::env::var("MAGNOLIA_SHERPA_TOKENS"),
+        model_path(
+            "MAGNOLIA_SHERPA_ENCODER",
+            "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        ),
+        model_path(
+            "MAGNOLIA_SHERPA_DECODER",
+            "decoder-epoch-99-avg-1-chunk-16-left-128.onnx",
+        ),
+        model_path(
+            "MAGNOLIA_SHERPA_JOINER",
+            "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        ),
+        model_path("MAGNOLIA_SHERPA_TOKENS", "tokens.txt"),
     ];
-    if sherpa_paths.iter().all(|path| path.is_ok()) {
+    if sherpa_paths.iter().all(|path| path.is_some()) {
         let config = SherpaConfig {
             encoder: sherpa_paths[0].as_ref().unwrap().into(),
             decoder: sherpa_paths[1].as_ref().unwrap().into(),

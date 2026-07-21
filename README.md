@@ -24,6 +24,7 @@ Magnolia is a foundational connectivity layer for modular signal-processing syst
 
 - **Apps**
     - `daemon`: The Nannou-based visual engine and host.
+    - `caption_demo`: Deterministic provisional/final caption reducer demo.
 
 ## Getting Started
 
@@ -31,6 +32,29 @@ Magnolia is a foundational connectivity layer for modular signal-processing syst
    ```bash
    cargo run -p daemon
    ```
+
+### Local Sherpa captions
+
+The recommended T14 model is the CPU/int8 streaming Zipformer English model.
+Run the reproducible setup script once:
+
+```bash
+./scripts/setup_sherpa_captioning.sh
+```
+
+This downloads model files into the ignored `models/` directory and creates a
+machine-local `.env` from the checked-in
+[`config/magnolia.env.example`](config/magnolia.env.example). The daemon loads
+`.env` automatically. Do not commit `.env` or model files.
+
+Then run:
+
+```bash
+cargo run -p daemon
+```
+
+Use `MAGNOLIA_SHERPA_THREADS=1`, `2`, and `4` when benchmarking. Two threads
+is the initial setting for the ThinkPad T14.
 
 2. **Add a Plugin**:
    Drop a compiled plugin (`.so` or `.dll`) into the `./plugins` directory. The daemon will detect and load it automatically.
