@@ -3,8 +3,10 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// Execution model for a module - determines how it runs
@@ -100,6 +102,13 @@ pub struct RoutedSignal {
     pub signal: Signal,
 }
 
+/// Outcome of a bounded host shutdown request.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ShutdownReport {
+    pub completed: Vec<String>,
+    pub timed_out: Vec<String>,
+}
+
 /// Handle to a running module instance
 pub struct ModuleHandle {
     pub id: String,
@@ -114,7 +123,10 @@ enum ModuleTask {
         task: tokio::task::JoinHandle<()>,
         state: Arc<AtomicU8>,
     },
-    Thread(JoinHandle<()>),
+    Thread {
+        thread: JoinHandle<()>,
+        state: Arc<AtomicU8>,
+    },
 }
 
 impl ModuleHandle {
@@ -230,51 +242,59 @@ impl ModuleHost {
             ExecutionModel::DedicatedThread => {
                 // Direct OS thread with its own runtime
                 let state = state.clone();
-                ModuleTask::Thread(thread::spawn(move || {
-                    state.store(ModuleState::Running.as_u8(), Ordering::Release);
-                    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                    let result = catch_unwind(AssertUnwindSafe(|| {
-                        rt.block_on(async {
-                            module.run(inbox_rx, outbox).await;
-                        });
-                    }));
+                let thread_state = state.clone();
+                ModuleTask::Thread {
+                    thread: thread::spawn(move || {
+                        thread_state.store(ModuleState::Running.as_u8(), Ordering::Release);
+                        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+                        let result = catch_unwind(AssertUnwindSafe(|| {
+                            rt.block_on(async {
+                                module.run(inbox_rx, outbox).await;
+                            });
+                        }));
 
-                    match result {
-                        Ok(_) => {
-                            state.store(ModuleState::Stopped.as_u8(), Ordering::Release);
-                            log::info!("Module {} exited normally", module_name)
+                        match result {
+                            Ok(_) => {
+                                thread_state.store(ModuleState::Stopped.as_u8(), Ordering::Release);
+                                log::info!("Module {} exited normally", module_name)
+                            }
+                            Err(e) => {
+                                thread_state.store(ModuleState::Failed.as_u8(), Ordering::Release);
+                                log::error!("Module {} panicked: {:?}", module_name, e);
+                            }
                         }
-                        Err(e) => {
-                            state.store(ModuleState::Failed.as_u8(), Ordering::Release);
-                            log::error!("Module {} panicked: {:?}", module_name, e);
-                        }
-                    }
-                }))
+                    }),
+                    state: state.clone(),
+                }
             }
             ExecutionModel::ThreadPool { .. } => {
                 // For now, treat as dedicated thread
                 // TODO: Implement rayon integration
                 let state = state.clone();
-                ModuleTask::Thread(thread::spawn(move || {
-                    state.store(ModuleState::Running.as_u8(), Ordering::Release);
-                    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                    let result = catch_unwind(AssertUnwindSafe(|| {
-                        rt.block_on(async {
-                            module.run(inbox_rx, outbox).await;
-                        });
-                    }));
+                let thread_state = state.clone();
+                ModuleTask::Thread {
+                    thread: thread::spawn(move || {
+                        thread_state.store(ModuleState::Running.as_u8(), Ordering::Release);
+                        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+                        let result = catch_unwind(AssertUnwindSafe(|| {
+                            rt.block_on(async {
+                                module.run(inbox_rx, outbox).await;
+                            });
+                        }));
 
-                    match result {
-                        Ok(_) => {
-                            state.store(ModuleState::Stopped.as_u8(), Ordering::Release);
-                            log::info!("Module {} exited normally", module_name)
+                        match result {
+                            Ok(_) => {
+                                thread_state.store(ModuleState::Stopped.as_u8(), Ordering::Release);
+                                log::info!("Module {} exited normally", module_name)
+                            }
+                            Err(e) => {
+                                thread_state.store(ModuleState::Failed.as_u8(), Ordering::Release);
+                                log::error!("Module {} panicked: {:?}", module_name, e);
+                            }
                         }
-                        Err(e) => {
-                            state.store(ModuleState::Failed.as_u8(), Ordering::Release);
-                            log::error!("Module {} panicked: {:?}", module_name, e);
-                        }
-                    }
-                }))
+                    }),
+                    state: state.clone(),
+                }
             }
         };
 
@@ -307,12 +327,33 @@ impl ModuleHost {
 
     /// Shutdown a specific module
     pub fn shutdown_module(&mut self, module_id: &str) -> Result<(), String> {
+        let report = self.shutdown_module_with_timeout(module_id, Duration::from_secs(5))?;
+        if report.timed_out.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "Module {module_id} did not stop before the deadline"
+            ))
+        }
+    }
+
+    /// Shutdown one module with an explicit deadline.
+    pub fn shutdown_module_with_timeout(
+        &mut self,
+        module_id: &str,
+        timeout: Duration,
+    ) -> Result<ShutdownReport, String> {
         if let Some(mut handle) = self.modules.remove(module_id) {
             handle.shutdown();
+            let mut report = ShutdownReport::default();
             if let Some(task) = handle.task.take() {
-                Self::join_task(&self.runtime, task);
+                if Self::join_task(&self.runtime, task, timeout) {
+                    report.completed.push(module_id.to_string());
+                } else {
+                    report.timed_out.push(module_id.to_string());
+                }
             }
-            Ok(())
+            Ok(report)
         } else {
             Err(format!("Module {} not found", module_id))
         }
@@ -320,7 +361,16 @@ impl ModuleHost {
 
     /// Shutdown all modules and wait for them to finish
     pub fn shutdown_all(&mut self) {
+        let report = self.shutdown_all_with_timeout(Duration::from_secs(5));
+        if !report.timed_out.is_empty() {
+            log::error!("Modules exceeded shutdown deadline: {:?}", report.timed_out);
+        }
+    }
+
+    /// Shutdown all modules, bounding each join by `timeout`.
+    pub fn shutdown_all_with_timeout(&mut self, timeout: Duration) -> ShutdownReport {
         log::info!("Shutting down {} modules", self.modules.len());
+        let mut report = ShutdownReport::default();
 
         // Send shutdown signals
         for (id, handle) in &self.modules {
@@ -333,23 +383,47 @@ impl ModuleHost {
         for (id, mut handle) in self.modules.drain() {
             if let Some(task) = handle.task.take() {
                 log::debug!("Waiting for {} to finish", id);
-                Self::join_task(&runtime, task);
+                if Self::join_task(&runtime, task, timeout) {
+                    report.completed.push(id);
+                } else {
+                    report.timed_out.push(id);
+                }
             }
         }
 
         log::info!("All modules shut down");
+        report
     }
 
-    fn join_task(runtime: &tokio::runtime::Runtime, task: ModuleTask) {
+    fn join_task(runtime: &tokio::runtime::Runtime, task: ModuleTask, timeout: Duration) -> bool {
         match task {
-            ModuleTask::Async { task, state } => {
-                if let Err(error) = runtime.block_on(task) {
-                    state.store(ModuleState::Failed.as_u8(), Ordering::Release);
-                    log::error!("Async module task failed during shutdown: {error}");
+            ModuleTask::Async { mut task, state } => {
+                match runtime.block_on(async { tokio::time::timeout(timeout, &mut task).await }) {
+                    Ok(Ok(())) => true,
+                    Ok(Err(error)) => {
+                        state.store(ModuleState::Failed.as_u8(), Ordering::Release);
+                        log::error!("Async module task failed during shutdown: {error}");
+                        true
+                    }
+                    Err(_) => {
+                        task.abort();
+                        state.store(ModuleState::Failed.as_u8(), Ordering::Release);
+                        false
+                    }
                 }
             }
-            ModuleTask::Thread(thread) => {
-                let _ = thread.join();
+            ModuleTask::Thread { thread, state } => {
+                let (done_tx, done_rx) = std_mpsc::sync_channel(1);
+                thread::spawn(move || {
+                    let _ = thread.join();
+                    let _ = done_tx.send(());
+                });
+                if done_rx.recv_timeout(timeout).is_ok() {
+                    true
+                } else {
+                    state.store(ModuleState::Failed.as_u8(), Ordering::Release);
+                    false
+                }
             }
         }
     }
@@ -392,6 +466,7 @@ mod tests {
         id: String,
         enabled: bool,
         ran: Arc<AtomicBool>,
+        slow_shutdown: bool,
     }
 
     impl TestModule {
@@ -402,9 +477,19 @@ mod tests {
                     id: id.to_string(),
                     enabled: true,
                     ran: ran.clone(),
+                    slow_shutdown: false,
                 },
                 ran,
             )
+        }
+
+        fn slow_shutdown(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                enabled: true,
+                ran: Arc::new(AtomicBool::new(false)),
+                slow_shutdown: true,
+            }
         }
     }
 
@@ -415,6 +500,13 @@ mod tests {
         }
         fn name(&self) -> &str {
             &self.id
+        }
+        fn execution_model(&self) -> ExecutionModel {
+            if self.slow_shutdown {
+                ExecutionModel::DedicatedThread
+            } else {
+                ExecutionModel::Async
+            }
         }
         fn schema(&self) -> ModuleSchema {
             ModuleSchema {
@@ -438,6 +530,10 @@ mod tests {
             _outbox: mpsc::Sender<RoutedSignal>,
         ) {
             self.ran.store(true, Ordering::SeqCst);
+            if self.slow_shutdown {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                return;
+            }
             // Simple echo loop
             while let Some(_signal) = inbox.recv().await {
                 // Process signals
@@ -474,5 +570,18 @@ mod tests {
         host.shutdown_module("test_module").unwrap();
 
         assert!(host.get_module("test_module").is_none());
+    }
+
+    #[test]
+    fn test_module_shutdown_deadline() {
+        let (router_tx, _router_rx) = mpsc::channel(10);
+        let mut host = ModuleHost::new(router_tx);
+        host.spawn(TestModule::slow_shutdown("slow_module"), 10)
+            .unwrap();
+
+        thread::sleep(Duration::from_millis(10));
+        let report = host.shutdown_all_with_timeout(Duration::from_millis(1));
+        assert_eq!(report.completed, Vec::<String>::new());
+        assert_eq!(report.timed_out, vec!["slow_module".to_string()]);
     }
 }
