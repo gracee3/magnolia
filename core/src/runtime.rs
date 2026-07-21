@@ -2,6 +2,7 @@ use crate::{ModuleSchema, Signal};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use tokio::sync::mpsc;
@@ -24,6 +25,38 @@ pub enum Priority {
     Normal,
     High,
     RealTime,
+}
+
+/// Lifecycle state for a supervised module instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleState {
+    Starting,
+    Running,
+    Stopping,
+    Stopped,
+    Failed,
+}
+
+impl ModuleState {
+    fn as_u8(self) -> u8 {
+        match self {
+            Self::Starting => 0,
+            Self::Running => 1,
+            Self::Stopping => 2,
+            Self::Stopped => 3,
+            Self::Failed => 4,
+        }
+    }
+
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Running,
+            2 => Self::Stopping,
+            3 => Self::Stopped,
+            4 => Self::Failed,
+            _ => Self::Starting,
+        }
+    }
 }
 
 /// Runtime trait for modules that can be spawned and managed
@@ -73,10 +106,14 @@ pub struct ModuleHandle {
     task: Option<ModuleTask>,
     pub inbox: mpsc::Sender<Signal>,
     _shutdown_tx: mpsc::Sender<()>,
+    state: Arc<AtomicU8>,
 }
 
 enum ModuleTask {
-    Async(tokio::task::JoinHandle<()>),
+    Async {
+        task: tokio::task::JoinHandle<()>,
+        state: Arc<AtomicU8>,
+    },
     Thread(JoinHandle<()>),
 }
 
@@ -93,7 +130,18 @@ impl ModuleHandle {
 
     /// Request shutdown of this module
     pub fn shutdown(&self) {
+        let current = self.state();
+        if matches!(current, ModuleState::Stopping | ModuleState::Stopped) {
+            return;
+        }
+        self.state
+            .store(ModuleState::Stopping.as_u8(), Ordering::Release);
         let _ = self._shutdown_tx.try_send(());
+    }
+
+    /// Return the latest lifecycle state observed for this module.
+    pub fn state(&self) -> ModuleState {
+        ModuleState::from_u8(self.state.load(Ordering::Acquire))
     }
 }
 
@@ -152,6 +200,7 @@ impl ModuleHost {
         let (inbox_tx, inbox_rx) = mpsc::channel::<Signal>(buffer_size);
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         let outbox = self.router_tx.clone();
+        let state = Arc::new(AtomicU8::new(ModuleState::Starting.as_u8()));
 
         // Spawn based on execution model
         let task = match module.execution_model() {
@@ -160,20 +209,29 @@ impl ModuleHost {
                 // an OS thread and a Tokio scheduler of its own.
                 let module_name_clone = module_name.clone();
                 let runtime = self.runtime.clone();
-                ModuleTask::Async(runtime.spawn(async move {
-                    tokio::select! {
-                        _ = shutdown_rx.recv() => {
-                            log::info!("Module {} received shutdown signal", module_name_clone);
+                let state = state.clone();
+                let task_state = state.clone();
+                ModuleTask::Async {
+                    task: runtime.spawn(async move {
+                        task_state.store(ModuleState::Running.as_u8(), Ordering::Release);
+                        tokio::select! {
+                            _ = shutdown_rx.recv() => {
+                                log::info!("Module {} received shutdown signal", module_name_clone);
+                            }
+                            _ = module.run(inbox_rx, outbox) => {
+                                log::info!("Module {} exited normally", module_name_clone);
+                            }
                         }
-                        _ = module.run(inbox_rx, outbox) => {
-                            log::info!("Module {} exited normally", module_name_clone);
-                        }
-                    }
-                }))
+                        task_state.store(ModuleState::Stopped.as_u8(), Ordering::Release);
+                    }),
+                    state: state.clone(),
+                }
             }
             ExecutionModel::DedicatedThread => {
                 // Direct OS thread with its own runtime
+                let state = state.clone();
                 ModuleTask::Thread(thread::spawn(move || {
+                    state.store(ModuleState::Running.as_u8(), Ordering::Release);
                     let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
                     let result = catch_unwind(AssertUnwindSafe(|| {
                         rt.block_on(async {
@@ -182,8 +240,12 @@ impl ModuleHost {
                     }));
 
                     match result {
-                        Ok(_) => log::info!("Module {} exited normally", module_name),
+                        Ok(_) => {
+                            state.store(ModuleState::Stopped.as_u8(), Ordering::Release);
+                            log::info!("Module {} exited normally", module_name)
+                        }
                         Err(e) => {
+                            state.store(ModuleState::Failed.as_u8(), Ordering::Release);
                             log::error!("Module {} panicked: {:?}", module_name, e);
                         }
                     }
@@ -192,7 +254,9 @@ impl ModuleHost {
             ExecutionModel::ThreadPool { .. } => {
                 // For now, treat as dedicated thread
                 // TODO: Implement rayon integration
+                let state = state.clone();
                 ModuleTask::Thread(thread::spawn(move || {
+                    state.store(ModuleState::Running.as_u8(), Ordering::Release);
                     let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
                     let result = catch_unwind(AssertUnwindSafe(|| {
                         rt.block_on(async {
@@ -201,8 +265,12 @@ impl ModuleHost {
                     }));
 
                     match result {
-                        Ok(_) => log::info!("Module {} exited normally", module_name),
+                        Ok(_) => {
+                            state.store(ModuleState::Stopped.as_u8(), Ordering::Release);
+                            log::info!("Module {} exited normally", module_name)
+                        }
                         Err(e) => {
+                            state.store(ModuleState::Failed.as_u8(), Ordering::Release);
                             log::error!("Module {} panicked: {:?}", module_name, e);
                         }
                     }
@@ -215,6 +283,7 @@ impl ModuleHost {
             task: Some(task),
             inbox: inbox_tx,
             _shutdown_tx: shutdown_tx,
+            state,
         };
 
         self.modules.insert(module_id, module_handle);
@@ -273,8 +342,9 @@ impl ModuleHost {
 
     fn join_task(runtime: &tokio::runtime::Runtime, task: ModuleTask) {
         match task {
-            ModuleTask::Async(task) => {
+            ModuleTask::Async { task, state } => {
                 if let Err(error) = runtime.block_on(task) {
+                    state.store(ModuleState::Failed.as_u8(), Ordering::Release);
                     log::error!("Async module task failed during shutdown: {error}");
                 }
             }
@@ -295,6 +365,11 @@ impl ModuleHost {
     /// Get a direct sender to a module's inbox (for UI/Tiles)
     pub fn get_sender(&self, module_id: &str) -> Option<mpsc::Sender<Signal>> {
         self.modules.get(module_id).map(|h| h.inbox.clone())
+    }
+
+    /// Return the lifecycle state of a registered module.
+    pub fn module_state(&self, module_id: &str) -> Option<ModuleState> {
+        self.modules.get(module_id).map(ModuleHandle::state)
     }
 }
 
@@ -383,6 +458,7 @@ mod tests {
 
         assert!(ran_flag.load(Ordering::SeqCst), "Module should have run");
         assert!(host.get_module("test_module").is_some());
+        assert_eq!(host.module_state("test_module"), Some(ModuleState::Running));
     }
 
     #[test]
@@ -394,6 +470,7 @@ mod tests {
         host.spawn(module, 10).unwrap();
 
         thread::sleep(Duration::from_millis(50));
+        assert_eq!(host.module_state("test_module"), Some(ModuleState::Running));
         host.shutdown_module("test_module").unwrap();
 
         assert!(host.get_module("test_module").is_none());

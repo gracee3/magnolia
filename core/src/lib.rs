@@ -19,7 +19,7 @@ pub use host::{ModuleHandle, ModuleImpl};
 
 pub mod runtime;
 pub use runtime::RoutedSignal;
-pub use runtime::{ExecutionModel, ModuleHost, ModuleRuntime, Priority};
+pub use runtime::{ExecutionModel, ModuleHost, ModuleRuntime, ModuleState, Priority};
 
 pub mod adapters;
 pub use adapters::{SinkAdapter, SourceAdapter};
