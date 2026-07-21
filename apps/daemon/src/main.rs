@@ -1,9 +1,9 @@
-use nannou::prelude::*;
 use magnolia_core::adapters::{ProcessorAdapter, SinkAdapter, SourceAdapter};
 use magnolia_core::{
     ModuleRuntime, PatchBay, PluginManager, PluginModuleAdapter, RoutedSignal, Signal,
 };
 use magnolia_core::{Processor, Sink, Source};
+use nannou::prelude::*;
 // use nannou_egui removed
 use tokio::sync::mpsc;
 

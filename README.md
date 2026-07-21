@@ -37,55 +37,6 @@ Magnolia is a foundational connectivity layer for modular signal-processing syst
 
    See `examples/hello_plugin` to create your own.
 
-## ASR Test Harness (Parakeet TRT)
-
-The ASR smoke harness lives at `apps/asr_test` and depends on the C++ TRT runtime
-now located in `/home/emmy/git/trt-asr-engine`.
-
-1. **Build the C++ runtime**:
-   ```bash
-   cd /home/emmy/git/trt-asr-engine
-   cmake -S cpp -B cpp/build
-   cmake --build cpp/build -j
-   ```
-   If you keep the runtime elsewhere, set `PARAKEET_CPP_BUILD_DIR` accordingly.
-
-2. **Run a smoke sweep (LibriSpeech dev-clean)**:
-   ```bash
-   cd /home/emmy/git/magnolia
-   export LD_LIBRARY_PATH=/home/emmy/git/trt-asr-engine/cpp/build:${LD_LIBRARY_PATH}
-   cargo run --bin asr_test -- \
-     --dataset /home/emmy/git/magnolia/tools/LibriSpeech/dev-clean \
-     --engine parakeet \
-     --model-dir /home/emmy/git/trt-asr-engine/models/parakeet-tdt-0.6b-v3 \
-     --mode smoke \
-     --smoke-n 20 \
-     --smoke-seed 123 \
-     --blank-penalty 0.5 \
-     --eos-pad-ms 0 \
-     --utterance-timeout-ms 20000 \
-     --inflight-chunks 1
-   ```
-
-   Debug knobs (optional):
-   - `PARAKEET_SLOW_CHUNK_MS` (default 250): log per-chunk decode calls slower than this threshold.
-   - `PARAKEET_ABORT_SLOW_CHUNK_MS` (default 5000): emit `slow_chunk_abort` error after a slow chunk returns.
-   - `PARAKEET_WORKER_JOIN_TIMEOUT_MS` (default 0): cap worker join during restarts (ms); non-zero exits the process on timeout to avoid stuck CUDA contexts.
-   - `PARAKEET_SLOW_ENQUEUE_MS` (default 250): TRT `enqueueV3` slow/error log + cudaMemGetInfo delta (C++).
-   - `PARAKEET_DUMP_BINDINGS_ON_SLOW=1`: dump TRT binding pointers/dims on slow/enqueue errors (C++).
-   - `PARAKEET_SLOT_REUSE_CHECK=1`: enable CUDA-event in-flight slot reuse checks (C++).
-   - `PARAKEET_SLOT_REUSE_MODE` (log|wait|fail, default log): action on detected slot reuse.
-   - `PARAKEET_SLOT_REUSE_LOG_THRESHOLD` (default 4): cap reuse logs per engine (0 disables logging).
-   - `PARAKEET_SLOT_REUSE_CAP` (default = engine binding count): override slot ring size used by the reuse checker.
-   - `PARAKEET_DEBUG_SYNC=1`: force `cudaStreamSynchronize` after every `enqueueV3` and log timing/errors.
-   - `PARAKEET_DEBUG_SYNC_ENGINE` (all|encoder|predictor|joint, default all): select which engine(s) to sync.
-   - `PARAKEET_DEBUG_SYNC_LIMIT` (default 0): sync only first K enqueues per utterance (0 = no limit).
-   - `PARAKEET_DEBUG_SYNC_MEMCPY=1`: force `cudaStreamSynchronize` after each CUDA memcpy/memset and log timing/errors.
-   - `PARAKEET_SLOW_MEMCPY_MS` (default 50): log memcpy/memset calls slower than this threshold.
-   - `PARAKEET_GPU_TELEMETRY=1`: enable NVML sampling (GPU util/memory/power/temp) per utterance.
-   - `PARAKEET_GPU_TELEMETRY_HZ` (default 5): NVML sampling rate.
-   - `PARAKEET_GPU_TELEMETRY_DEVICE` (default = device id): NVML device index override.
-
 ## Keyboard Controls
 
 Magnolia is keyboard-first with smart tile navigation:

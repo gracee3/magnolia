@@ -4,9 +4,9 @@
 //! Control mode: Full astrological wheel chart with planets, houses, and signs
 
 use chrono::{FixedOffset, TimeZone, Utc};
-use nannou::prelude::*;
 use magnolia_core::{BindableAction, RenderContext, TileRenderer};
 use magnolia_ui::{draw_text, FontId, TextAlignment};
+use nannou::prelude::*;
 
 /// Transit mode for bi-wheel chart
 #[derive(Debug, Clone, Default)]

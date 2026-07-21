@@ -1,8 +1,8 @@
+use magnolia_ui::tweaks::GlyphTweaks;
+use magnolia_ui::{self, draw_text, theme, FontId, GlyphOp, TextAlignment};
 use nannou::lyon::math::point as lpoint;
 use nannou::lyon::path::Path;
 use nannou::prelude::*;
-use magnolia_ui::tweaks::GlyphTweaks;
-use magnolia_ui::{self, draw_text, theme, FontId, GlyphOp, TextAlignment};
 
 fn main() {
     nannou::app(model).update(update).run();

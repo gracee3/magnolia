@@ -1,7 +1,7 @@
 use async_trait::async_trait;
+use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
 use regex::Regex;
 use std::sync::{Arc, Mutex};
-use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Result, Signal, Sink};
 
 // --- Word Count Sink ---
 pub struct WordCountSink {

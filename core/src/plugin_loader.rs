@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use libloading::{Library, Symbol};
+use magnolia_plugin_abi::*;
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
-use magnolia_plugin_abi::*;
 
 /// Loaded plugin library with manifest and vtable
 pub struct PluginLibrary {

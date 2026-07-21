@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use nannou::prelude::*;
 use magnolia_core::{BindableAction, RenderContext, TileRenderer};
 use magnolia_ui::{draw_text, FontId, TextAlignment};
+use nannou::prelude::*;
 
 use crate::AudioDspState;
 

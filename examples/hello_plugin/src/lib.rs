@@ -1,6 +1,6 @@
+use magnolia_plugin_abi::*;
 use std::ffi::CString;
 use std::os::raw::c_void;
-use magnolia_plugin_abi::*;
 
 /// Example plugin state
 struct HelloPlugin {

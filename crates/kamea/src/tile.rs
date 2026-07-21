@@ -11,14 +11,14 @@ use crate::generator::generate_path;
 #[cfg(feature = "tile-rendering")]
 use crate::generator::SigilConfig;
 #[cfg(feature = "tile-rendering")]
+use magnolia_core::{BindableAction, RenderContext, TileRenderer};
+#[cfg(feature = "tile-rendering")]
+use magnolia_ui::{draw_text, FontId, TextAlignment};
+#[cfg(feature = "tile-rendering")]
 use nannou::prelude::*;
 #[cfg(feature = "tile-rendering")]
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
-#[cfg(feature = "tile-rendering")]
-use magnolia_core::{BindableAction, RenderContext, TileRenderer};
-#[cfg(feature = "tile-rendering")]
-use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 pub struct KameaTile {
     current_text: Arc<Mutex<String>>,
@@ -355,14 +355,14 @@ impl TileRenderer for KameaTile {
             self.show_grid_dots = dots;
         }
         if let Some(color) = settings.get("path_color").and_then(|v| v.as_array()) {
-                #[cfg(feature = "tile-rendering")]
-                {
-                    self.path_color = (
-                        color[0].as_f64().unwrap_or(0.0) as f32,
-                        color[1].as_f64().unwrap_or(1.0) as f32,
-                        color[2].as_f64().unwrap_or(1.0) as f32,
-                    );
-                }
+            #[cfg(feature = "tile-rendering")]
+            {
+                self.path_color = (
+                    color[0].as_f64().unwrap_or(0.0) as f32,
+                    color[1].as_f64().unwrap_or(1.0) as f32,
+                    color[2].as_f64().unwrap_or(1.0) as f32,
+                );
+            }
         }
     }
 

@@ -6,10 +6,10 @@
 use super::{BindableAction, RenderContext, TileRenderer};
 use crate::ui::controls;
 use chrono::Local;
+use magnolia_ui::{draw_text, FontId, TextAlignment};
 use nannou::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use magnolia_ui::{draw_text, FontId, TextAlignment};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeFormat {

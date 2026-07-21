@@ -3,9 +3,9 @@
 //! Handles layout configuration loading, track resolution (px/fr/%),
 //! and tile rect calculation.
 
+use magnolia_core::{LayoutConfig, TileConfig};
 use nannou::prelude::*;
 use std::fs;
-use magnolia_core::{LayoutConfig, TileConfig};
 
 pub struct Layout {
     pub window_rect: Rect,
