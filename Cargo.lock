@@ -4095,6 +4095,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stt_bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "audio_replay",
+ "dotenvy",
+ "speech_to_text",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

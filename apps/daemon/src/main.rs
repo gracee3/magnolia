@@ -283,6 +283,11 @@ fn model(app: &App) -> Model {
             .is_some_and(std::path::Path::exists)
     });
     if sherpa_enabled && sherpa_paths_complete {
+        if let Ok(mut captions) = caption_state.lock() {
+            captions.apply(SttEvent::Status {
+                status: speech_to_text::SttStatus::Starting,
+            });
+        }
         let config = SherpaConfig {
             encoder: sherpa_paths[0].as_ref().unwrap().into(),
             decoder: sherpa_paths[1].as_ref().unwrap().into(),
@@ -299,6 +304,11 @@ fn model(app: &App) -> Model {
         patch_bay.register_module(stt.schema());
         if let Err(e) = module_host.spawn(ProcessorAdapter::new(stt), 64) {
             log::error!("Failed to spawn speech-to-text processor: {e}");
+            if let Ok(mut captions) = caption_state.lock() {
+                captions.apply(SttEvent::Status {
+                    status: speech_to_text::SttStatus::Failed,
+                });
+            }
         } else if let Err(e) =
             patch_bay.connect("audio_input", "audio_out", "speech_to_text", "audio_in")
         {

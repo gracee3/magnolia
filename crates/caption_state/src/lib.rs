@@ -1,7 +1,7 @@
 //! Stable/provisional caption state for TUI and native views.
 
 use serde::{Deserialize, Serialize};
-use speech_to_text::SttEvent;
+use speech_to_text::{SttEvent, SttStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaptionSegment {
@@ -11,18 +11,37 @@ pub struct CaptionSegment {
     pub end_ms: Option<u64>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaptionState {
     pub committed: Vec<CaptionSegment>,
     pub provisional: Option<CaptionSegment>,
     pub last_sequence: u64,
+    pub status: SttStatus,
+}
+
+impl Default for CaptionState {
+    fn default() -> Self {
+        Self {
+            committed: Vec::new(),
+            provisional: None,
+            last_sequence: 0,
+            status: SttStatus::Stopped,
+        }
+    }
 }
 
 impl CaptionState {
     pub fn apply(&mut self, event: SttEvent) {
         let sequence = match &event {
             SttEvent::Partial { sequence, .. } | SttEvent::Final { sequence, .. } => *sequence,
-            _ => return,
+            SttEvent::Status { status } => {
+                self.status = status.clone();
+                return;
+            }
+            SttEvent::Error { .. } => {
+                self.status = SttStatus::Failed;
+                return;
+            }
         };
         if sequence <= self.last_sequence {
             return;

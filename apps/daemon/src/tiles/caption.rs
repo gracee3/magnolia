@@ -65,13 +65,30 @@ impl TileRenderer for CaptionTile {
         let Ok(state) = self.state.lock() else { return };
         let text = state.display_text();
         if text.is_empty() {
+            let (message, color) = match state.status {
+                speech_to_text::SttStatus::Starting => {
+                    ("Loading speech model…", srgba(0.80, 0.70, 0.35, 1.0))
+                }
+                speech_to_text::SttStatus::Listening => {
+                    ("Listening for speech…", srgba(0.45, 0.48, 0.55, 1.0))
+                }
+                speech_to_text::SttStatus::Paused => {
+                    ("Transcription paused", srgba(0.80, 0.70, 0.35, 1.0))
+                }
+                speech_to_text::SttStatus::Failed => {
+                    ("Speech model unavailable", srgba(0.90, 0.35, 0.35, 1.0))
+                }
+                speech_to_text::SttStatus::Stopped => {
+                    ("Transcription disabled", srgba(0.45, 0.48, 0.55, 1.0))
+                }
+            };
             draw_text(
                 draw,
                 FontId::PlexSansRegular,
-                "Listening for speech…",
+                message,
                 rect.xy(),
                 14.0,
-                srgba(0.45, 0.48, 0.55, 1.0),
+                color,
                 TextAlignment::Center,
             );
             return;

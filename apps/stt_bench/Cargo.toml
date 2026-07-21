@@ -1,0 +1,10 @@
+[package]
+name = "stt_bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+audio_replay = { path = "../../crates/audio_replay" }
+dotenvy = "0.15"
+speech_to_text = { path = "../../crates/speech_to_text", features = ["sherpa"] }

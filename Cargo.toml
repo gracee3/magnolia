@@ -20,6 +20,7 @@ members = [
     "crates/text_tools",
     "apps/daemon",
     "apps/caption_demo",
+    "apps/stt_bench",
     "examples/hello_plugin",
 ]
 default-members = [
@@ -36,5 +37,6 @@ default-members = [
     "crates/speech_to_text",
     "crates/text_tools",
     "apps/caption_demo",
+    "apps/stt_bench",
     "examples/hello_plugin",
 ]
