@@ -11,6 +11,7 @@ while IFS= read -r flac; do
     id="$(basename "$flac" .flac)"
     book_dir="$(dirname "$flac")"
     transcript="${book_dir}/$(basename "$(dirname "$book_dir")")-$(basename "$book_dir").trans.txt"
+    [[ -f "$transcript" ]] || continue
     reference="$(awk -v id="$id" '$1 == id { sub(/^[^ ]+ /, ""); print; exit }' "$transcript")"
     [[ -n "$reference" ]] || continue
     wav="$(mktemp --suffix=.wav)"
