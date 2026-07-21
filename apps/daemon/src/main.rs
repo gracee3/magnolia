@@ -1,6 +1,7 @@
 use magnolia_core::adapters::{ProcessorAdapter, SinkAdapter, SourceAdapter};
 use magnolia_core::{
-    ModuleRuntime, PatchBay, PluginManager, PluginModuleAdapter, RoutedSignal, Signal,
+    ModuleRuntime, PatchBay, PluginManager, PluginModuleAdapter, RoutedSignal, RoutingMetrics,
+    Signal,
 };
 use magnolia_core::{Processor, Sink, Source};
 use nannou::prelude::*;
@@ -36,6 +37,7 @@ struct Model {
     // We use a non-blocking channel for the UI thread to receive updates
     _receiver: std::sync::mpsc::Receiver<Signal>,
     router_rx: mpsc::Receiver<RoutedSignal>,
+    routing_metrics: std::sync::Arc<RoutingMetrics>,
 
     // UI State
     // egui removed
@@ -124,6 +126,7 @@ fn model(app: &App) -> Model {
     // 1. Setup Channels
     let (tx_ui, rx_ui) = std::sync::mpsc::channel::<Signal>();
     let (tx_router, rx_router) = mpsc::channel::<RoutedSignal>(1000);
+    let routing_metrics = std::sync::Arc::new(RoutingMetrics::default());
 
     // Clone for different uses
     let _tx_ui_clone = tx_ui.clone();
@@ -348,6 +351,7 @@ fn model(app: &App) -> Model {
     let model = Model {
         _receiver: rx_ui,
         router_rx: rx_router,
+        routing_metrics,
         // egui removed
         layout,
         selected_tile: None,
@@ -530,7 +534,15 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Process Router Signals (From Plugins)
     while let Ok(routed) = model.router_rx.try_recv() {
+        model
+            .routing_metrics
+            .received
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Err(error) = routed.validate() {
+            model
+                .routing_metrics
+                .invalid_dropped
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             log::warn!(
                 "Dropping invalid routed signal from '{}': {:?}",
                 routed.source_id,
@@ -565,6 +577,10 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
             })
             .collect::<Vec<_>>();
         if outgoing.is_empty() {
+            model
+                .routing_metrics
+                .unroutable
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             continue;
         }
 
@@ -579,7 +595,17 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
         let active_sinks: Vec<_> = outgoing
             .into_iter()
-            .filter(|patch| !model.patch_bay.is_module_disabled(&patch.sink_module))
+            .filter(|patch| {
+                if model.patch_bay.is_module_disabled(&patch.sink_module) {
+                    model
+                        .routing_metrics
+                        .disabled
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    false
+                } else {
+                    true
+                }
+            })
             .collect();
         if active_sinks.is_empty() {
             continue;
@@ -587,9 +613,20 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
         if is_audio_stream {
             if let Some(first) = active_sinks.first() {
-                let _ = model
+                let result = model
                     .module_host
                     .send_signal(&first.sink_module, routed.signal);
+                if result.is_ok() {
+                    model
+                        .routing_metrics
+                        .delivered
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                } else {
+                    model
+                        .routing_metrics
+                        .send_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
             continue;
         }
@@ -600,10 +637,28 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
             let payload = if remaining == 1 {
                 signal.take().expect("signal payload already taken")
             } else {
+                model
+                    .routing_metrics
+                    .fanout_clones
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 signal.as_ref().expect("signal payload missing").clone()
             };
             remaining -= 1;
-            let _ = model.module_host.send_signal(&patch.sink_module, payload);
+            if model
+                .module_host
+                .send_signal(&patch.sink_module, payload)
+                .is_ok()
+            {
+                model
+                    .routing_metrics
+                    .delivered
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                model
+                    .routing_metrics
+                    .send_failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
         }
     }
 

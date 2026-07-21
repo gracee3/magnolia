@@ -2,7 +2,7 @@ use crate::{ModuleSchema, Signal};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -160,6 +160,44 @@ pub fn default_output_port(schema: &ModuleSchema) -> String {
 pub struct ShutdownReport {
     pub completed: Vec<String>,
     pub timed_out: Vec<String>,
+}
+
+/// Counters for signals crossing the control-plane router boundary.
+#[derive(Default)]
+pub struct RoutingMetrics {
+    pub received: AtomicU64,
+    pub invalid_dropped: AtomicU64,
+    pub unroutable: AtomicU64,
+    pub disabled: AtomicU64,
+    pub delivered: AtomicU64,
+    pub send_failures: AtomicU64,
+    pub fanout_clones: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RoutingMetricsSnapshot {
+    pub received: u64,
+    pub invalid_dropped: u64,
+    pub unroutable: u64,
+    pub disabled: u64,
+    pub delivered: u64,
+    pub send_failures: u64,
+    pub fanout_clones: u64,
+}
+
+impl RoutingMetrics {
+    pub fn snapshot(&self) -> RoutingMetricsSnapshot {
+        let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+        RoutingMetricsSnapshot {
+            received: load(&self.received),
+            invalid_dropped: load(&self.invalid_dropped),
+            unroutable: load(&self.unroutable),
+            disabled: load(&self.disabled),
+            delivered: load(&self.delivered),
+            send_failures: load(&self.send_failures),
+            fanout_clones: load(&self.fanout_clones),
+        }
+    }
 }
 
 /// Handle to a running module instance
@@ -658,6 +696,21 @@ mod tests {
         assert_eq!(
             invalid.validate(),
             Err(RoutedSignalError::MissingSourcePort)
+        );
+    }
+
+    #[test]
+    fn routing_metrics_snapshot_is_consistent() {
+        let metrics = RoutingMetrics::default();
+        metrics.received.fetch_add(2, Ordering::Relaxed);
+        metrics.invalid_dropped.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(
+            metrics.snapshot(),
+            RoutingMetricsSnapshot {
+                received: 2,
+                invalid_dropped: 1,
+                ..RoutingMetricsSnapshot::default()
+            }
         );
     }
 }
