@@ -461,7 +461,9 @@ use std::fmt::Debug;
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
 
 // Re-export core types from signals
-pub use magnolia_signals::{AstrologyData, ControlSignal, DataType, PortDirection, Signal};
+pub use magnolia_signals::{
+    AstrologyData, ControlSignal, DataType, OverflowPolicy, PortDirection, Signal,
+};
 pub use magnolia_signals::{AudioBufferHandle, BlobHandle, GpuBufferHandle, GpuTextureHandle};
 
 /// A typed port on a module for connecting to other modules

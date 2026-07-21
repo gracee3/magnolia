@@ -213,6 +213,25 @@ pub enum Signal {
     Pulse,
 }
 
+/// Queue overflow behavior for a signal payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverflowPolicy {
+    LossSensitive,
+    Replaceable,
+}
+
+impl Signal {
+    pub fn overflow_policy(&self) -> OverflowPolicy {
+        match self {
+            Signal::Texture { .. } | Signal::Pulse => OverflowPolicy::Replaceable,
+            Signal::Computed { source, .. } if source == "stt_partial" => {
+                OverflowPolicy::Replaceable
+            }
+            _ => OverflowPolicy::LossSensitive,
+        }
+    }
+}
+
 impl Clone for Signal {
     fn clone(&self) -> Self {
         match self {

@@ -1,4 +1,4 @@
-use crate::{ModuleSchema, Signal};
+use crate::{ModuleSchema, OverflowPolicy, Signal};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -172,6 +172,8 @@ pub struct RoutingMetrics {
     pub delivered: AtomicU64,
     pub send_failures: AtomicU64,
     pub fanout_clones: AtomicU64,
+    pub replaceable_drops: AtomicU64,
+    pub loss_sensitive_failures: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -183,6 +185,8 @@ pub struct RoutingMetricsSnapshot {
     pub delivered: u64,
     pub send_failures: u64,
     pub fanout_clones: u64,
+    pub replaceable_drops: u64,
+    pub loss_sensitive_failures: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -202,6 +206,8 @@ impl RoutingMetrics {
             delivered: load(&self.delivered),
             send_failures: load(&self.send_failures),
             fanout_clones: load(&self.fanout_clones),
+            replaceable_drops: load(&self.replaceable_drops),
+            loss_sensitive_failures: load(&self.loss_sensitive_failures),
         }
     }
 }
@@ -608,6 +614,7 @@ impl ModuleHost {
                     .fetch_add(1, Ordering::Relaxed);
                 signal.as_ref().expect("signal payload missing").clone()
             };
+            let overflow_policy = payload.overflow_policy();
             if self.send_signal(&patch.sink_module, payload).is_ok() {
                 delivered += 1;
                 self.routing_metrics
@@ -617,6 +624,16 @@ impl ModuleHost {
                 self.routing_metrics
                     .send_failures
                     .fetch_add(1, Ordering::Relaxed);
+                match overflow_policy {
+                    OverflowPolicy::Replaceable => self
+                        .routing_metrics
+                        .replaceable_drops
+                        .fetch_add(1, Ordering::Relaxed),
+                    OverflowPolicy::LossSensitive => self
+                        .routing_metrics
+                        .loss_sensitive_failures
+                        .fetch_add(1, Ordering::Relaxed),
+                };
             }
         }
         RoutingResult {
@@ -882,7 +899,15 @@ mod tests {
         assert_eq!(first.delivered, 1);
         assert_eq!(second.delivered, 0);
         assert!(second.dropped);
-        assert_eq!(host.routing_metrics().snapshot().send_failures, 1);
+        let snapshot = host.routing_metrics().snapshot();
+        assert_eq!(snapshot.send_failures, 1);
+        assert_eq!(snapshot.replaceable_drops, 1);
+        let third = host.route_signal(
+            &patch_bay,
+            RoutedSignal::new("source", "out", Signal::Text("final".to_string())),
+        );
+        assert_eq!(third.delivered, 0);
+        assert_eq!(host.routing_metrics().snapshot().loss_sensitive_failures, 1);
     }
 
     #[test]
@@ -920,6 +945,26 @@ mod tests {
                 invalid_dropped: 1,
                 ..RoutingMetricsSnapshot::default()
             }
+        );
+    }
+
+    #[test]
+    fn overflow_policy_distinguishes_partials_from_final_events() {
+        assert_eq!(
+            Signal::Computed {
+                source: "stt_partial".to_string(),
+                content: "draft".to_string(),
+            }
+            .overflow_policy(),
+            OverflowPolicy::Replaceable
+        );
+        assert_eq!(
+            Signal::Computed {
+                source: "stt_final".to_string(),
+                content: "final".to_string(),
+            }
+            .overflow_policy(),
+            OverflowPolicy::LossSensitive
         );
     }
 }
