@@ -75,6 +75,7 @@ struct Model {
     // Shared Settings Handles
     audio_input_settings: std::sync::Arc<AudioInputSettings>,
     caption_state: std::sync::Arc<std::sync::Mutex<CaptionState>>,
+    stt_metrics: Option<std::sync::Arc<speech_to_text::SttMetrics>>,
 
     // Modal animation states (for fullscreen modals)
     modal_anims: std::collections::HashMap<ModalAnimKey, ModalAnim>,
@@ -183,6 +184,7 @@ fn model(app: &App) -> Model {
     let audio_input_settings = AudioInputSettings::new();
     let audio_output_settings = AudioOutputSettings::new();
     let caption_state = std::sync::Arc::new(std::sync::Mutex::new(CaptionState::default()));
+    let mut stt_metrics = None;
 
     // Audio input tile (device selection)
     tile_registry.register(AudioInputTile::new(
@@ -281,6 +283,7 @@ fn model(app: &App) -> Model {
             endpointing: true,
         };
         let stt = SttProcessor::new("speech_to_text", Box::new(LocalSherpaBackend::new(config)));
+        stt_metrics = Some(stt.metrics());
         patch_bay.register_module(stt.schema());
         if let Err(e) = module_host.spawn(ProcessorAdapter::new(stt), 64) {
             log::error!("Failed to spawn speech-to-text processor: {e}");
@@ -431,6 +434,7 @@ fn model(app: &App) -> Model {
         keyboard_nav: KeyboardNav::new(),
         audio_input_settings: audio_input_settings.clone(),
         caption_state,
+        stt_metrics,
         modal_anims: std::collections::HashMap::new(),
     };
 
@@ -561,6 +565,20 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
         .tile_registry
         .update_all_with_power(model.layout.config.power_profile, model.frame_count);
     model.frame_count += 1;
+
+    if model.frame_count % 300 == 0 {
+        if let Some(metrics) = &model.stt_metrics {
+            let snapshot = metrics.snapshot();
+            log::info!(
+                "STT metrics: audio_chunks={} emitted_events={} dropped_partials={} backend_errors={} queue_overflows={}",
+                snapshot.audio_chunks,
+                snapshot.emitted_events,
+                snapshot.dropped_partials,
+                snapshot.backend_errors,
+                snapshot.queue_overflows,
+            );
+        }
+    }
 
     // (Audio tiles update independently; module runtime handles audio pipeline)
 

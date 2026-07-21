@@ -1,8 +1,9 @@
 name: CI
 
 on:
-  pull_request:
-  push:
+  # CI is intentionally paused while Track A focuses on local runtime work.
+  # It remains manually runnable from the Actions tab when needed.
+  workflow_dispatch:
 
 jobs:
   baseline:
