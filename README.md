@@ -1,5 +1,7 @@
 # Magnolia
 
+**Status:** Experimental active research software. The repository contains working components and demonstrations, but the feature list describes the intended system boundary; not every path is hardened or independently validated. CI is manual-dispatch while local runtime work continues.
+
 Magnolia is a foundational connectivity layer for modular signal-processing systems. It provides a high-performance microkernel and a patch-bay style runtime that decouples data sources, processors, and sinks.
 
 ## Key Features
