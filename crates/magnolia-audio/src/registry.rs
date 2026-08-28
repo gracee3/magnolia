@@ -38,7 +38,7 @@ impl RegistryDevice {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DeviceRegistry {
     devices: BTreeMap<u32, RegistryDevice>,
     default_input_node_name: Option<String>,

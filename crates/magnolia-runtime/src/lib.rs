@@ -144,6 +144,7 @@ mod tests {
             operation_id: magnolia_domain::OperationId::from_u128(1),
             target_graph_revision: TargetGraphRevision::new(2),
             graph: WorkspaceGraph::default(),
+            device_selectors: Default::default(),
         };
         port.enqueue_activation(request.clone());
         assert_eq!(runtime.pending_requests(), vec![request.clone()]);

@@ -1,11 +1,13 @@
-use magnolia_domain::{OperationId, TargetGraphRevision, WorkspaceGraph};
+use magnolia_domain::{DeviceSelector, OperationId, TargetGraphRevision, WorkspaceGraph};
 use magnolia_protocol::AudioRuntimeProjection;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivationRequest {
     pub operation_id: OperationId,
     pub target_graph_revision: TargetGraphRevision,
     pub graph: WorkspaceGraph,
+    pub device_selectors: BTreeMap<String, DeviceSelector>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

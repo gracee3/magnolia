@@ -1,4 +1,7 @@
 use magnolia_application::{ActivationRequest, RuntimeControl, RuntimeEvent, RuntimePort};
+#[cfg(target_os = "linux")]
+use magnolia_audio::pipewire::PipeWireRegistryManager;
+use magnolia_domain::DeviceSelector;
 use magnolia_protocol::{AudioRuntimeProjection, AudioRuntimeState};
 use std::{
     collections::VecDeque,
@@ -95,9 +98,19 @@ fn run_worker(
     events: &Arc<Mutex<VecDeque<RuntimeEvent>>>,
 ) {
     let mut audio = AudioRuntimeProjection::default();
+    let mut input_selector: Option<DeviceSelector> = None;
+    #[cfg(target_os = "linux")]
+    let registry = PipeWireRegistryManager::start().ok();
     while let Ok(message) = receiver.recv() {
         match message {
             WorkerMessage::Activate(request) => {
+                input_selector = request
+                    .device_selectors
+                    .get("audio.input")
+                    .cloned()
+                    .or_else(|| request.device_selectors.values().next().cloned());
+                audio.input_selector_key =
+                    input_selector.as_ref().map(|_| "audio.input".to_owned());
                 // Graph compilation remains control-thread work. The initial
                 // native slice accepts the empty graph and rejects every
                 // module until its concrete audio compiler is registered.
@@ -124,10 +137,14 @@ fn run_worker(
                 match control {
                     RuntimeControl::StartAudio => {
                         audio.desired_running = true;
-                        audio.state = AudioRuntimeState::Degraded;
-                        audio.last_error = Some(
-                            "no resolved PipeWire default input metadata is available".to_owned(),
+                        #[cfg(target_os = "linux")]
+                        resolve_desired_input(
+                            &mut audio,
+                            input_selector.as_ref(),
+                            registry.as_ref(),
                         );
+                        #[cfg(not(target_os = "linux"))]
+                        resolve_desired_input(&mut audio, input_selector.as_ref());
                     }
                     RuntimeControl::StopAudio => {
                         audio.desired_running = false;
@@ -155,6 +172,49 @@ fn run_worker(
             }
             WorkerMessage::Shutdown => break,
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_desired_input(
+    audio: &mut AudioRuntimeProjection,
+    selector: Option<&DeviceSelector>,
+    registry: Option<&PipeWireRegistryManager>,
+) {
+    let Some(selector) = selector else {
+        audio.state = AudioRuntimeState::Degraded;
+        audio.last_error = Some("no durable input device selector is configured".to_owned());
+        return;
+    };
+    if let Some(registry) = registry {
+        match registry.snapshot().resolve_input(selector) {
+            Ok(device) => {
+                audio.resolved_input_id = Some(device.runtime_id.clone());
+                audio.state = AudioRuntimeState::Preparing;
+                audio.last_error = Some(
+                    "PipeWire input resolved; capture stream preparation is pending".to_owned(),
+                );
+            }
+            Err(error) => {
+                audio.resolved_input_id = None;
+                audio.state = AudioRuntimeState::Degraded;
+                audio.last_error = Some(error.to_string());
+            }
+        }
+        return;
+    }
+    audio.state = AudioRuntimeState::Failed;
+    audio.last_error = Some("PipeWire registry manager is unavailable".to_owned());
+}
+
+#[cfg(not(target_os = "linux"))]
+fn resolve_desired_input(audio: &mut AudioRuntimeProjection, selector: Option<&DeviceSelector>) {
+    if selector.is_none() {
+        audio.state = AudioRuntimeState::Degraded;
+        audio.last_error = Some("no durable input device selector is configured".to_owned());
+    } else {
+        audio.state = AudioRuntimeState::Failed;
+        audio.last_error = Some("native audio capture requires Linux PipeWire".to_owned());
     }
 }
 
@@ -208,6 +268,7 @@ mod tests {
             operation_id: OperationId::from_u128(1),
             target_graph_revision: TargetGraphRevision::new(1),
             graph: WorkspaceGraph::default(),
+            device_selectors: Default::default(),
         });
         assert!(matches!(
             next_event(&mut runtime),

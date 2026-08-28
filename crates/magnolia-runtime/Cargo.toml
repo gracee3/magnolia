@@ -6,6 +6,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 magnolia-application = { path = "../magnolia-application" }
+magnolia-audio = { path = "../magnolia-audio" }
 magnolia-domain = { path = "../magnolia-domain" }
 magnolia-protocol = { path = "../magnolia-protocol" }
 thiserror.workspace = true

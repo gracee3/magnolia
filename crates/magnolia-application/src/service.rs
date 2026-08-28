@@ -559,6 +559,7 @@ fn process_new_command<P: PersistencePort, R: RuntimePort>(
             operation_id,
             target_graph_revision: next_target,
             graph: inner.document.graph.clone(),
+            device_selectors: inner.document.device_selectors.clone(),
         });
         Some(operation_id)
     } else {
