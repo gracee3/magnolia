@@ -4,16 +4,11 @@ use magnolia_plugin_helper::{
 use magnolia_signals::AstrologyData;
 
 pub mod aspects;
-#[cfg(feature = "tile-rendering")]
-pub mod chart;
 pub mod ephemeris;
 pub mod layout;
-pub mod rendering;
 pub mod vedic;
 pub mod western;
 
-#[cfg(feature = "tile-rendering")]
-pub mod tile;
 
 use ephemeris::{EphemerisSettings, GeoLocation, SwissEphemerisAdapter};
 

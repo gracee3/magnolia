@@ -1,8 +1,5 @@
 mod backend;
 mod settings;
-#[cfg(feature = "tile-rendering")]
-pub mod tile;
-
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};

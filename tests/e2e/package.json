@@ -1,5 +1,5 @@
 {
-  "name": "magnolia-phase-2-e2e",
+  "name": "magnolia-browser-e2e",
   "private": true,
   "type": "module",
   "engines": {

@@ -10,7 +10,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
 ./scripts/check.sh
-./scripts/check-phase-2.sh
+./scripts/check-browser.sh
 
 git diff --check HEAD
 git diff --check

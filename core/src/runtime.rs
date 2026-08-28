@@ -261,8 +261,6 @@ impl ModuleHandle {
 }
 
 use crate::resources::buffer_pool::{AudioBufferPool, BlobBufferPool};
-#[cfg(feature = "gpu-resources")]
-use crate::resources::gpu_map::{GpuBufferMap, GpuTextureMap, GpuTextureViewMap};
 
 /// Manages the lifecycle of all module runtimes
 pub struct ModuleHost {
@@ -272,12 +270,6 @@ pub struct ModuleHost {
     routing_metrics: Arc<RoutingMetrics>,
     pub audio_pool: Arc<AudioBufferPool>,
     pub blob_pool: Arc<BlobBufferPool>,
-    #[cfg(feature = "gpu-resources")]
-    pub texture_map: Arc<GpuTextureMap>,
-    #[cfg(feature = "gpu-resources")]
-    pub buffer_map: Arc<GpuBufferMap>,
-    #[cfg(feature = "gpu-resources")]
-    pub view_map: Arc<GpuTextureViewMap>,
 }
 
 impl ModuleHost {
@@ -292,12 +284,6 @@ impl ModuleHost {
             routing_metrics: Arc::new(RoutingMetrics::default()),
             audio_pool: Arc::new(AudioBufferPool::new()),
             blob_pool: Arc::new(BlobBufferPool::new()),
-            #[cfg(feature = "gpu-resources")]
-            texture_map: Arc::new(GpuTextureMap::new()),
-            #[cfg(feature = "gpu-resources")]
-            buffer_map: Arc::new(GpuBufferMap::new()),
-            #[cfg(feature = "gpu-resources")]
-            view_map: Arc::new(GpuTextureViewMap::new()),
         }
     }
 

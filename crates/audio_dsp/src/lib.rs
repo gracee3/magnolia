@@ -5,9 +5,6 @@ use async_trait::async_trait;
 
 use magnolia_core::{DataType, ModuleSchema, Port, PortDirection, Processor, Signal};
 
-#[cfg(feature = "tile-rendering")]
-pub mod tile;
-
 fn load_f32(atom: &AtomicU32) -> f32 {
     f32::from_bits(atom.load(Ordering::Relaxed))
 }

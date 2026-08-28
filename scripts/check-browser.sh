@@ -2,13 +2,13 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-phase2_manifest="$repo_root/apps/magnolia-desktop/Cargo.toml"
+desktop_manifest="$repo_root/apps/magnolia-desktop/Cargo.toml"
 web_root="$repo_root/crates/magnolia-studio-web"
 assets="$repo_root/target/magnolia-studio-web-dist"
 
 for tool in cargo rg rustup trunk; do
   if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "required Phase 2 verification dependency is missing: $tool" >&2
+    echo "required browser verification dependency is missing: $tool" >&2
     exit 1
   fi
 done
@@ -18,14 +18,14 @@ if ! rustup target list --installed | rg --quiet '^wasm32-unknown-unknown$'; the
   exit 1
 fi
 
-export CARGO_TARGET_DIR="$repo_root/target/phase2"
+export CARGO_TARGET_DIR="$repo_root/target/browser"
 export NO_COLOR=false
 
-cargo fmt --manifest-path "$phase2_manifest" --all --check
-cargo check --locked --manifest-path "$phase2_manifest" --workspace --all-targets
-cargo test --locked --manifest-path "$phase2_manifest" --package magnolia-desktop --all-targets
-cargo clippy --locked --manifest-path "$phase2_manifest" --workspace --all-targets -- -D warnings
-cargo check --locked --manifest-path "$phase2_manifest" \
+cargo fmt --manifest-path "$desktop_manifest" --all --check
+cargo check --locked --manifest-path "$desktop_manifest" --workspace --all-targets
+cargo test --locked --manifest-path "$desktop_manifest" --package magnolia-desktop --all-targets
+cargo clippy --locked --manifest-path "$desktop_manifest" --workspace --all-targets -- -D warnings
+cargo check --locked --manifest-path "$desktop_manifest" \
   --package magnolia-studio-web --target wasm32-unknown-unknown
 
 cd "$web_root"
@@ -79,6 +79,6 @@ if [[ -z "${MAGNOLIA_CHROMIUM:-}" ]]; then
   fi
 fi
 
-export MAGNOLIA_DESKTOP_BIN="$repo_root/target/phase2/debug/magnolia-desktop"
+export MAGNOLIA_DESKTOP_BIN="$repo_root/target/browser/debug/magnolia-desktop"
 export MAGNOLIA_WEB_ASSETS="$assets"
 "$npm_bin" test --prefix "$repo_root/tests/e2e"

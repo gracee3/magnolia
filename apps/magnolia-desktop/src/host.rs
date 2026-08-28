@@ -1015,7 +1015,7 @@ fn test_authorized(state: &HostState, headers: &HeaderMap) -> bool {
 
 #[derive(Debug, Error)]
 pub enum HostError {
-    #[error("Trunk assets are missing; expected {0}. Run scripts/run-phase-2.sh")]
+    #[error("Trunk assets are missing; expected {0}. Run scripts/run.sh")]
     MissingAssets(PathBuf),
     #[error("could not bind the Magnolia loopback listener: {0}")]
     Bind(std::io::Error),
