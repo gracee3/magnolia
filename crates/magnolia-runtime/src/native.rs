@@ -1,11 +1,13 @@
 use magnolia_application::{ActivationRequest, RuntimeControl, RuntimeEvent, RuntimePort};
 #[cfg(target_os = "linux")]
 use magnolia_audio::{
-    pipewire::PipeWireRegistryManager, CaptureConfiguration, CaptureState, NativeSampleFormat,
-    OutputConfiguration, PipeWireCapture, PipeWireOutput,
+    pipewire::PipeWireRegistryManager, CaptureConfiguration, CaptureState, DeviceDirection,
+    NativeSampleFormat, OutputConfiguration, PipeWireCapture, PipeWireOutput,
 };
 use magnolia_domain::DeviceSelector;
-use magnolia_protocol::{AudioRuntimeProjection, AudioRuntimeState};
+use magnolia_protocol::{
+    AudioDeviceDirection, AudioDeviceProjection, AudioRuntimeProjection, AudioRuntimeState,
+};
 use std::{
     collections::VecDeque,
     sync::{mpsc, Arc, Mutex, MutexGuard},
@@ -113,13 +115,23 @@ fn run_worker(
             Ok(message) => message,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 #[cfg(target_os = "linux")]
+                let before = audio.clone();
+                #[cfg(target_os = "linux")]
+                if let Some(registry) = registry.as_ref() {
+                    update_registry_projection(&mut audio, registry);
+                }
+                #[cfg(target_os = "linux")]
                 if let Some(capture) = capture.as_ref() {
-                    let before = audio.clone();
                     apply_capture_snapshot(&mut audio, capture);
-                    if audio != before {
-                        audio.runtime_revision = audio.runtime_revision.saturating_add(1);
-                        push_event(events, RuntimeEvent::AudioProjection(audio.clone()));
-                    }
+                }
+                #[cfg(target_os = "linux")]
+                if let Some(output) = output.as_ref() {
+                    audio.underruns = output.snapshot().underruns;
+                }
+                #[cfg(target_os = "linux")]
+                if audio != before {
+                    audio.runtime_revision = audio.runtime_revision.saturating_add(1);
+                    push_event(events, RuntimeEvent::AudioProjection(audio.clone()));
                 }
                 continue;
             }
@@ -127,6 +139,10 @@ fn run_worker(
         };
         match message {
             WorkerMessage::Activate(request) => {
+                #[cfg(target_os = "linux")]
+                if let Some(registry) = registry.as_ref() {
+                    update_registry_projection(&mut audio, registry);
+                }
                 input_selector = request
                     .device_selectors
                     .get("audio.input")
@@ -230,6 +246,10 @@ fn run_worker(
                     }
                 }
                 #[cfg(target_os = "linux")]
+                if let Some(registry) = registry.as_ref() {
+                    update_registry_projection(&mut audio, registry);
+                }
+                #[cfg(target_os = "linux")]
                 if let Some(capture) = capture.as_ref() {
                     apply_capture_snapshot(&mut audio, capture);
                 }
@@ -306,6 +326,38 @@ fn apply_capture_snapshot(audio: &mut AudioRuntimeProjection, capture: &PipeWire
 }
 
 #[cfg(target_os = "linux")]
+fn update_registry_projection(
+    audio: &mut AudioRuntimeProjection,
+    registry: &PipeWireRegistryManager,
+) {
+    let snapshot = registry.snapshot();
+    audio.available_devices = snapshot
+        .devices()
+        .map(|device| AudioDeviceProjection {
+            runtime_id: device.runtime_id.clone(),
+            label: device.label.clone(),
+            direction: match device.direction {
+                DeviceDirection::Input => AudioDeviceDirection::Input,
+                DeviceDirection::Output => AudioDeviceDirection::Output,
+            },
+            node_name: device.fingerprint.node_name.clone(),
+            device_api: device.fingerprint.device_api.clone(),
+            object_path: device.fingerprint.object_path.clone(),
+            is_default: match device.direction {
+                DeviceDirection::Input => {
+                    snapshot.default_input_node_name()
+                        == Some(device.fingerprint.node_name.as_str())
+                }
+                DeviceDirection::Output => {
+                    snapshot.default_output_node_name()
+                        == Some(device.fingerprint.node_name.as_str())
+                }
+            },
+        })
+        .collect();
+}
+
+#[cfg(target_os = "linux")]
 fn start_monitor_output(
     audio: &mut AudioRuntimeProjection,
     registry: Option<&PipeWireRegistryManager>,
@@ -321,7 +373,7 @@ fn start_monitor_output(
         audio.last_error = Some("PipeWire default output is unavailable".to_owned());
         return;
     };
-    let Some(consumer) = capture.and_then(PipeWireCapture::take_consumer) else {
+    let Some(edge) = capture.and_then(PipeWireCapture::take_monitor_edge) else {
         audio.last_error = Some("capture graph edge is unavailable for monitoring".to_owned());
         return;
     };
@@ -329,7 +381,7 @@ fn start_monitor_output(
         OutputConfiguration {
             target_node_name: device.fingerprint.node_name.clone(),
         },
-        consumer,
+        edge,
     ) {
         Ok(started) => {
             audio.resolved_output_id = Some(device.runtime_id.clone());

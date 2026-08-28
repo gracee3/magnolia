@@ -79,6 +79,16 @@ impl DeviceRegistry {
         self.revision
     }
 
+    #[must_use]
+    pub fn default_input_node_name(&self) -> Option<&str> {
+        self.default_input_node_name.as_deref()
+    }
+
+    #[must_use]
+    pub fn default_output_node_name(&self) -> Option<&str> {
+        self.default_output_node_name.as_deref()
+    }
+
     pub fn resolve_input(
         &self,
         selector: &DeviceSelector,

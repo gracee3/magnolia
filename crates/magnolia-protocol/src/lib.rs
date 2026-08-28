@@ -270,6 +270,8 @@ pub struct AudioRuntimeProjection {
     pub dropped_frames: u64,
     pub discontinuities: u64,
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub available_devices: Vec<AudioDeviceProjection>,
 }
 
 impl Default for AudioRuntimeProjection {
@@ -295,8 +297,28 @@ impl Default for AudioRuntimeProjection {
             dropped_frames: 0,
             discontinuities: 0,
             last_error: None,
+            available_devices: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioDeviceProjection {
+    pub runtime_id: String,
+    pub label: String,
+    pub direction: AudioDeviceDirection,
+    pub node_name: String,
+    pub device_api: String,
+    pub object_path: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioDeviceDirection {
+    Input,
+    Output,
 }
 
 impl AudioRuntimeProjection {

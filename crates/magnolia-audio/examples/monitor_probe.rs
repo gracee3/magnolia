@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let consumer = capture
-        .take_consumer()
+        .take_monitor_edge()
         .ok_or("capture graph edge unavailable")?;
     let output = PipeWireOutput::start(
         OutputConfiguration {

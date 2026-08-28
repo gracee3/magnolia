@@ -499,13 +499,14 @@ fn process_new_command<P: PersistencePort, R: RuntimePort>(
         Ok(candidate) => candidate,
         Err((code, message)) => return Ok(rejected_receipt(inner, envelope, code, message)),
     };
-    let graph_changed = candidate.graph != inner.document.graph;
+    let runtime_changed = candidate.graph != inner.document.graph
+        || candidate.device_selectors != inner.document.device_selectors;
     let next_document = inner
         .document
         .revision
         .checked_next()
         .map_err(|error| ApplicationError::RevisionOverflow(error.to_string()))?;
-    let next_target = graph_changed
+    let next_target = runtime_changed
         .then(|| inner.target_revision.checked_next())
         .transpose()
         .map_err(|error| ApplicationError::RevisionOverflow(error.to_string()))?;

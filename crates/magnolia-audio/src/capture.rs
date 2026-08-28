@@ -92,6 +92,18 @@ pub struct PipeWireCapture {
     stop: Option<pw::channel::Sender<()>>,
     worker: Option<JoinHandle<()>>,
     consumer: Option<BlockConsumer>,
+    monitor_edge_enabled: Arc<AtomicBool>,
+}
+
+pub struct MonitorEdge {
+    pub(crate) consumer: BlockConsumer,
+    enabled: Arc<AtomicBool>,
+}
+
+impl Drop for MonitorEdge {
+    fn drop(&mut self) {
+        self.enabled.store(false, Ordering::Release);
+    }
 }
 
 impl PipeWireCapture {
@@ -100,6 +112,8 @@ impl PipeWireCapture {
             return Err(CaptureError::BlankTarget);
         }
         let counters = Arc::new(CaptureCounters::default());
+        let monitor_edge_enabled = Arc::new(AtomicBool::new(false));
+        let worker_monitor_edge_enabled = Arc::clone(&monitor_edge_enabled);
         let format = AudioFormat::new(48_000, 2, 256).map_err(|_| CaptureError::InternalFormat)?;
         let (producer, consumer, _) = block_channel(format, 16);
         let worker_counters = Arc::clone(&counters);
@@ -112,6 +126,7 @@ impl PipeWireCapture {
                     receiver,
                     Arc::clone(&worker_counters),
                     producer,
+                    worker_monitor_edge_enabled,
                 )
                 .is_err()
                 {
@@ -126,6 +141,7 @@ impl PipeWireCapture {
             stop: Some(stop),
             worker: Some(worker),
             consumer: Some(consumer),
+            monitor_edge_enabled,
         })
     }
 
@@ -151,8 +167,13 @@ impl PipeWireCapture {
         }
     }
 
-    pub fn take_consumer(&mut self) -> Option<BlockConsumer> {
-        self.consumer.take()
+    pub fn take_monitor_edge(&mut self) -> Option<MonitorEdge> {
+        let consumer = self.consumer.take()?;
+        self.monitor_edge_enabled.store(true, Ordering::Release);
+        Some(MonitorEdge {
+            consumer,
+            enabled: Arc::clone(&self.monitor_edge_enabled),
+        })
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -191,6 +212,7 @@ struct CallbackData {
     adapter: Option<QuantumAdapter>,
     counters: Arc<CaptureCounters>,
     producer: BlockProducer,
+    monitor_edge_enabled: Arc<AtomicBool>,
 }
 
 fn run_capture_loop(
@@ -198,6 +220,7 @@ fn run_capture_loop(
     stop: pw::channel::Receiver<()>,
     counters: Arc<CaptureCounters>,
     producer: BlockProducer,
+    monitor_edge_enabled: Arc<AtomicBool>,
 ) -> Result<(), CaptureError> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
@@ -220,6 +243,7 @@ fn run_capture_loop(
         adapter: None,
         counters: Arc::clone(&counters),
         producer,
+        monitor_edge_enabled,
     };
     let _listener = stream
         .add_local_listener_with_user_data(callback_data)
@@ -364,6 +388,9 @@ fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
         source_position,
         0,
         |samples, meta| {
+            if !data.monitor_edge_enabled.load(Ordering::Acquire) {
+                return;
+            }
             if !canonical_format {
                 counters.faults.fetch_add(1, Ordering::Relaxed);
                 return;

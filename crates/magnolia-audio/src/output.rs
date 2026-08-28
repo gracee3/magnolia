@@ -1,4 +1,4 @@
-use crate::{BlockConsumer, CallbackScope, ConsumeOutcome};
+use crate::{CallbackScope, ConsumeOutcome, MonitorEdge};
 use pipewire as pw;
 use pw::{properties::properties, spa};
 use spa::pod::Pod;
@@ -49,7 +49,7 @@ pub struct PipeWireOutput {
 impl PipeWireOutput {
     pub fn start(
         configuration: OutputConfiguration,
-        consumer: BlockConsumer,
+        edge: MonitorEdge,
     ) -> Result<Self, OutputError> {
         if configuration.target_node_name.trim().is_empty() {
             return Err(OutputError::BlankTarget);
@@ -63,7 +63,7 @@ impl PipeWireOutput {
         let worker = thread::Builder::new()
             .name("magnolia-pipewire-output".to_owned())
             .spawn(move || {
-                if run_output_loop(configuration, receiver, consumer, &worker_controls).is_err() {
+                if run_output_loop(configuration, receiver, edge, &worker_controls).is_err() {
                     worker_controls.state.store(3, Ordering::Release);
                 }
             })
@@ -108,7 +108,7 @@ impl Drop for PipeWireOutput {
 }
 
 struct OutputData {
-    consumer: BlockConsumer,
+    edge: MonitorEdge,
     controls: Arc<OutputControls>,
     held: [f32; BLOCK_SAMPLES],
     held_offset: usize,
@@ -119,7 +119,7 @@ struct OutputData {
 fn run_output_loop(
     configuration: OutputConfiguration,
     stop: pw::channel::Receiver<()>,
-    consumer: BlockConsumer,
+    edge: MonitorEdge,
     controls: &Arc<OutputControls>,
 ) -> Result<(), OutputError> {
     pw::init();
@@ -139,7 +139,7 @@ fn run_output_loop(
         },
     )?;
     let data = OutputData {
-        consumer,
+        edge,
         controls: Arc::clone(controls),
         held: [0.0; BLOCK_SAMPLES],
         held_offset: 0,
@@ -206,7 +206,7 @@ fn process_output(stream: &pw::stream::Stream, data: &mut OutputData) {
     let mut written = 0;
     while written < samples_needed {
         if data.held_offset == data.held_samples {
-            match data.consumer.consume(|block| {
+            match data.edge.consumer.consume(|block| {
                 let samples = block.samples();
                 data.held[..samples.len()].copy_from_slice(samples);
                 samples.len()

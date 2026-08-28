@@ -9,10 +9,13 @@ use crate::{
 };
 use leptos::prelude::*;
 use magnolia_client::ApplicationClient;
-use magnolia_domain::{ControlKind, EntityId, LayoutNode, SplitAxis};
+use magnolia_domain::{
+    ControlKind, DeviceFingerprint, DeviceSelector, EntityId, LayoutNode, SplitAxis, WorkspaceEdit,
+    WorkspaceEditBatch,
+};
 use magnolia_protocol::{
-    ControlManifest, ModuleState, OperationState, SyntheticTelemetryPayload, TelemetrySubscription,
-    SYNTHETIC_CAPTION_STREAM_ID, SYNTHETIC_DIAGNOSTICS_STREAM_ID,
+    ControlManifest, ModuleState, OperationState, SemanticCommand, SyntheticTelemetryPayload,
+    TelemetrySubscription, SYNTHETIC_CAPTION_STREAM_ID, SYNTHETIC_DIAGNOSTICS_STREAM_ID,
 };
 use send_wrapper::SendWrapper;
 use serde_json::Value;
@@ -606,6 +609,7 @@ fn DiagnosticsTile(state: StudioState, visible: Signal<bool>) -> impl IntoView {
 
     view! {
         <div class="diagnostics-tile" data-testid="diagnostics-tile">
+            <AudioControls state=state.clone() />
             <div class="diagnostic-counters">
                 {move || state.projection.get().map(|projection| {
                     projection.diagnostics.counters.iter().map(|(name, value)| view! {
@@ -622,6 +626,101 @@ fn DiagnosticsTile(state: StudioState, visible: Signal<bool>) -> impl IntoView {
                 {move || state.events.get().into_iter().rev().take(20).map(|entry| view! { <li>{entry}</li> }).collect_view()}
             </ol>
         </div>
+    }
+}
+
+#[component]
+fn AudioControls(state: StudioState) -> impl IntoView {
+    let start = state.clone();
+    let stop = state.clone();
+    let capture_mute = state.clone();
+    let monitor_enable = state.clone();
+    let monitor_mute = state.clone();
+    let gain_zero = state.clone();
+    let gain_safe = state.clone();
+    let projection = state.clone();
+    let devices = state.clone();
+    let follow_default = state.clone();
+    view! {
+        <section class="audio-controls" data-testid="audio-controls">
+            <h3>"Native audio runtime"</h3>
+            <div class="control-actions">
+                <button type="button" on:click=move |_| start.dispatch(SemanticCommand::StartAudio)>"Start capture"</button>
+                <button type="button" on:click=move |_| stop.dispatch(SemanticCommand::StopAudio)>"Stop"</button>
+                <button type="button" on:click=move |_| {
+                    let muted = capture_mute.projection.get_untracked().is_some_and(|value| value.audio.capture_muted);
+                    capture_mute.dispatch(SemanticCommand::SetCaptureMuted { muted: !muted });
+                }>"Capture mute"</button>
+                <button type="button" on:click=move |_| {
+                    let enabled = monitor_enable.projection.get_untracked().is_some_and(|value| value.audio.monitor_enabled);
+                    monitor_enable.dispatch(SemanticCommand::SetMonitorEnabled { enabled: !enabled });
+                }>"Monitor enable"</button>
+                <button type="button" on:click=move |_| {
+                    let muted = monitor_mute.projection.get_untracked().is_none_or(|value| value.audio.monitor_muted);
+                    monitor_mute.dispatch(SemanticCommand::SetMonitorMuted { muted: !muted });
+                }>"Monitor mute"</button>
+                <button type="button" on:click=move |_| gain_zero.dispatch(SemanticCommand::SetMonitorGain { linear_millionths: 0 })>"Gain 0"</button>
+                <button type="button" on:click=move |_| gain_safe.dispatch(SemanticCommand::SetMonitorGain { linear_millionths: 30_000 })>"Gain 3%"</button>
+            </div>
+            <div class="control-actions" data-testid="audio-input-devices">
+                <button type="button" on:click=move |_| follow_default.dispatch(
+                    SemanticCommand::ApplyWorkspaceEdit {
+                        batch: WorkspaceEditBatch::new(vec![WorkspaceEdit::SetDeviceSelector {
+                            key: "audio.input".to_owned(),
+                            selector: DeviceSelector::FollowDefaultInput,
+                        }]),
+                    }
+                )>"Follow default input"</button>
+                {move || devices.projection.get().into_iter().flat_map(|projection| {
+                    projection.audio.available_devices.iter().filter(|device| {
+                        device.direction == magnolia_protocol::AudioDeviceDirection::Input
+                    }).cloned().map(|device| {
+                        let selection_state = devices.clone();
+                        let label = if device.is_default {
+                            format!("{} (default)", device.label)
+                        } else {
+                            device.label.clone()
+                        };
+                        view! {
+                            <button type="button" on:click=move |_| selection_state.dispatch(
+                                SemanticCommand::ApplyWorkspaceEdit {
+                                    batch: WorkspaceEditBatch::new(vec![WorkspaceEdit::SetDeviceSelector {
+                                        key: "audio.input".to_owned(),
+                                        selector: DeviceSelector::Exact {
+                                            fingerprint: DeviceFingerprint {
+                                                node_name: device.node_name.clone(),
+                                                device_api: device.device_api.clone(),
+                                                object_path: device.object_path.clone(),
+                                            },
+                                        },
+                                    }]),
+                                }
+                            )>{label}</button>
+                        }
+                    }).collect::<Vec<_>>()
+                }).collect_view()}
+            </div>
+            <pre data-testid="audio-runtime-status">{move || projection.projection.get().map_or_else(
+                || "audio projection pending".to_owned(),
+                |value| format!(
+                    "state={:?} format={:?} rate={:?} channels={:?} quantum={:?} runtime_rev={} callbacks={} underruns={} drops={} discontinuities={} monitor={}/{}/{} error={}",
+                    value.audio.state,
+                    value.audio.sample_format,
+                    value.audio.sample_rate,
+                    value.audio.channels,
+                    value.audio.quantum_frames,
+                    value.audio.runtime_revision,
+                    value.audio.callback_count,
+                    value.audio.underruns,
+                    value.audio.dropped_frames,
+                    value.audio.discontinuities,
+                    value.audio.monitor_enabled,
+                    value.audio.monitor_muted,
+                    value.audio.monitor_gain_millionths,
+                    value.audio.last_error.clone().unwrap_or_else(|| "none".to_owned()),
+                ),
+            )}</pre>
+        </section>
     }
 }
 
