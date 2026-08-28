@@ -26,6 +26,8 @@ jobs:
           toolchain: 1.97.1
           components: clippy,rustfmt
           targets: wasm32-unknown-unknown
+      - name: Install verification dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ripgrep
       - run: ./scripts/verify.sh
 
   baseline:

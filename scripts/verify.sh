@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if ! command -v rg >/dev/null 2>&1; then
+  echo "required verification dependency is missing: rg" >&2
+  exit 1
+fi
+
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
@@ -14,6 +19,13 @@ cargo test --locked --package magnolia-runtime \
 git diff --check
 
 for file in README.md AGENTS.md $(find docs -type f -name '*.md' -print); do
+  link_matches=$(rg -o '\[[^]]*\]\([^)]+\)' "$file") || {
+    rg_status=$?
+    if [[ $rg_status -ne 1 ]]; then
+      echo "Markdown-link scan failed for $file" >&2
+      exit "$rg_status"
+    fi
+  }
   while IFS= read -r raw_link; do
     link=${raw_link#*](}
     link=${link%)}
@@ -27,5 +39,5 @@ for file in README.md AGENTS.md $(find docs -type f -name '*.md' -print); do
       echo "broken internal Markdown link: $file -> $link" >&2
       exit 1
     fi
-  done < <(rg -o '\[[^]]*\]\([^)]+\)' "$file" || true)
+  done <<< "$link_matches"
 done
