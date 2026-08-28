@@ -1,7 +1,7 @@
 use crate::{
     block_channel, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, AudioFormat, BlockConsumer,
-    BlockIndex, BlockProducer, CallbackScope, CallbackTiming, PublishOutcome, QuantumAdapter,
-    StereoLinearResampler, MAX_PIPEWIRE_QUANTUM_FRAMES,
+    BlockIndex, BlockProducer, CallbackScope, CallbackTiming, EdgeCounters, PublishOutcome,
+    QuantumAdapter, StereoLinearResampler, MAX_PIPEWIRE_QUANTUM_FRAMES,
 };
 use pipewire as pw;
 use pw::{properties::properties, spa};
@@ -45,6 +45,7 @@ pub struct CaptureSnapshot {
     pub source_frames: u64,
     pub emitted_blocks: u64,
     pub faults: u64,
+    pub dropped_frames: u64,
     pub callback_max_ns: u64,
     pub callback_p99_ns: u64,
     pub callback_p999_ns: u64,
@@ -116,6 +117,7 @@ pub struct PipeWireCapture {
     worker: Option<JoinHandle<()>>,
     consumer: Option<BlockConsumer>,
     monitor_edge_enabled: Arc<AtomicBool>,
+    edge_counters: Arc<EdgeCounters>,
 }
 
 pub struct MonitorEdge {
@@ -138,7 +140,7 @@ impl PipeWireCapture {
         let monitor_edge_enabled = Arc::new(AtomicBool::new(false));
         let worker_monitor_edge_enabled = Arc::clone(&monitor_edge_enabled);
         let format = AudioFormat::new(48_000, 2, 256).map_err(|_| CaptureError::InternalFormat)?;
-        let (producer, consumer, _) = block_channel(format, 16);
+        let (producer, consumer, edge_counters) = block_channel(format, 16);
         let worker_counters = Arc::clone(&counters);
         let (stop, receiver) = pw::channel::channel();
         let worker = thread::Builder::new()
@@ -165,6 +167,7 @@ impl PipeWireCapture {
             worker: Some(worker),
             consumer: Some(consumer),
             monitor_edge_enabled,
+            edge_counters,
         })
     }
 
@@ -197,6 +200,7 @@ impl PipeWireCapture {
             _ => None,
         };
         let timing = self.counters.timing.snapshot();
+        let edge = self.edge_counters.snapshot();
         CaptureSnapshot {
             state,
             sample_format,
@@ -208,7 +212,12 @@ impl PipeWireCapture {
             callbacks: timing.callbacks,
             source_frames: self.counters.source_frames.load(Ordering::Relaxed),
             emitted_blocks: self.counters.emitted_blocks.load(Ordering::Relaxed),
-            faults: self.counters.faults.load(Ordering::Relaxed),
+            faults: self
+                .counters
+                .faults
+                .load(Ordering::Relaxed)
+                .saturating_add(edge.faults),
+            dropped_frames: edge.dropped.saturating_mul(256),
             callback_max_ns: timing.maximum_ns,
             callback_p99_ns: timing.p99_ns,
             callback_p999_ns: timing.p999_ns,
@@ -222,6 +231,11 @@ impl PipeWireCapture {
             consumer,
             enabled: Arc::clone(&self.monitor_edge_enabled),
         })
+    }
+
+    #[must_use]
+    pub fn monitor_edge_available(&self) -> bool {
+        self.consumer.is_some()
     }
 
     pub fn set_muted(&self, muted: bool) {

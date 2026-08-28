@@ -13,12 +13,22 @@ use std::{
     collections::VecDeque,
     sync::{mpsc, Arc, Mutex, MutexGuard},
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 enum WorkerMessage {
     Activate(ActivationRequest),
     Control(RuntimeControl),
     Shutdown,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, Default)]
+struct StreamTotals {
+    callbacks: u64,
+    dropped_frames: u64,
+    faults: u64,
+    underruns: u64,
 }
 
 pub struct NativeRuntime {
@@ -111,6 +121,12 @@ fn run_worker(
     let mut capture: Option<PipeWireCapture> = None;
     #[cfg(target_os = "linux")]
     let mut output: Option<PipeWireOutput> = None;
+    #[cfg(target_os = "linux")]
+    let mut totals = StreamTotals::default();
+    #[cfg(target_os = "linux")]
+    let mut last_recovery_attempt = Instant::now()
+        .checked_sub(Duration::from_secs(1))
+        .unwrap_or_else(Instant::now);
     loop {
         let message = match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(message) => message,
@@ -120,14 +136,24 @@ fn run_worker(
                 #[cfg(target_os = "linux")]
                 if let Some(registry) = registry.as_ref() {
                     update_registry_projection(&mut audio, registry);
+                    maintain_capture(
+                        &mut audio,
+                        input_selector.as_ref(),
+                        registry,
+                        &mut capture,
+                        &mut output,
+                        &mut totals,
+                        &mut last_recovery_attempt,
+                    );
+                    apply_stream_totals(&mut audio, &totals);
                 }
                 #[cfg(target_os = "linux")]
                 if let Some(capture) = capture.as_ref() {
-                    apply_capture_snapshot(&mut audio, capture);
+                    apply_capture_snapshot(&mut audio, capture, &totals);
                 }
                 #[cfg(target_os = "linux")]
                 if let Some(output) = output.as_ref() {
-                    audio.underruns = output.snapshot().underruns;
+                    apply_output_snapshot(&mut audio, output, &totals);
                 }
                 #[cfg(target_os = "linux")]
                 if audio != before {
@@ -144,13 +170,11 @@ fn run_worker(
                 if let Some(registry) = registry.as_ref() {
                     update_registry_projection(&mut audio, registry);
                 }
-                input_selector = request
+                let candidate_selector = request
                     .device_selectors
                     .get("audio.input")
                     .cloned()
                     .or_else(|| request.device_selectors.values().next().cloned());
-                audio.input_selector_key =
-                    input_selector.as_ref().map(|_| "audio.input".to_owned());
                 // Compilation and validation stay on this control worker. A
                 // failed candidate never changes the application last-good
                 // revision.
@@ -162,6 +186,9 @@ fn run_worker(
                         message: error.message,
                     }
                 } else {
+                    input_selector = candidate_selector;
+                    audio.input_selector_key =
+                        input_selector.as_ref().map(|_| "audio.input".to_owned());
                     RuntimeEvent::ActivationSucceeded {
                         operation_id: request.operation_id,
                         target_graph_revision: request.target_graph_revision,
@@ -174,28 +201,23 @@ fn run_worker(
                     RuntimeControl::StartAudio => {
                         audio.desired_running = true;
                         #[cfg(target_os = "linux")]
-                        if let Some(target_node_name) = resolve_desired_input(
-                            &mut audio,
-                            input_selector.as_ref(),
-                            registry.as_ref(),
-                        ) {
-                            match PipeWireCapture::start(CaptureConfiguration { target_node_name })
-                            {
-                                Ok(started) => capture = Some(started),
-                                Err(error) => {
-                                    audio.state = AudioRuntimeState::Failed;
-                                    audio.last_error = Some(error.to_string());
-                                }
-                            }
+                        if capture.is_none() {
+                            try_start_capture(
+                                &mut audio,
+                                input_selector.as_ref(),
+                                registry.as_ref(),
+                                &mut capture,
+                                &mut last_recovery_attempt,
+                            );
                         }
                         #[cfg(not(target_os = "linux"))]
                         resolve_desired_input(&mut audio, input_selector.as_ref());
                     }
                     RuntimeControl::StopAudio => {
                         #[cfg(target_os = "linux")]
-                        output.take();
+                        retire_output(&mut output, &mut totals);
                         #[cfg(target_os = "linux")]
-                        capture.take();
+                        retire_capture(&mut capture, &mut totals);
                         audio.desired_running = false;
                         audio.monitor_enabled = false;
                         audio.monitor_muted = true;
@@ -214,17 +236,35 @@ fn run_worker(
                         audio.monitor_enabled = enabled;
                         if !enabled {
                             #[cfg(target_os = "linux")]
-                            output.take();
+                            retire_output(&mut output, &mut totals);
                             audio.monitor_muted = true;
                             audio.monitor_gain_millionths = 0;
                         } else {
                             #[cfg(target_os = "linux")]
-                            start_monitor_output(
-                                &mut audio,
-                                registry.as_ref(),
-                                capture.as_mut(),
-                                &mut output,
-                            );
+                            if capture
+                                .as_ref()
+                                .is_some_and(|capture| !capture.monitor_edge_available())
+                            {
+                                retire_output(&mut output, &mut totals);
+                                retire_capture(&mut capture, &mut totals);
+                                audio.discontinuities = audio.discontinuities.saturating_add(1);
+                                try_start_capture(
+                                    &mut audio,
+                                    input_selector.as_ref(),
+                                    registry.as_ref(),
+                                    &mut capture,
+                                    &mut last_recovery_attempt,
+                                );
+                            }
+                            #[cfg(target_os = "linux")]
+                            if output.is_none() {
+                                start_monitor_output(
+                                    &mut audio,
+                                    registry.as_ref(),
+                                    capture.as_mut(),
+                                    &mut output,
+                                );
+                            }
                         }
                     }
                     RuntimeControl::SetMonitorMuted(muted) => {
@@ -247,12 +287,14 @@ fn run_worker(
                     update_registry_projection(&mut audio, registry);
                 }
                 #[cfg(target_os = "linux")]
+                apply_stream_totals(&mut audio, &totals);
+                #[cfg(target_os = "linux")]
                 if let Some(capture) = capture.as_ref() {
-                    apply_capture_snapshot(&mut audio, capture);
+                    apply_capture_snapshot(&mut audio, capture, &totals);
                 }
                 #[cfg(target_os = "linux")]
                 if let Some(output) = output.as_ref() {
-                    audio.underruns = output.snapshot().underruns;
+                    apply_output_snapshot(&mut audio, output, &totals);
                 }
                 audio.runtime_revision = audio.runtime_revision.saturating_add(1);
                 push_event(events, RuntimeEvent::AudioProjection(audio.clone()));
@@ -356,41 +398,113 @@ fn compile_audio_graph(graph: &WorkspaceGraph) -> Result<(), GraphCompileError> 
 }
 
 #[cfg(target_os = "linux")]
-fn resolve_desired_input(
-    audio: &mut AudioRuntimeProjection,
+fn resolve_input_target(
     selector: Option<&DeviceSelector>,
     registry: Option<&PipeWireRegistryManager>,
-) -> Option<String> {
-    let Some(selector) = selector else {
-        audio.state = AudioRuntimeState::Degraded;
-        audio.last_error = Some("no durable input device selector is configured".to_owned());
-        return None;
-    };
-    if let Some(registry) = registry {
-        match registry.snapshot().resolve_input(selector) {
-            Ok(device) => {
-                audio.resolved_input_id = Some(device.runtime_id.clone());
-                audio.state = AudioRuntimeState::Preparing;
-                audio.last_error = Some(
-                    "PipeWire input resolved; capture stream preparation is pending".to_owned(),
-                );
-                return Some(device.fingerprint.node_name.clone());
-            }
-            Err(error) => {
-                audio.resolved_input_id = None;
-                audio.state = AudioRuntimeState::Degraded;
-                audio.last_error = Some(error.to_string());
-            }
-        }
-        return None;
-    }
-    audio.state = AudioRuntimeState::Failed;
-    audio.last_error = Some("PipeWire registry manager is unavailable".to_owned());
-    None
+) -> Result<(String, String), String> {
+    let selector =
+        selector.ok_or_else(|| "no durable input device selector is configured".to_owned())?;
+    let registry = registry.ok_or_else(|| "PipeWire registry manager is unavailable".to_owned())?;
+    registry
+        .snapshot()
+        .resolve_input(selector)
+        .map(|device| {
+            (
+                device.runtime_id.clone(),
+                device.fingerprint.node_name.clone(),
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "linux")]
-fn apply_capture_snapshot(audio: &mut AudioRuntimeProjection, capture: &PipeWireCapture) {
+fn try_start_capture(
+    audio: &mut AudioRuntimeProjection,
+    selector: Option<&DeviceSelector>,
+    registry: Option<&PipeWireRegistryManager>,
+    capture: &mut Option<PipeWireCapture>,
+    last_attempt: &mut Instant,
+) {
+    *last_attempt = Instant::now();
+    let (runtime_id, target_node_name) = match resolve_input_target(selector, registry) {
+        Ok(target) => target,
+        Err(error) => {
+            audio.resolved_input_id = None;
+            audio.state = AudioRuntimeState::Degraded;
+            audio.last_error = Some(error);
+            return;
+        }
+    };
+    audio.resolved_input_id = Some(runtime_id);
+    audio.state = AudioRuntimeState::Preparing;
+    audio.last_error = Some("PipeWire capture stream preparation is pending".to_owned());
+    match PipeWireCapture::start(CaptureConfiguration { target_node_name }) {
+        Ok(started) => {
+            started.set_muted(audio.capture_muted);
+            *capture = Some(started);
+        }
+        Err(error) => {
+            audio.state = AudioRuntimeState::Failed;
+            audio.last_error = Some(error.to_string());
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn maintain_capture(
+    audio: &mut AudioRuntimeProjection,
+    selector: Option<&DeviceSelector>,
+    registry: &PipeWireRegistryManager,
+    capture: &mut Option<PipeWireCapture>,
+    output: &mut Option<PipeWireOutput>,
+    totals: &mut StreamTotals,
+    last_attempt: &mut Instant,
+) {
+    if !audio.desired_running {
+        return;
+    }
+    let resolved = resolve_input_target(selector, Some(registry));
+    let failed = capture.as_ref().is_some_and(|capture| {
+        matches!(
+            capture.snapshot().state,
+            CaptureState::Failed | CaptureState::Stopped
+        )
+    });
+    match resolved {
+        Err(error) => {
+            if capture.is_some() {
+                retire_output(output, totals);
+                retire_capture(capture, totals);
+                audio.discontinuities = audio.discontinuities.saturating_add(1);
+            }
+            audio.resolved_input_id = None;
+            audio.state = AudioRuntimeState::Degraded;
+            audio.last_error = Some(error);
+        }
+        Ok((runtime_id, _)) => {
+            let changed = audio.resolved_input_id.as_deref() != Some(runtime_id.as_str());
+            if changed || failed {
+                retire_output(output, totals);
+                retire_capture(capture, totals);
+                audio.discontinuities = audio.discontinuities.saturating_add(1);
+                audio.resolved_input_id = Some(runtime_id);
+            }
+            if capture.is_none() && last_attempt.elapsed() >= Duration::from_secs(1) {
+                try_start_capture(audio, selector, Some(registry), capture, last_attempt);
+                if audio.monitor_enabled && capture.is_some() {
+                    start_monitor_output(audio, Some(registry), capture.as_mut(), output);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_capture_snapshot(
+    audio: &mut AudioRuntimeProjection,
+    capture: &PipeWireCapture,
+    totals: &StreamTotals,
+) {
     let snapshot = capture.snapshot();
     audio.state = match snapshot.state {
         CaptureState::Running => AudioRuntimeState::Running,
@@ -413,10 +527,13 @@ fn apply_capture_snapshot(audio: &mut AudioRuntimeProjection, capture: &PipeWire
         None => Vec::new(),
     };
     audio.quantum_frames = (snapshot.quantum_frames != 0).then_some(snapshot.quantum_frames);
-    audio.callback_count = snapshot.callbacks;
+    audio.callback_count = totals.callbacks.saturating_add(snapshot.callbacks);
     audio.callback_p99_ns = snapshot.callback_p99_ns;
     audio.callback_p999_ns = snapshot.callback_p999_ns;
-    audio.dropped_frames = snapshot.faults;
+    audio.dropped_frames = totals
+        .dropped_frames
+        .saturating_add(snapshot.dropped_frames);
+    audio.overruns = totals.faults.saturating_add(snapshot.faults);
     if snapshot.state == CaptureState::Running {
         audio.last_error = None;
     } else if let Some(error) = snapshot.configuration_error {
@@ -434,6 +551,46 @@ fn apply_capture_snapshot(audio: &mut AudioRuntimeProjection, capture: &PipeWire
             }
             .to_owned(),
         );
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_output_snapshot(
+    audio: &mut AudioRuntimeProjection,
+    output: &PipeWireOutput,
+    totals: &StreamTotals,
+) {
+    audio.underruns = totals.underruns.saturating_add(output.snapshot().underruns);
+}
+
+#[cfg(target_os = "linux")]
+fn apply_stream_totals(audio: &mut AudioRuntimeProjection, totals: &StreamTotals) {
+    audio.callback_count = audio.callback_count.max(totals.callbacks);
+    audio.dropped_frames = audio.dropped_frames.max(totals.dropped_frames);
+    audio.overruns = audio.overruns.max(totals.faults);
+    audio.underruns = audio.underruns.max(totals.underruns);
+}
+
+#[cfg(target_os = "linux")]
+fn retire_capture(capture: &mut Option<PipeWireCapture>, totals: &mut StreamTotals) {
+    if let Some(retired) = capture.take() {
+        let snapshot = retired.snapshot();
+        totals.callbacks = totals.callbacks.saturating_add(snapshot.callbacks);
+        totals.dropped_frames = totals
+            .dropped_frames
+            .saturating_add(snapshot.dropped_frames);
+        totals.faults = totals.faults.saturating_add(snapshot.faults);
+        drop(retired);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn retire_output(output: &mut Option<PipeWireOutput>, totals: &mut StreamTotals) {
+    if let Some(retired) = output.take() {
+        totals.underruns = totals
+            .underruns
+            .saturating_add(retired.snapshot().underruns);
+        drop(retired);
     }
 }
 
