@@ -29,6 +29,11 @@ members = [
     "examples/hello_plugin",
 ]
 
+exclude = [
+    "apps/magnolia-desktop",
+    "crates/magnolia-studio-web",
+]
+
 default-members = [
     "core",
     "crates/magnolia-domain",

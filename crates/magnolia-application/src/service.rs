@@ -2,15 +2,15 @@ use crate::{ActivationRequest, PersistenceError, PersistencePort, RuntimeEvent, 
 use event_listener::Event;
 use magnolia_domain::{
     ActiveGraphRevision, ClientId, ControlKind, DescriptorRegistry, EntityId, OperationId,
-    ProjectionRevision, RequestId, RuntimeEpochId, TargetGraphRevision, WorkspaceDocument,
-    WorkspaceEdit, WorkspaceEditBatch,
+    ProjectionRevision, RequestId, RuntimeEpochId, TargetGraphRevision, TranscriptRevision,
+    WorkspaceDocument, WorkspaceEdit, WorkspaceEditBatch,
 };
 use magnolia_protocol::{
     negotiate_protocol, CommandEnvelope, CommandError, CommandErrorCode, CommandReceipt,
     ConnectRequest, ConnectResponse, ControlAvailability, ControlCommandIdentity, ControlManifest,
     DiagnosticsSummary, ModuleState, ModuleStatus, OperationState, OperationStatus,
     ProtocolVersion, ReceiptOutcome, RequestSequence, RuntimeError, RuntimeProjection,
-    SemanticCommand, TranscriptSummary,
+    SemanticCommand, TranscriptPage, TranscriptSegment, TranscriptSummary,
 };
 use serde_json::Value;
 use std::{
@@ -49,6 +49,9 @@ struct Inner<P: PersistencePort, R: RuntimePort> {
     projection_revision: ProjectionRevision,
     operations: BTreeMap<OperationId, OperationStatus>,
     errors: Vec<RuntimeError>,
+    transcript_revision: TranscriptRevision,
+    transcript_segments: Vec<TranscriptSegment>,
+    diagnostics: BTreeMap<String, u64>,
     undo: Vec<WorkspaceDocument>,
     redo: Vec<WorkspaceDocument>,
     clients: BTreeMap<ClientId, ClientLedger>,
@@ -86,6 +89,8 @@ pub enum ApplicationError {
     Persistence(#[from] PersistenceError),
     #[error("revision overflow: {0}")]
     RevisionOverflow(String),
+    #[error("invalid observation update: {0}")]
+    InvalidObservation(String),
 }
 
 impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
@@ -137,6 +142,9 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
                     projection_revision: ProjectionRevision::ZERO,
                     operations: BTreeMap::new(),
                     errors: Vec::new(),
+                    transcript_revision: TranscriptRevision::ZERO,
+                    transcript_segments: Vec::new(),
+                    diagnostics: BTreeMap::new(),
                     undo: Vec::new(),
                     redo: Vec::new(),
                     clients: BTreeMap::new(),
@@ -263,6 +271,100 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
             self.shared.projection_changed.notify(usize::MAX);
         }
         Ok(report)
+    }
+
+    /// Append an authoritative final transcript segment to the process-local journal.
+    ///
+    /// Synthetic Phase 2 producers use the same application-owned path that later
+    /// native ASR adapters will use. Partials remain telemetry and never enter the
+    /// final journal.
+    pub fn append_transcript(
+        &self,
+        segment: TranscriptSegment,
+    ) -> Result<TranscriptRevision, ApplicationError> {
+        let mut inner = self.lock()?;
+        let next = inner
+            .transcript_revision
+            .checked_next()
+            .map_err(|error| ApplicationError::RevisionOverflow(error.to_string()))?;
+        if inner
+            .transcript_segments
+            .last()
+            .is_some_and(|previous| segment.sequence <= previous.sequence)
+        {
+            return Err(ApplicationError::InvalidObservation(
+                "final transcript sequences must increase monotonically".to_owned(),
+            ));
+        }
+        inner.transcript_revision = next;
+        inner.transcript_segments.push(segment);
+        publish(&mut inner)?;
+        drop(inner);
+        self.shared.projection_changed.notify(usize::MAX);
+        Ok(next)
+    }
+
+    pub fn transcript_page(
+        &self,
+        after: u64,
+        limit: u32,
+    ) -> Result<TranscriptPage, ApplicationError> {
+        let inner = self.lock()?;
+        let limit = usize::try_from(limit.clamp(1, 256)).unwrap_or(256);
+        let mut matching = inner
+            .transcript_segments
+            .iter()
+            .filter(|segment| segment.sequence > after);
+        let segments: Vec<_> = matching.by_ref().take(limit).cloned().collect();
+        let has_more = matching.next().is_some();
+        let next_cursor = if has_more {
+            segments.last().map(|segment| segment.sequence)
+        } else {
+            None
+        };
+        Ok(TranscriptPage {
+            revision: inner.transcript_revision,
+            segments,
+            next_cursor,
+        })
+    }
+
+    /// Replace a cumulative observation counter and publish only when it changes.
+    pub fn set_diagnostic_counter(
+        &self,
+        name: impl Into<String>,
+        value: u64,
+    ) -> Result<bool, ApplicationError> {
+        self.set_diagnostic_counters([(name.into(), value)])
+    }
+
+    /// Atomically replace a group of cumulative observation counters.
+    ///
+    /// Telemetry health is projected at a deliberately low cadence; publishing
+    /// one immutable snapshot for the batch keeps observation traffic from
+    /// crowding command receipts or document projections.
+    pub fn set_diagnostic_counters(
+        &self,
+        counters: impl IntoIterator<Item = (String, u64)>,
+    ) -> Result<bool, ApplicationError> {
+        let counters: Vec<_> = counters.into_iter().collect();
+        if counters.iter().any(|(name, _)| name.trim().is_empty()) {
+            return Err(ApplicationError::InvalidObservation(
+                "diagnostic counter name must not be blank".to_owned(),
+            ));
+        }
+        let mut inner = self.lock()?;
+        let changed = counters
+            .iter()
+            .any(|(name, value)| inner.diagnostics.get(name) != Some(value));
+        if !changed {
+            return Ok(false);
+        }
+        inner.diagnostics.extend(counters);
+        publish(&mut inner)?;
+        drop(inner);
+        self.shared.projection_changed.notify(usize::MAX);
+        Ok(true)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Inner<P, R>>, ApplicationError> {
@@ -638,8 +740,23 @@ fn publish<P: PersistencePort, R: RuntimePort>(
         operations: inner.operations.values().cloned().collect(),
         errors: inner.errors.clone(),
         control_manifests: materialize_controls(&inner.document, &inner.registry, pending),
-        transcript: TranscriptSummary::default(),
-        diagnostics: DiagnosticsSummary::default(),
+        transcript: TranscriptSummary {
+            revision: inner.transcript_revision,
+            final_segment_count: inner.transcript_segments.len() as u64,
+            recent: inner
+                .transcript_segments
+                .iter()
+                .rev()
+                .take(32)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect(),
+        },
+        diagnostics: DiagnosticsSummary {
+            counters: inner.diagnostics.clone(),
+        },
     });
     Ok(())
 }
@@ -1137,5 +1254,71 @@ mod tests {
             service.snapshot().unwrap().control_manifests[&module_id][0].value,
             Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn final_transcript_journal_is_ordered_and_cursor_addressable() {
+        let service = service();
+        let session_id = EntityId::from_u128(500);
+        for sequence in 1..=2 {
+            service
+                .append_transcript(TranscriptSegment {
+                    session_id,
+                    segment_id: EntityId::from_u128(500 + u128::from(sequence)),
+                    segment_revision: 1,
+                    sequence,
+                    text: format!("segment {sequence}"),
+                })
+                .unwrap();
+        }
+        let first = service.transcript_page(0, 1).unwrap();
+        assert_eq!(first.segments.len(), 1);
+        assert_eq!(first.segments[0].sequence, 1);
+        assert_eq!(first.next_cursor, Some(1));
+        let second = service.transcript_page(1, 8).unwrap();
+        assert_eq!(second.segments.len(), 1);
+        assert_eq!(second.segments[0].sequence, 2);
+        assert_eq!(second.next_cursor, None);
+        let projection = service.snapshot().unwrap();
+        assert_eq!(projection.transcript.final_segment_count, 2);
+        assert_eq!(projection.transcript.recent.len(), 2);
+
+        assert!(matches!(
+            service.append_transcript(TranscriptSegment {
+                session_id,
+                segment_id: EntityId::from_u128(999),
+                segment_revision: 1,
+                sequence: 2,
+                text: "duplicate".to_owned(),
+            }),
+            Err(ApplicationError::InvalidObservation(_))
+        ));
+    }
+
+    #[test]
+    fn diagnostic_counter_batches_publish_one_snapshot_only_when_changed() {
+        let service = service();
+        let before = service.snapshot().unwrap().revision;
+        assert!(service
+            .set_diagnostic_counters([
+                ("telemetry.connections".to_owned(), 1),
+                ("telemetry.dropped".to_owned(), 4),
+            ])
+            .unwrap());
+        let after = service.snapshot().unwrap();
+        assert_eq!(after.revision.get(), before.get() + 1);
+        assert_eq!(after.diagnostics.counters["telemetry.connections"], 1);
+        assert_eq!(after.diagnostics.counters["telemetry.dropped"], 4);
+        assert!(!service
+            .set_diagnostic_counters([
+                ("telemetry.connections".to_owned(), 1),
+                ("telemetry.dropped".to_owned(), 4),
+            ])
+            .unwrap());
+        assert_eq!(service.snapshot().unwrap().revision, after.revision);
+        assert!(matches!(
+            service.set_diagnostic_counter(" ", 1),
+            Err(ApplicationError::InvalidObservation(_))
+        ));
     }
 }

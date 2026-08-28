@@ -1,6 +1,6 @@
 //! Portable Magnolia application-client boundary.
 
-use magnolia_domain::ProjectionRevision;
+use magnolia_domain::{EntityId, ProjectionRevision};
 use magnolia_protocol::{
     CommandEnvelope, CommandReceipt, ConnectRequest, ConnectResponse, RuntimeProjection,
     TelemetryLease, TelemetrySubscription, TranscriptPage,
@@ -40,6 +40,8 @@ pub trait ApplicationClient {
         subscription: TelemetrySubscription,
     ) -> ClientFuture<'_, TelemetryLease>;
 
+    fn release_telemetry(&self, stream_id: EntityId) -> ClientFuture<'_, ()>;
+
     fn transcript_page(&self, after: u64, limit: u32) -> ClientFuture<'_, TranscriptPage>;
 }
 
@@ -69,6 +71,7 @@ pub enum ApplicationCall {
     WaitForProjection { after: ProjectionRevision },
     Dispatch(CommandEnvelope),
     SubscribeTelemetry(TelemetrySubscription),
+    ReleaseTelemetry { stream_id: EntityId },
     TranscriptPage { after: u64, limit: u32 },
 }
 
@@ -93,6 +96,10 @@ pub enum ScriptStep {
         expected: TelemetrySubscription,
         result: Result<TelemetryLease, ClientError>,
     },
+    ReleaseTelemetry {
+        expected_stream_id: EntityId,
+        result: Result<(), ClientError>,
+    },
     TranscriptPage {
         expected_after: u64,
         expected_limit: u32,
@@ -108,6 +115,7 @@ impl ScriptStep {
             Self::WaitForProjection { .. } => "wait_for_projection",
             Self::Dispatch { .. } => "dispatch",
             Self::SubscribeTelemetry { .. } => "subscribe_telemetry",
+            Self::ReleaseTelemetry { .. } => "release_telemetry",
             Self::TranscriptPage { .. } => "transcript_page",
         }
     }
@@ -239,6 +247,22 @@ impl ApplicationClient for MockApplicationClient {
         })
     }
 
+    fn release_telemetry(&self, stream_id: EntityId) -> ClientFuture<'_, ()> {
+        Box::pin(async move {
+            self.record(ApplicationCall::ReleaseTelemetry { stream_id })?;
+            match self.next("release_telemetry")? {
+                ScriptStep::ReleaseTelemetry {
+                    expected_stream_id,
+                    result,
+                } if expected_stream_id == stream_id => result,
+                ScriptStep::ReleaseTelemetry { .. } => {
+                    Err(ClientError::ArgumentMismatch("release_telemetry"))
+                }
+                _ => unreachable!("step name checked"),
+            }
+        })
+    }
+
     fn transcript_page(&self, after: u64, limit: u32) -> ClientFuture<'_, TranscriptPage> {
         Box::pin(async move {
             self.record(ApplicationCall::TranscriptPage { after, limit })?;
@@ -337,6 +361,10 @@ mod tests {
                 &self,
                 _subscription: TelemetrySubscription,
             ) -> ClientFuture<'_, TelemetryLease> {
+                Box::pin(async { Err(ClientError::Unsupported("telemetry")) })
+            }
+
+            fn release_telemetry(&self, _stream_id: EntityId) -> ClientFuture<'_, ()> {
                 Box::pin(async { Err(ClientError::Unsupported("telemetry")) })
             }
 

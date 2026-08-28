@@ -1,0 +1,52 @@
+[package]
+name = "magnolia-studio-web"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+workspace = "../../apps/magnolia-desktop"
+
+[dependencies]
+futures.workspace = true
+gloo-timers.workspace = true
+js-sys.workspace = true
+leptos.workspace = true
+magnolia-client = { path = "../magnolia-client" }
+magnolia-domain = { path = "../magnolia-domain" }
+magnolia-protocol = { path = "../magnolia-protocol" }
+postcard.workspace = true
+send_wrapper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = [
+    "BinaryType",
+    "CanvasRenderingContext2d",
+    "CanvasGradient",
+    "CloseEvent",
+    "Document",
+    "Element",
+    "ErrorEvent",
+    "Event",
+    "EventTarget",
+    "FocusEvent",
+    "History",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlSelectElement",
+    "HtmlTextAreaElement",
+    "KeyboardEvent",
+    "Location",
+    "MessageEvent",
+    "MouseEvent",
+    "Storage",
+    "WebSocket",
+    "Window",
+    "console",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { workspace = true, features = ["js"] }

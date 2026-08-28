@@ -1,6 +1,6 @@
 use crate::{ApplicationService, PersistencePort, RuntimePort};
 use magnolia_client::{ApplicationClient, ClientError, ClientFuture};
-use magnolia_domain::{ProjectionRevision, TranscriptRevision};
+use magnolia_domain::{EntityId, ProjectionRevision};
 use magnolia_protocol::{
     CommandEnvelope, CommandReceipt, ConnectRequest, ConnectResponse, RuntimeProjection,
     TelemetryLease, TelemetrySubscription, TranscriptPage,
@@ -79,13 +79,19 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationClient for InProcessApplicat
         })
     }
 
-    fn transcript_page(&self, _after: u64, _limit: u32) -> ClientFuture<'_, TranscriptPage> {
+    fn release_telemetry(&self, _stream_id: EntityId) -> ClientFuture<'_, ()> {
         Box::pin(async {
-            Ok(TranscriptPage {
-                revision: TranscriptRevision::ZERO,
-                segments: Vec::new(),
-                next_cursor: None,
-            })
+            Err(ClientError::Unsupported(
+                "telemetry leases require a transport adapter",
+            ))
+        })
+    }
+
+    fn transcript_page(&self, after: u64, limit: u32) -> ClientFuture<'_, TranscriptPage> {
+        Box::pin(async move {
+            self.service
+                .transcript_page(after, limit)
+                .map_err(|error| ClientError::Service(error.to_string()))
         })
     }
 }

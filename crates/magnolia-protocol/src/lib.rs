@@ -11,6 +11,10 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
+mod transport;
+
+pub use transport::*;
+
 pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
