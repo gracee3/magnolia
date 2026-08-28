@@ -1,6 +1,7 @@
 # Target architecture and protocol
 
-Status: accepted contract; not implemented.
+Status: accepted contract; the Phase 1 portable foundation is implemented, while
+native execution, audio, ASR, browser presentation, and transport are not.
 
 ## Crates and dependency direction
 
@@ -8,7 +9,7 @@ Status: accepted contract; not implemented.
 |---|---|
 | `magnolia-domain` | Portable UUID ID newtypes, checked revision newtypes, documents, static module/control definitions, graph types, and validation. |
 | `magnolia-protocol` | Wire DTOs, dynamic `ControlManifest`s, commands, receipts, full projections, handshake, telemetry, and transcript types; depends only on portable domain types. |
-| `magnolia-client` | Portable `ApplicationClient` and scripted `MockApplicationClient`. |
+| `magnolia-client` | Async portable `ApplicationClient` with browser-local futures and scripted `MockApplicationClient`. |
 | `magnolia-application` | Authoritative service, transactions, undo/redo, persistence and runtime ports, manifest materialization, projection publication, and an in-process client. |
 | `magnolia-runtime` | Native runtime adapter; begins as deterministic `MockRuntime`, then gains graph compilation, lifecycle, activation, clocks, and execution lanes. |
 | `magnolia-audio` | PipeWire capture/output, explicit conversion/channel-map/resample nodes, monitoring. |
@@ -43,13 +44,22 @@ four executor contracts are deliberately separate:
 3. Asynchronous workers handle control, ordinary I/O, and inference coordination.
 4. Storage workers journal, record, persist, and export.
 
-Graph validation rejects missing or incorrect ports, stream schema/format
-mismatches, cycles without an explicit delay node, missing clock or resampling
-bridges, invalid fan-in, and unbounded cross-lane edges. Compilation and resource
-preparation happen off-thread. Activation swaps an immutable prepared graph at
-an execution-safe point; real-time audio subgraphs swap specifically at an audio
-block boundary. Failure leaves the last-good active graph running, keeps target
-and active revisions distinct, and publishes a structured error.
+Graph validation rejects missing or incorrect ports, stream
+schema/format/delivery-policy mismatches, invalid module configuration under the
+descriptor's supported portable schema, cycles without an explicit delay node,
+missing clock or resampling bridges, invalid fan-in, and unbounded cross-lane
+edges. Compilation and resource preparation happen off-thread. Activation swaps
+an immutable prepared graph at an execution-safe point; real-time audio
+subgraphs swap specifically at an audio block boundary. Failure leaves the
+last-good active graph running, keeps target and active revisions distinct, and
+publishes a structured error.
+
+The foundation configuration-schema subset accepts boolean schemas plus
+`type`, `enum`, `properties`, `required`, `additionalProperties`, and `items`;
+annotation-only title/description/default and schema/ID fields are also allowed.
+Descriptor registration rejects unsupported assertion keywords so validation is
+never silently bypassed. The subset can be widened deliberately with contract
+tests when native modules need more constraints.
 
 Same-lane real-time nodes use borrowed buffers from an immutable, preallocated
 prepared graph. Every cross-lane tap owns paired `rtrb` free/ready queues whose
@@ -93,8 +103,9 @@ with requested and negotiated rate, capacity, and delivery policy.
 ## Application façade
 
 The native `ApplicationService` and portable, transport-neutral
-`ApplicationClient` expose
-the same operations:
+`ApplicationClient` expose the same operations. Client operations are async and
+their futures do not require `Send`, allowing a WASM adapter to use browser-local
+WebSocket state:
 
 - protocol handshake/connect;
 - immediate full snapshot;
@@ -127,7 +138,10 @@ document, graph, configuration, and layout mutations. Capture/monitor mute,
 recording state, telemetry subscriptions, and live samples never enter history.
 Durable mutations use atomic typed `WorkspaceEdit` batches covering module
 instances, edges, configurations, tile bindings, named presets, and promoted
-settings. JSON Patch is not a command or persistence contract.
+settings. A committed transaction advances the document revision, but only a
+material graph change advances the target revision, creates an activation
+operation, or supersedes a pending activation. JSON Patch is not a command or
+persistence contract.
 
 ## Foundation mock round trip
 

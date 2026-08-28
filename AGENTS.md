@@ -12,7 +12,7 @@ Magnolia's accepted target architecture is documented under `docs/rearchitecture
 
 ## Validation and provenance
 
-For documentation-only changes run `git diff --check` and validate links/path references with focused searches. Future implementation must add and use `scripts/check.sh` and `scripts/verify.sh` at the gates prescribed by `docs/rearchitecture/migration-and-verification.md`.
+For documentation-only changes run `git diff --check` and validate links/path references with focused searches. For Phase 1 foundation changes use `scripts/check.sh` as the fast gate and `scripts/verify.sh` as the handoff gate. These scripts are intentionally scoped to the five portable foundation crates and must be extended as later native, WASM, browser, and hardware phases arrive.
 
 Do not download models or corpora, access devices, run capture/benchmarks, launch the GUI, build plugins, or use a GPU without explicit authorization. Never commit recordings, transcripts, model/corpus payloads, `.env`, secrets, local paths, raw host captures, unjustified binaries, or unlicensed assets. Record provenance and actual execution providers. Do not claim ABI stability, sandbox/signing/hot-reload enforcement, real-time performance, ASR accuracy, browser continuity, or GPU support without evidence for the exact path and host.
 

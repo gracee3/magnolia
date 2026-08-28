@@ -4,9 +4,34 @@ on:
   # CI is intentionally paused while Track A focuses on local runtime work.
   # It remains manually runnable from the Actions tab when needed.
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Verification suite to run
+        required: true
+        default: foundation
+        type: choice
+        options:
+          - foundation
+          - baseline
+          - all
 
 jobs:
+  portable-foundation:
+    if: ${{ inputs.suite == 'foundation' || inputs.suite == 'all' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: clippy,rustfmt
+          targets: wasm32-unknown-unknown
+      - name: Install verification dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ripgrep
+      - run: ./scripts/verify.sh
+
   baseline:
+    if: ${{ inputs.suite == 'baseline' || inputs.suite == 'all' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
