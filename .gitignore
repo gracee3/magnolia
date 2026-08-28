@@ -31,19 +31,6 @@ Thumbs.db
 # Magnolia Configs (Keep secrets out)
 # configs/*.toml
 
-# Built plugin artifacts
-plugins/*.so
-plugins/*.dylib
-plugins/*.dll
-*.so
-*.dylib
-*.dll
-
-configs/layout.toml
-screenshots/
-tools/LibriSpeech/
-
-# Local speech models and machine-specific environment configuration
-models/
+# Local machine-specific environment configuration
 .env
 .env.local

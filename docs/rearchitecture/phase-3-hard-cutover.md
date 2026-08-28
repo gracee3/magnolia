@@ -1,6 +1,6 @@
 # Phase 3 hard cutover
 
-Status: in progress on `feature/hard-cutover`
+Status: implemented on `feature/hard-cutover`; awaiting review and merge
 
 ## Frozen base and policy
 
@@ -37,5 +37,32 @@ unrelated applications, obsolete configuration and tooling, and the tracked
 plugin binary. Git history is the archive; no compatibility bridge or importer
 is introduced.
 
-Final verification evidence, exact counts, residue audits, limitations, and
-Phase 4 deferrals will be recorded here before delivery.
+## Final state and verification
+
+The root workspace contains exactly seven members: domain, protocol, client,
+application, runtime, desktop, and studio-web. The cutover changes 189 tracked
+paths relative to the Phase 2 merge base, with 170 tracked paths deleted,
+35,496 lines removed, and no tracked binary remaining. One root lockfile covers
+the entire workspace.
+
+The final candidate gate passed formatting, native all-target checks, 50 unit
+tests, four distinct Rust integration scenarios, denied-warning Clippy,
+portable and studio `wasm32-unknown-unknown` checks, a release Trunk build, and
+five real-Chromium scenarios. Browser coverage includes twenty active-stream
+reloads and the 2,000-message telemetry flood. Markdown links, changed-tree
+whitespace, required tools, exact workspace membership, tracked binaries,
+workflow absence, and legacy source/dependency residue are checked by the same
+non-skippable `./scripts/verify.sh` entry point.
+
+The canonical `./scripts/run.sh` lifecycle was also exercised with a loopback
+host and dedicated temporary Chromium profile. Ctrl-C stopped the native host
+and its browser child, removed the profile, and left no Magnolia-started process.
+
+## Limitations and Phase 4 boundary
+
+The active runtime remains `MockRuntime` with synthetic descriptors. The
+cutover does not implement devices, audio, PipeWire, ASR, recording/replay,
+filesystem persistence, GPU computation, model acquisition, a plugin system,
+legacy import, or hardware certification. Phase 4 may begin the accepted native
+audio work; later observation and ASR phases must reconstruct only the needed
+concepts from documented contracts and Git history.

@@ -1,12 +1,12 @@
 # Magnolia native runtime and Leptos studio rearchitecture
 
-Status: **accepted target architecture; Phases 1 and 2 implemented; Phase 3 in progress**
+Status: **accepted target architecture; Phases 1 through 3 implemented**
 
 Accepted: 2026-08-27
 
 Implementation status: Phase 1 adds portable contracts and a deterministic mock
 round trip. Phase 2 adds the authenticated native desktop, Leptos cockpit,
-bounded synthetic telemetry, and Chromium lifecycle proof. Phase 3 is the active
+bounded synthetic telemetry, and Chromium lifecycle proof. Phase 3 completed the
 hard cutover; later phases remain unimplemented.
 
 This package is the controlling plan for replacing Magnolia's prototype runtime

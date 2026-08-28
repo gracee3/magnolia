@@ -8,11 +8,6 @@ members = [
     "crates/magnolia-runtime",
     "apps/magnolia-desktop",
     "crates/magnolia-studio-web",
-    "core",
-    "crates/magnolia-module-api",
-    "crates/magnolia-plugin-abi",
-    "crates/magnolia-plugin-helper",
-    "crates/magnolia-signals",
 ]
 
 default-members = [

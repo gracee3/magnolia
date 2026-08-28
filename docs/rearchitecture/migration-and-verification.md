@@ -1,6 +1,6 @@
 # Migration and verification
 
-Status: Phases 1 and 2 implemented; Phase 3 in progress; phases 4 through 7 are prescribed future work.
+Status: Phases 1 through 3 implemented; phases 4 through 7 are prescribed future work.
 
 ## Commit-sized migration
 
@@ -43,6 +43,8 @@ Add `magnolia-desktop` and `magnolia-studio-web` with synthetic modules. Prove a
 Exit gate: `wasm32-unknown-unknown` compiles, `trunk build --release` succeeds, Chromium E2E tests pass, twenty active-stream reloads retain the runtime/graph, and telemetry overload cannot delay control receipts. No Nannou/Leptos bridge is created.
 
 ### 3. Hard cutover and exact deletion point
+
+Status: implemented. See [Phase 3 hard cutover](phase-3-hard-cutover.md).
 
 Make the new desktop binary the default only after phase 2 gates pass. Then make two explicit breaking commits:
 
