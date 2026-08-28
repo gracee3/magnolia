@@ -11,6 +11,7 @@ pub struct ActivationBoundary<T> {
     pending: Consumer<Box<T>>,
     retired: Producer<Box<T>>,
     active: Box<T>,
+    held_pending: Option<Box<T>>,
 }
 
 #[must_use]
@@ -26,6 +27,7 @@ pub fn activation_channel<T>(initial: T) -> (ActivationController<T>, Activation
             pending: pending_rx,
             retired: retired_tx,
             active: Box::new(initial),
+            held_pending: None,
         },
     )
 }
@@ -52,13 +54,25 @@ impl<T> ActivationController<T> {
 impl<T> ActivationBoundary<T> {
     /// Call exactly once at the start of an audio block.
     pub fn activate_at_block_boundary(&mut self) -> bool {
-        let Ok(next) = self.pending.pop() else {
+        if self.retired.is_full() {
             return false;
+        }
+        let next = if let Some(next) = self.held_pending.take() {
+            next
+        } else {
+            let Ok(next) = self.pending.pop() else {
+                return false;
+            };
+            next
         };
         let previous = std::mem::replace(&mut self.active, next);
-        self.retired
-            .push(previous)
-            .expect("one pending slot guarantees one retired slot");
+        if let Err(rtrb::PushError::Full(previous)) = self.retired.push(previous) {
+            // Capacity was checked before consuming pending. With this SPSC
+            // endpoint no other producer can fill it in between.
+            let next = std::mem::replace(&mut self.active, previous);
+            self.held_pending = Some(next);
+            return false;
+        }
         true
     }
 
@@ -88,5 +102,19 @@ mod tests {
         controller.prepare(2).unwrap();
         assert_eq!(controller.prepare(3), Err(3));
         assert_eq!(boundary.active(), &1);
+    }
+
+    #[test]
+    fn second_activation_waits_for_off_callback_reclamation() {
+        let (mut controller, mut boundary) = activation_channel(1);
+        controller.prepare(2).unwrap();
+        assert!(boundary.activate_at_block_boundary());
+        controller.prepare(3).unwrap();
+
+        assert!(!boundary.activate_at_block_boundary());
+        assert_eq!(boundary.active(), &2);
+        assert_eq!(controller.reclaim_retired(), 1);
+        assert!(boundary.activate_at_block_boundary());
+        assert_eq!(boundary.active(), &3);
     }
 }

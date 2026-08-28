@@ -21,8 +21,8 @@ pub enum DeviceSelector {
 pub enum ResolveDeviceError {
     #[error("exact PipeWire input node is unavailable: {0}")]
     ExactDeviceMissing(String),
-    #[error("PipeWire reported no input devices")]
-    NoInputDevices,
+    #[error("the default PipeWire input is unavailable because default metadata was not supplied")]
+    DefaultInputUnavailable,
 }
 
 pub fn resolve_device<'a>(
@@ -30,7 +30,9 @@ pub fn resolve_device<'a>(
     selector: &DeviceSelector,
 ) -> Result<&'a InputDevice, ResolveDeviceError> {
     match selector {
-        DeviceSelector::FollowDefault => devices.first().ok_or(ResolveDeviceError::NoInputDevices),
+        // Registry enumeration does not identify the default. Returning any
+        // device here would silently change user intent based on sort order.
+        DeviceSelector::FollowDefault => Err(ResolveDeviceError::DefaultInputUnavailable),
         DeviceSelector::ExactNodeName(name) => devices
             .iter()
             .find(|device| device.node_name == *name)
@@ -117,5 +119,18 @@ mod tests {
             ),
             Err(ResolveDeviceError::ExactDeviceMissing(_))
         ));
+    }
+
+    #[test]
+    fn unresolved_default_never_uses_the_first_sorted_device() {
+        let devices = vec![InputDevice {
+            global_id: 7,
+            node_name: "first.sorted.source".to_owned(),
+            description: None,
+        }];
+        assert_eq!(
+            resolve_device(&devices, &DeviceSelector::FollowDefault),
+            Err(ResolveDeviceError::DefaultInputUnavailable)
+        );
     }
 }

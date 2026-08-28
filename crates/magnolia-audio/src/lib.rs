@@ -12,4 +12,7 @@ pub mod pipewire;
 
 pub use block::{AudioBlock, AudioFormat, BlockIndex, Discontinuity};
 pub use convert::{downmix_to_mono, i16_le_to_f32, LinearResampler, ProcessError};
-pub use pool::{block_channel, BlockConsumer, BlockProducer, EdgeCounters, EdgeSnapshot};
+pub use pool::{
+    block_channel, BlockConsumer, BlockProducer, ConsumeOutcome, EdgeCounters, EdgeSnapshot,
+    PublishOutcome,
+};
