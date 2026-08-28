@@ -1,0 +1,50 @@
+[package]
+name = "magnolia-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[workspace]
+members = [".", "../../crates/magnolia-studio-web"]
+resolver = "2"
+
+[workspace.dependencies]
+base64 = "0.22"
+futures = "0.3"
+getrandom = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
+leptos = { version = "0.8.20", features = ["csr"] }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+send_wrapper = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["serde", "v4"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = "0.3"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+base64.workspace = true
+futures.workspace = true
+getrandom.workspace = true
+magnolia-application = { path = "../../crates/magnolia-application" }
+magnolia-domain = { path = "../../crates/magnolia-domain" }
+magnolia-protocol = { path = "../../crates/magnolia-protocol" }
+magnolia-runtime = { path = "../../crates/magnolia-runtime" }
+postcard.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtle = "2.6"
+tempfile = "3"
+thiserror.workspace = true
+tokio = { version = "1", features = ["macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["fs", "set-header", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+tokio-tungstenite = "0.28"
+tower = { version = "0.5", features = ["util"] }

@@ -16,7 +16,40 @@ cargo test --locked --package magnolia-runtime \
   portable_foundation_round_trip_preserves_last_good_and_ignores_stale_results \
   -- --exact
 
+verification_suite=${MAGNOLIA_VERIFY_SUITE:-all}
+case "$verification_suite" in
+  all) ./scripts/check-phase-2.sh ;;
+  foundation) ;;
+  *)
+    echo "unknown Magnolia verification suite: $verification_suite" >&2
+    exit 1
+    ;;
+esac
+
+verification_base=${MAGNOLIA_VERIFY_BASE:-origin/main}
+if git rev-parse --verify "$verification_base^{commit}" >/dev/null 2>&1; then
+  git diff --check "$verification_base"...HEAD
+  changed_paths=$(
+    {
+      git diff --name-only "$verification_base"...HEAD
+      git diff --name-only
+      git diff --cached --name-only
+      git ls-files --others --exclude-standard
+    } | sort -u
+  )
+  while IFS= read -r changed_path; do
+    [[ -z "$changed_path" ]] && continue
+    case "$changed_path" in
+      .github/workflows/*|.gitignore|AGENTS.md|Cargo.toml|README.md|docs/*|scripts/*|tests/*|apps/magnolia-desktop/*|crates/magnolia-application/*|crates/magnolia-client/*|crates/magnolia-domain/*|crates/magnolia-protocol/*|crates/magnolia-studio-web/*) ;;
+      *)
+        echo "Phase 2 changed-path audit rejected: $changed_path" >&2
+        exit 1
+        ;;
+    esac
+  done <<< "$changed_paths"
+fi
 git diff --check
+git diff --cached --check
 
 for file in README.md AGENTS.md $(find docs -type f -name '*.md' -print); do
   link_matches=$(rg -o '\[[^]]*\]\([^)]+\)' "$file") || {

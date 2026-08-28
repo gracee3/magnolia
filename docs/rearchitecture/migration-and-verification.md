@@ -1,6 +1,6 @@
 # Migration and verification
 
-Status: Phase 1 implemented; phases 2 through 7 are prescribed future work.
+Status: Phases 1 and 2 implemented; phases 3 through 7 are prescribed future work.
 
 ## Commit-sized migration
 
@@ -34,6 +34,9 @@ Microphone, PipeWire, Sherpa, Leptos, Chromium transport, and legacy deletion ar
 excluded from this first slice.
 
 ### 2. New shell proof
+
+Status: implemented and covered by the Phase 2 handoff gate. See
+[Phase 2 shell proof](phase-2-shell-proof.md).
 
 Add `magnolia-desktop` and `magnolia-studio-web` with synthetic modules. Prove authenticated loopback handshake, immediate snapshot, command/receipt, projection updates, reload/reconnect, transcript cursors, bounded binary telemetry, retained split/tab layouts, focus routing, and browser automation.
 
@@ -101,11 +104,11 @@ Exit gate: automated gates and applicable measured targets pass with evidence; d
 - Persistence: atomic save/restore, interrupted recording recovery, transcript paging, unsupported schemas, and replay comparisons.
 - Hardware: 30-minute T14 continuity/latency and corpus ASR runs; separate actual-provider RTX 3090 run.
 
-Phase 1 provides `scripts/check.sh` as its focused fast gate and
-`scripts/verify.sh` as its foundation handoff gate. Later phases must extend the
-same entry points with native runtime, studio WASM/Trunk/browser, and applicable
-hardware gates; the current scripts prove only the three portable crates compile
-for WASM and do not claim those later validations.
+Phase 1 provides `scripts/check.sh` as its focused fast gate. Phase 2 extends
+`scripts/verify.sh` with the native desktop tests, studio WASM/Trunk build,
+Chromium E2E, documentation, changed-path, and whitespace gates through
+`scripts/check-phase-2.sh`. Later audio/ASR phases must extend these same entry
+points only when their prerequisites become applicable.
 
 ## Risks and required evidence
 

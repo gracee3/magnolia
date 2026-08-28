@@ -1,11 +1,13 @@
 # Magnolia native runtime and Leptos studio rearchitecture
 
-Status: **accepted target architecture; Phase 1 portable foundation implemented**
+Status: **accepted target architecture; Phases 1 and 2 implemented**
 
 Accepted: 2026-08-27
 
 Implementation status: Phase 1 adds portable contracts and a deterministic mock
-round trip; later phases remain unimplemented.
+round trip. Phase 2 adds the authenticated native desktop, Leptos cockpit,
+bounded synthetic telemetry, and Chromium lifecycle proof. Phase 3 and later
+remain unimplemented.
 
 This package is the controlling plan for replacing Magnolia's prototype runtime
 and Nannou shell. Phase 1 source/tests establish only the portable contracts and
@@ -63,6 +65,9 @@ demonstrate.
   and host-tool snapshots without claiming build or device validation.
 - [Phase 1 foundation](phase-1-foundation.md) records the implemented crates,
   mock scenarios, verification commands, and deferred boundaries.
+- [Phase 2 shell proof](phase-2-shell-proof.md) records the native/browser
+  topology, authentication, retained cockpit, telemetry, E2E evidence, and
+  Phase 3 prerequisites.
 - [Target architecture and protocol](target-and-protocol.md) defines crate
   direction, graph contracts, ownership, façade, transport, and studio rules.
 - [Microphone and ASR slice](microphone-asr-slice.md) defines a later native-audio

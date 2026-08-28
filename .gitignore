@@ -2,6 +2,11 @@
 # will have compiled files and executables
 debug/
 target/
+.tools/
+apps/magnolia-desktop/dist/
+tests/e2e/node_modules/
+tests/e2e/playwright-report/
+tests/e2e/test-results/
 
 # Remove Cargo.lock from gitignore if creating an executable, leave it for libraries
 # More information here https://doc.rust-lang.org/cargo/guide/cargo-guide-later-steps.html#checks-for-ci-and-git

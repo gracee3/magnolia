@@ -4,7 +4,7 @@ Magnolia's accepted target architecture is documented under `docs/rearchitecture
 
 ## Current and target boundaries
 
-- The current tree remains a legacy experimental Rust/Nannou prototype until the migration gates say otherwise.
+- The current tree temporarily contains both the legacy Rust/Nannou prototype and the isolated Phase 2 native desktop/Leptos shell proof. The new shell is not the default until Phase 3.
 - Native Rust will own devices, graph/runtime state, scheduling, ASR, persistence, telemetry production, and authoritative GPU computation/resources. Leptos owns presentation/session state; browser GPU APIs may accelerate presentation only.
 - Modules and tiles are independent many-to-many concepts.
 - Magnolia remains domain-neutral and does not share a framework with Mirabile, Digital Liquid Light Lab, astrology, tarot, people, journal, or vault domains.
@@ -12,9 +12,9 @@ Magnolia's accepted target architecture is documented under `docs/rearchitecture
 
 ## Validation and provenance
 
-For documentation-only changes run `git diff --check` and validate links/path references with focused searches. For Phase 1 foundation changes use `scripts/check.sh` as the fast gate and `scripts/verify.sh` as the handoff gate. These scripts are intentionally scoped to the five portable foundation crates and must be extended as later native, WASM, browser, and hardware phases arrive.
+For documentation-only changes run `git diff --check` and validate links/path references with focused searches. For Phase 1 foundation changes use `scripts/check.sh` as the fast gate. For Phase 2 or cross-boundary changes use `scripts/verify.sh`; it includes the native desktop, WASM, release Trunk, and real Chromium gates. Use `scripts/bootstrap-e2e.sh` for project-local browser-test dependencies and `scripts/run-phase-2.sh` for the one-command cockpit launch.
 
-Do not download models or corpora, access devices, run capture/benchmarks, launch the GUI, build plugins, or use a GPU without explicit authorization. Never commit recordings, transcripts, model/corpus payloads, `.env`, secrets, local paths, raw host captures, unjustified binaries, or unlicensed assets. Record provenance and actual execution providers. Do not claim ABI stability, sandbox/signing/hot-reload enforcement, real-time performance, ASR accuracy, browser continuity, or GPU support without evidence for the exact path and host.
+Do not download models or corpora, access devices, run capture/benchmarks, launch applications outside the phase in scope, build plugins, or use a GPU without explicit authorization. Never commit recordings, transcripts, model/corpus payloads, `.env`, secrets, local paths, raw host captures, browser test artifacts, unjustified binaries, or unlicensed assets. Record provenance and actual execution providers. Do not claim ABI stability, sandbox/signing/hot-reload enforcement, real-time performance, ASR accuracy, browser continuity, or GPU support without evidence for the exact path and host.
 
 ## Migration discipline
 
