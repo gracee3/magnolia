@@ -28,7 +28,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Install verification dependencies
         run: sudo apt-get update && sudo apt-get install --yes ripgrep
-      - run: ./scripts/verify.sh
+      - run: MAGNOLIA_VERIFY_SUITE=foundation ./scripts/verify.sh
 
   baseline:
     if: ${{ inputs.suite == 'baseline' || inputs.suite == 'all' }}
