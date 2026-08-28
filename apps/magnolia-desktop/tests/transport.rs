@@ -190,8 +190,8 @@ fn connect_request(client_id: ClientId, major: u16) -> ConnectRequest {
         client_id,
         supported_versions: vec![ProtocolVersionRange {
             major,
-            minimum_minor: 0,
-            maximum_minor: 0,
+            minimum_minor: PROTOCOL_VERSION.minor,
+            maximum_minor: PROTOCOL_VERSION.minor,
         }],
     }
 }

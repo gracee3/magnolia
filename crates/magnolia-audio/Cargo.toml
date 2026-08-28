@@ -5,6 +5,7 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+magnolia-domain = { path = "../magnolia-domain" }
 rtrb.workspace = true
 serde.workspace = true
 thiserror.workspace = true

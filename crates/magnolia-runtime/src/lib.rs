@@ -1,6 +1,6 @@
 //! Native runtime adapters for Magnolia.
 
-use magnolia_application::{ActivationRequest, RuntimeEvent, RuntimePort};
+use magnolia_application::{ActivationRequest, RuntimeControl, RuntimeEvent, RuntimePort};
 use magnolia_domain::TargetGraphRevision;
 use std::{
     collections::VecDeque,
@@ -9,13 +9,16 @@ use std::{
 use thiserror::Error;
 
 mod activation;
+mod native;
 pub use activation::{activation_channel, ActivationBoundary, ActivationController};
+pub use native::NativeRuntime;
 
 #[derive(Debug, Default)]
 struct MockState {
     pending: VecDeque<ActivationRequest>,
     observed: Vec<ActivationRequest>,
     events: VecDeque<RuntimeEvent>,
+    controls: VecDeque<RuntimeControl>,
 }
 
 /// Deterministic runtime adapter controlled explicitly by tests or a shell proof.
@@ -38,6 +41,11 @@ impl MockRuntime {
     #[must_use]
     pub fn observed_requests(&self) -> Vec<ActivationRequest> {
         self.lock().observed.clone()
+    }
+
+    #[must_use]
+    pub fn observed_controls(&self) -> Vec<RuntimeControl> {
+        self.lock().controls.iter().cloned().collect()
     }
 
     pub fn complete_next_success(&self) -> Result<ActivationRequest, MockRuntimeError> {
@@ -103,6 +111,10 @@ impl RuntimePort for MockRuntime {
         let mut state = self.lock();
         state.observed.push(request.clone());
         state.pending.push_back(request);
+    }
+
+    fn enqueue_control(&mut self, control: RuntimeControl) {
+        self.lock().controls.push_back(control);
     }
 
     fn poll_event(&mut self) -> Option<RuntimeEvent> {

@@ -6,13 +6,25 @@
 mod block;
 mod convert;
 mod pool;
+mod quantum;
+mod registry;
 
 #[cfg(target_os = "linux")]
 pub mod pipewire;
 
 pub use block::{AudioBlock, AudioFormat, BlockIndex, Discontinuity};
-pub use convert::{downmix_to_mono, i16_le_to_f32, LinearResampler, ProcessError};
+pub use convert::{
+    downmix_to_mono, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, LinearResampler, ProcessError,
+};
 pub use pool::{
     block_channel, BlockConsumer, BlockProducer, ConsumeOutcome, EdgeCounters, EdgeSnapshot,
     PublishOutcome,
+};
+pub use quantum::{
+    DiscontinuityReason, QuantumAdapter, QuantumBlockMeta, QuantumError, MAGNOLIA_BLOCK_FRAMES,
+    MAX_PIPEWIRE_QUANTUM_FRAMES,
+};
+pub use registry::{
+    deterministic_runtime_id, DeviceDirection, DeviceRegistry, DeviceResolutionError,
+    RegistryDevice,
 };

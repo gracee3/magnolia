@@ -14,6 +14,34 @@ pub fn i16_le_to_f32(input: &[u8], output: &mut [f32]) -> Result<usize, ProcessE
     Ok(samples)
 }
 
+pub fn i32_le_to_f32(input: &[u8], output: &mut [f32]) -> Result<usize, ProcessError> {
+    convert_four_byte_samples(input, output, |bytes| {
+        i32::from_le_bytes(bytes) as f32 / 2_147_483_648.0
+    })
+}
+
+pub fn f32_le_to_f32(input: &[u8], output: &mut [f32]) -> Result<usize, ProcessError> {
+    convert_four_byte_samples(input, output, f32::from_le_bytes)
+}
+
+fn convert_four_byte_samples(
+    input: &[u8],
+    output: &mut [f32],
+    convert: impl Fn([u8; 4]) -> f32,
+) -> Result<usize, ProcessError> {
+    if !input.len().is_multiple_of(4) {
+        return Err(ProcessError::MisalignedInput);
+    }
+    let samples = input.len() / 4;
+    if output.len() < samples {
+        return Err(ProcessError::OutputTooSmall);
+    }
+    for (bytes, sample) in input.chunks_exact(4).zip(output.iter_mut()) {
+        *sample = convert([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    }
+    Ok(samples)
+}
+
 pub fn downmix_to_mono(
     input: &[f32],
     channels: usize,
@@ -88,6 +116,21 @@ mod tests {
         downmix_to_mono(&stereo, 2, &mut mono).unwrap();
         assert!(mono[0] > 0.49);
         assert!(mono[1] < -0.49);
+    }
+
+    #[test]
+    fn supported_pipewire_formats_convert_without_allocating_output() {
+        let mut output = [0.0; 2];
+        assert_eq!(
+            f32_le_to_f32(&[0, 0, 0, 63, 0, 0, 128, 191], &mut output).unwrap(),
+            2
+        );
+        assert_eq!(output, [0.5, -1.0]);
+        assert_eq!(
+            i32_le_to_f32(&[0, 0, 0, 64, 0, 0, 0, 192], &mut output).unwrap(),
+            2
+        );
+        assert_eq!(output, [0.5, -0.5]);
     }
 
     #[test]
