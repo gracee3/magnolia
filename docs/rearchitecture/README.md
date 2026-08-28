@@ -1,7 +1,9 @@
 # Magnolia native runtime and Leptos studio rearchitecture
 
-Status: **accepted target architecture; implementation has not started**  
-Accepted: 2026-08-27  
+Status: **accepted target architecture; implementation has not started**
+
+Accepted: 2026-08-27
+
 Scope of this branch: documentation and ADRs only
 
 This package is the controlling plan for replacing Magnolia's prototype runtime
@@ -12,7 +14,8 @@ Current behavior remains whatever the source and tests on `main` demonstrate.
 ## Controlling decisions
 
 - Native Rust is authoritative for devices, graph state, scheduling, ASR,
-  persistence, telemetry production, and GPU work.
+  persistence, telemetry production, and GPU computation/resources. Browser GPU
+  APIs may accelerate presentation only.
 - Leptos 0.8 CSR, built with Trunk, owns presentation and disposable interaction
   state only.
 - Modules and tiles are independent, many-to-many concepts. A module can have no
@@ -53,10 +56,12 @@ Current behavior remains whatever the source and tests on `main` demonstrate.
 
 - [Current state and disposition](current-state-and-disposition.md) maps current
   paths and symbols to keep, refactor, or delete decisions.
+- [Planning audit](audit-2026-08-28.md) records inspected evidence, corrections,
+  and host-tool snapshots without claiming build or device validation.
 - [Target architecture and protocol](target-and-protocol.md) defines crate
   direction, graph contracts, ownership, façade, transport, and studio rules.
-- [Microphone and ASR slice](microphone-asr-slice.md) defines the first complete
-  dataflow, commands, recording bundle, diagnostics, and acceptance criteria.
+- [Microphone and ASR slice](microphone-asr-slice.md) defines a later native-audio
+  vertical slice, after the portable mock foundation and hard cutover.
 - [Migration and verification](migration-and-verification.md) defines commit-sized
   phases, exact deletion gates, tests, risks, and deferred work.
 - [ADRs](../adr/) record the eight accepted decisions.
