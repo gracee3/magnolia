@@ -5,6 +5,7 @@ use magnolia_domain::DeviceFingerprint;
 use pipewire as pw;
 use std::{
     cell::RefCell,
+    collections::BTreeMap,
     rc::Rc,
     sync::{Arc, Mutex, MutexGuard},
     thread::{self, JoinHandle},
@@ -167,6 +168,8 @@ fn run_registry_loop(
     let registry = core.get_registry_rc()?;
     let weak_registry = registry.downgrade();
     let metadata_objects = Rc::new(RefCell::new(Vec::new()));
+    let device_apis = Rc::new(RefCell::new(BTreeMap::<u32, String>::new()));
+    let apis_for_global = Rc::clone(&device_apis);
     let metadata_for_global = Rc::clone(&metadata_objects);
     let node_state = Arc::clone(&state);
     let metadata_state = Arc::clone(&state);
@@ -179,6 +182,17 @@ fn run_registry_loop(
     let _listener = registry
         .add_listener_local()
         .global(move |object| match object.type_ {
+            pw::types::ObjectType::Device => {
+                if let Some(api) = object
+                    .props
+                    .as_ref()
+                    .and_then(|properties| properties.get(*pw::keys::DEVICE_API))
+                {
+                    apis_for_global
+                        .borrow_mut()
+                        .insert(object.id, api.to_owned());
+                }
+            }
             pw::types::ObjectType::Node => {
                 let Some(properties) = object.props.as_ref() else {
                     return;
@@ -194,7 +208,13 @@ fn run_registry_loop(
                 let Some(node_name) = properties.get(*pw::keys::NODE_NAME) else {
                     return;
                 };
-                let Some(device_api) = properties.get(*pw::keys::DEVICE_API) else {
+                let Some(device_id) = properties
+                    .get(*pw::keys::DEVICE_ID)
+                    .and_then(|value| value.parse::<u32>().ok())
+                else {
+                    return;
+                };
+                let Some(device_api) = apis_for_global.borrow().get(&device_id).cloned() else {
                     return;
                 };
                 let Some(object_path) = properties.get(*pw::keys::OBJECT_PATH) else {
@@ -202,7 +222,7 @@ fn run_registry_loop(
                 };
                 let fingerprint = DeviceFingerprint {
                     node_name: node_name.to_owned(),
-                    device_api: device_api.to_owned(),
+                    device_api,
                     object_path: object_path.to_owned(),
                 };
                 let label = properties

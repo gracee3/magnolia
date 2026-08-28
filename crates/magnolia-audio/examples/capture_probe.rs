@@ -1,6 +1,14 @@
 #[cfg(target_os = "linux")]
+#[global_allocator]
+static ALLOCATOR: magnolia_audio::CallbackCountingAllocator =
+    magnolia_audio::CallbackCountingAllocator;
+
+#[cfg(target_os = "linux")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use magnolia_audio::{CaptureConfiguration, CaptureState, PipeWireCapture};
+    use magnolia_audio::{
+        callback_allocation_counts, reset_callback_allocation_counts, CaptureConfiguration,
+        CaptureState, PipeWireCapture,
+    };
     use std::{env, thread, time::Duration};
 
     let target = env::args()
@@ -9,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seconds = env::args()
         .nth(2)
         .map_or(Ok(5_u64), |value| value.parse())?;
+    reset_callback_allocation_counts();
     let capture = PipeWireCapture::start(CaptureConfiguration {
         target_node_name: target,
     })?;
@@ -20,9 +29,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let snapshot = capture.snapshot();
-    println!("{snapshot:?}");
+    let allocation_counts = callback_allocation_counts();
+    println!("{snapshot:?} callback_allocations={allocation_counts:?}");
     if snapshot.state != CaptureState::Running || snapshot.callbacks == 0 {
         return Err("PipeWire capture did not reach running callback state".into());
+    }
+    if allocation_counts != (0, 0) {
+        return Err("capture callback allocated or deallocated".into());
     }
     Ok(())
 }

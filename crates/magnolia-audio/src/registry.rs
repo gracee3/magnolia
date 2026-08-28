@@ -107,6 +107,20 @@ impl DeviceRegistry {
         }
     }
 
+    pub fn default_output(&self) -> Result<&RegistryDevice, DeviceResolutionError> {
+        let node_name = self
+            .default_output_node_name
+            .as_deref()
+            .ok_or(DeviceResolutionError::DefaultOutputUnavailable)?;
+        self.devices
+            .values()
+            .find(|device| {
+                device.direction == DeviceDirection::Output
+                    && device.fingerprint.node_name == node_name
+            })
+            .ok_or(DeviceResolutionError::DefaultOutputUnavailable)
+    }
+
     pub fn devices(&self) -> impl Iterator<Item = &RegistryDevice> {
         self.devices.values()
     }
@@ -116,6 +130,8 @@ impl DeviceRegistry {
 pub enum DeviceResolutionError {
     #[error("PipeWire default input metadata is unavailable or unresolved")]
     DefaultInputUnavailable,
+    #[error("PipeWire default output metadata is unavailable or unresolved")]
+    DefaultOutputUnavailable,
     #[error("exact PipeWire input fingerprint is unavailable: {0:?}")]
     ExactInputUnavailable(DeviceFingerprint),
 }

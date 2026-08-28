@@ -2,7 +2,7 @@ use magnolia_application::{ActivationRequest, RuntimeControl, RuntimeEvent, Runt
 #[cfg(target_os = "linux")]
 use magnolia_audio::{
     pipewire::PipeWireRegistryManager, CaptureConfiguration, CaptureState, NativeSampleFormat,
-    PipeWireCapture,
+    OutputConfiguration, PipeWireCapture, PipeWireOutput,
 };
 use magnolia_domain::DeviceSelector;
 use magnolia_protocol::{AudioRuntimeProjection, AudioRuntimeState};
@@ -106,6 +106,8 @@ fn run_worker(
     let registry = PipeWireRegistryManager::start().ok();
     #[cfg(target_os = "linux")]
     let mut capture: Option<PipeWireCapture> = None;
+    #[cfg(target_os = "linux")]
+    let mut output: Option<PipeWireOutput> = None;
     loop {
         let message = match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(message) => message,
@@ -178,6 +180,8 @@ fn run_worker(
                     }
                     RuntimeControl::StopAudio => {
                         #[cfg(target_os = "linux")]
+                        output.take();
+                        #[cfg(target_os = "linux")]
                         capture.take();
                         audio.desired_running = false;
                         audio.monitor_enabled = false;
@@ -186,22 +190,52 @@ fn run_worker(
                         audio.state = AudioRuntimeState::Stopped;
                         audio.last_error = None;
                     }
-                    RuntimeControl::SetCaptureMuted(muted) => audio.capture_muted = muted,
+                    RuntimeControl::SetCaptureMuted(muted) => {
+                        audio.capture_muted = muted;
+                        #[cfg(target_os = "linux")]
+                        if let Some(capture) = capture.as_ref() {
+                            capture.set_muted(muted);
+                        }
+                    }
                     RuntimeControl::SetMonitorEnabled(enabled) => {
                         audio.monitor_enabled = enabled;
                         if !enabled {
+                            #[cfg(target_os = "linux")]
+                            output.take();
                             audio.monitor_muted = true;
                             audio.monitor_gain_millionths = 0;
+                        } else {
+                            #[cfg(target_os = "linux")]
+                            start_monitor_output(
+                                &mut audio,
+                                registry.as_ref(),
+                                capture.as_mut(),
+                                &mut output,
+                            );
                         }
                     }
-                    RuntimeControl::SetMonitorMuted(muted) => audio.monitor_muted = muted,
+                    RuntimeControl::SetMonitorMuted(muted) => {
+                        audio.monitor_muted = muted;
+                        #[cfg(target_os = "linux")]
+                        if let Some(output) = output.as_ref() {
+                            output.set_muted(muted);
+                        }
+                    }
                     RuntimeControl::SetMonitorGain(gain) => {
                         audio.monitor_gain_millionths = gain;
+                        #[cfg(target_os = "linux")]
+                        if let Some(output) = output.as_ref() {
+                            output.set_gain_millionths(gain);
+                        }
                     }
                 }
                 #[cfg(target_os = "linux")]
                 if let Some(capture) = capture.as_ref() {
                     apply_capture_snapshot(&mut audio, capture);
+                }
+                #[cfg(target_os = "linux")]
+                if let Some(output) = output.as_ref() {
+                    audio.underruns = output.snapshot().underruns;
                 }
                 audio.runtime_revision = audio.runtime_revision.saturating_add(1);
                 push_event(events, RuntimeEvent::AudioProjection(audio.clone()));
@@ -268,6 +302,42 @@ fn apply_capture_snapshot(audio: &mut AudioRuntimeProjection, capture: &PipeWire
     audio.dropped_frames = snapshot.faults;
     if snapshot.state == CaptureState::Running {
         audio.last_error = None;
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_monitor_output(
+    audio: &mut AudioRuntimeProjection,
+    registry: Option<&PipeWireRegistryManager>,
+    capture: Option<&mut PipeWireCapture>,
+    output: &mut Option<PipeWireOutput>,
+) {
+    let Some(registry) = registry else {
+        audio.last_error = Some("PipeWire registry manager is unavailable".to_owned());
+        return;
+    };
+    let snapshot = registry.snapshot();
+    let Ok(device) = snapshot.default_output() else {
+        audio.last_error = Some("PipeWire default output is unavailable".to_owned());
+        return;
+    };
+    let Some(consumer) = capture.and_then(PipeWireCapture::take_consumer) else {
+        audio.last_error = Some("capture graph edge is unavailable for monitoring".to_owned());
+        return;
+    };
+    match PipeWireOutput::start(
+        OutputConfiguration {
+            target_node_name: device.fingerprint.node_name.clone(),
+        },
+        consumer,
+    ) {
+        Ok(started) => {
+            audio.resolved_output_id = Some(device.runtime_id.clone());
+            audio.monitor_muted = true;
+            audio.monitor_gain_millionths = 0;
+            *output = Some(started);
+        }
+        Err(error) => audio.last_error = Some(error.to_string()),
     }
 }
 

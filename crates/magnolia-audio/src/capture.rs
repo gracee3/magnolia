@@ -1,5 +1,7 @@
 use crate::{
-    f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, QuantumAdapter, MAX_PIPEWIRE_QUANTUM_FRAMES,
+    block_channel, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, AudioFormat, BlockConsumer,
+    BlockIndex, BlockProducer, CallbackScope, PublishOutcome, QuantumAdapter,
+    MAX_PIPEWIRE_QUANTUM_FRAMES,
 };
 use pipewire as pw;
 use pw::{properties::properties, spa};
@@ -7,7 +9,7 @@ use spa::{param::format::MediaSubtype, param::format::MediaType, pod::Pod};
 use std::{
     io::Cursor,
     sync::{
-        atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc,
     },
     thread::{self, JoinHandle},
@@ -64,6 +66,7 @@ struct CaptureCounters {
     emitted_blocks: AtomicU64,
     faults: AtomicU64,
     callback_max_ns: AtomicU64,
+    capture_muted: AtomicBool,
 }
 
 impl Default for CaptureCounters {
@@ -79,6 +82,7 @@ impl Default for CaptureCounters {
             emitted_blocks: AtomicU64::new(0),
             faults: AtomicU64::new(0),
             callback_max_ns: AtomicU64::new(0),
+            capture_muted: AtomicBool::new(false),
         }
     }
 }
@@ -87,6 +91,7 @@ pub struct PipeWireCapture {
     counters: Arc<CaptureCounters>,
     stop: Option<pw::channel::Sender<()>>,
     worker: Option<JoinHandle<()>>,
+    consumer: Option<BlockConsumer>,
 }
 
 impl PipeWireCapture {
@@ -95,12 +100,20 @@ impl PipeWireCapture {
             return Err(CaptureError::BlankTarget);
         }
         let counters = Arc::new(CaptureCounters::default());
+        let format = AudioFormat::new(48_000, 2, 256).map_err(|_| CaptureError::InternalFormat)?;
+        let (producer, consumer, _) = block_channel(format, 16);
         let worker_counters = Arc::clone(&counters);
         let (stop, receiver) = pw::channel::channel();
         let worker = thread::Builder::new()
             .name("magnolia-pipewire-capture".to_owned())
             .spawn(move || {
-                if run_capture_loop(configuration, receiver, Arc::clone(&worker_counters)).is_err()
+                if run_capture_loop(
+                    configuration,
+                    receiver,
+                    Arc::clone(&worker_counters),
+                    producer,
+                )
+                .is_err()
                 {
                     worker_counters
                         .state
@@ -112,6 +125,7 @@ impl PipeWireCapture {
             counters,
             stop: Some(stop),
             worker: Some(worker),
+            consumer: Some(consumer),
         })
     }
 
@@ -135,6 +149,14 @@ impl PipeWireCapture {
             faults: self.counters.faults.load(Ordering::Relaxed),
             callback_max_ns: self.counters.callback_max_ns.load(Ordering::Relaxed),
         }
+    }
+
+    pub fn take_consumer(&mut self) -> Option<BlockConsumer> {
+        self.consumer.take()
+    }
+
+    pub fn set_muted(&self, muted: bool) {
+        self.counters.capture_muted.store(muted, Ordering::Release);
     }
 }
 
@@ -168,12 +190,14 @@ struct CallbackData {
     converted: Box<[f32]>,
     adapter: Option<QuantumAdapter>,
     counters: Arc<CaptureCounters>,
+    producer: BlockProducer,
 }
 
 fn run_capture_loop(
     configuration: CaptureConfiguration,
     stop: pw::channel::Receiver<()>,
     counters: Arc<CaptureCounters>,
+    producer: BlockProducer,
 ) -> Result<(), CaptureError> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
@@ -195,6 +219,7 @@ fn run_capture_loop(
         converted: vec![0.0; MAX_PIPEWIRE_QUANTUM_FRAMES * 2].into_boxed_slice(),
         adapter: None,
         counters: Arc::clone(&counters),
+        producer,
     };
     let _listener = stream
         .add_local_listener_with_user_data(callback_data)
@@ -284,6 +309,7 @@ fn run_capture_loop(
 }
 
 fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
+    let _callback_scope = CallbackScope::enter();
     let started = Instant::now();
     let Some(mut buffer) = stream.dequeue_buffer() else {
         data.counters.faults.fetch_add(1, Ordering::Relaxed);
@@ -329,7 +355,31 @@ fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
         data.counters.faults.fetch_add(1, Ordering::Relaxed);
         return;
     };
-    let emitted = adapter.push(&data.converted[..samples], source_position, 0, |_, _| {});
+    let producer = &mut data.producer;
+    let counters = &data.counters;
+    let muted = counters.capture_muted.load(Ordering::Acquire);
+    let canonical_format = data.format.rate() == 48_000 && data.format.channels() == 2;
+    let emitted = adapter.push(
+        &data.converted[..samples],
+        source_position,
+        0,
+        |samples, meta| {
+            if !canonical_format {
+                counters.faults.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+            let outcome = producer.publish(BlockIndex(meta.sequence), 256, |destination| {
+                if muted {
+                    destination.fill(0.0);
+                } else {
+                    destination.copy_from_slice(samples);
+                }
+            });
+            if outcome != PublishOutcome::Published {
+                counters.faults.fetch_add(1, Ordering::Relaxed);
+            }
+        },
+    );
     match emitted {
         Ok(blocks) => {
             data.counters
@@ -373,6 +423,8 @@ pub enum CaptureError {
     Serialize(String),
     #[error("serialized PipeWire format pod is invalid")]
     InvalidPod,
+    #[error("internal canonical audio format is invalid")]
+    InternalFormat,
 }
 
 #[cfg(test)]
