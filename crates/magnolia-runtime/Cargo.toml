@@ -8,6 +8,7 @@ license = "AGPL-3.0-or-later"
 magnolia-application = { path = "../magnolia-application" }
 magnolia-domain = { path = "../magnolia-domain" }
 thiserror.workspace = true
+rtrb.workspace = true
 
 [dev-dependencies]
 futures.workspace = true

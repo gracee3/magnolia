@@ -4,13 +4,16 @@ Status: Phase 3 hard cutover implemented on 2026-08-28.
 
 ## Active workspace
 
-The root workspace contains exactly seven members:
+The root workspace contains the seven Phase 3 members plus the Phase 4
+`magnolia-audio` crate:
 
 - `magnolia-domain`: typed documents, graphs, identifiers, and validation;
 - `magnolia-protocol`: versioned control and telemetry wire contracts;
 - `magnolia-client`: the browser-compatible client boundary;
 - `magnolia-application`: authoritative command and projection service;
 - `magnolia-runtime`: deterministic runtime port and current mock runtime;
+- `magnolia-audio`: preallocated audio blocks, bounded block edges, explicit
+  transforms, and Linux PipeWire discovery;
 - `magnolia-desktop`: loopback host, authentication, telemetry, and Chromium
   lifecycle; and
 - `magnolia-studio-web`: Leptos CSR presentation and disposable session state.
@@ -19,8 +22,9 @@ The root workspace contains exactly seven members:
 authoritative. `./scripts/run.sh` builds the studio and launches the loopback
 desktop with a dedicated temporary Chromium profile.
 
-The implemented shell still uses synthetic descriptors and `MockRuntime`. It
-does not provide devices, audio, ASR, filesystem persistence, GPU computation,
+The implemented shell still uses synthetic descriptors and `MockRuntime`.
+PipeWire discovery is not live capture: the tree does not yet provide a stream
+callback, device-loss recovery, ASR, filesystem persistence, GPU computation,
 or production/hardware certification.
 
 ## Completed deletion

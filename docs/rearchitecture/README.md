@@ -1,6 +1,6 @@
 # Magnolia native runtime and Leptos studio rearchitecture
 
-Status: **accepted target architecture; Phases 1 through 3 implemented**
+Status: **accepted target architecture; Phases 1 through 3 implemented; Phase 4 in progress**
 
 Accepted: 2026-08-27
 
@@ -70,6 +70,8 @@ demonstrate.
   Phase 3 prerequisites.
 - [Phase 3 hard cutover](phase-3-hard-cutover.md) records the frozen merge base,
   local-gate policy, cleanup, deletion inventory, and final evidence.
+- [Phase 4 native audio](phase-4-native-audio.md) records the implemented block,
+  conversion, activation, and PipeWire discovery foundation and its limits.
 - [Target architecture and protocol](target-and-protocol.md) defines crate
   direction, graph contracts, ownership, façade, transport, and studio rules.
 - [Microphone and ASR slice](microphone-asr-slice.md) defines a later native-audio

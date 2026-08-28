@@ -1,8 +1,8 @@
 # Magnolia
 
-**Current status:** Phase 3 hard cutover implemented. The Leptos desktop is the default native application. The Nannou shell, legacy signal/plugin architecture, unrelated applications, prototype audio/ASR stack, old configuration/tooling, and unproven assets are removed. Implementation and tests—not old feature claims—are authoritative.
+**Current status:** Phase 3 hard cutover implemented; Phase 4 native audio has begun. The Leptos desktop is the default native application. The new audio crate currently provides fixed preallocated blocks, bounded `rtrb` edges with visible overflow, explicit conversion/downmix/resampling primitives, block-boundary activation support, and Linux PipeWire input discovery. Live stream capture and hardware certification are not yet implemented. Implementation and tests—not old feature claims—are authoritative.
 
-**Accepted target:** a native authoritative, typed, fixed-block runtime with a Leptos 0.8 CSR/Trunk studio served over authenticated loopback and opened in a dedicated Chromium app window. Phases 1 through 3 are implemented. Native audio, ASR reconstruction, filesystem persistence, and hardware certification are not.
+**Accepted target:** a native authoritative, typed, fixed-block runtime with a Leptos 0.8 CSR/Trunk studio served over authenticated loopback and opened in a dedicated Chromium app window. Phases 1 through 3 are implemented and Phase 4 is in progress. ASR reconstruction, filesystem persistence, and hardware certification are not implemented.
 
 Sherpa is the first ASR adapter reconstructed/refactored in the later native-ASR
 phase; it is not the first implementation work. Phase 1 is the portable

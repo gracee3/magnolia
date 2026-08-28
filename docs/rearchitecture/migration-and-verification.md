@@ -1,6 +1,6 @@
 # Migration and verification
 
-Status: Phases 1 through 3 implemented; phases 4 through 7 are prescribed future work.
+Status: Phases 1 through 3 implemented; Phase 4 in progress; phases 5 through 7 are prescribed future work.
 
 ## Commit-sized migration
 
@@ -68,6 +68,8 @@ crate, uncompilable workspace member, or importer remains.
 Exit gate: the default workspace, desktop launch, Mock scenarios, and clean-tree search contain no legacy dependency, type, mode, layout format, plugin entrypoint, or tracked binary. Deletion occurs neither before shell proof nor after native audio begins.
 
 ### 4. Native audio
+
+Status: in progress. See [Phase 4 native audio](phase-4-native-audio.md).
 
 Implement PipeWire discovery/hotplug, exact/default selectors, fixed-block graph,
 conversion/mapping/resampling, capture/monitor commands, block-boundary

@@ -5,6 +5,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
 packages=(
+  magnolia-audio
   magnolia-domain
   magnolia-protocol
   magnolia-client
@@ -19,6 +20,7 @@ done
 
 cargo fmt --all --check
 cargo check --locked --target wasm32-unknown-unknown \
+  --package magnolia-audio \
   --package magnolia-domain \
   --package magnolia-protocol \
   --package magnolia-client
