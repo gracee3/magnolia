@@ -6,6 +6,7 @@ members = [
     "crates/magnolia-client",
     "crates/magnolia-application",
     "crates/magnolia-runtime",
+    "crates/magnolia-audio",
     "apps/magnolia-desktop",
     "crates/magnolia-studio-web",
 ]
@@ -24,6 +25,7 @@ hex = "0.4"
 js-sys = "0.3"
 leptos = { version = "0.8.20", features = ["csr"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
+rtrb = "0.3"
 send_wrapper = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

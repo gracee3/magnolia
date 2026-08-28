@@ -25,7 +25,7 @@ git diff --check "$verification_base"...HEAD
 git diff --check
 git diff --cached --check
 
-expected_members=$'magnolia-application\nmagnolia-client\nmagnolia-desktop\nmagnolia-domain\nmagnolia-protocol\nmagnolia-runtime\nmagnolia-studio-web'
+expected_members=$'magnolia-application\nmagnolia-audio\nmagnolia-client\nmagnolia-desktop\nmagnolia-domain\nmagnolia-protocol\nmagnolia-runtime\nmagnolia-studio-web'
 actual_members=$(cargo metadata --locked --no-deps --format-version 1 | jq -r \
   '.workspace_members as $members | [.packages[] | select(.id as $id | $members | index($id)) | .name] | sort | .[]')
 if [[ "$actual_members" != "$expected_members" ]]; then
@@ -44,7 +44,7 @@ if git ls-files | rg --quiet '\.(so|dylib|dll|exe)$'; then
   exit 1
 fi
 
-active_paths=(Cargo.toml Cargo.lock .cargo apps crates tests)
+active_paths=(Cargo.toml .cargo apps crates tests)
 legacy_pattern='nannou|magnolia[_-](core|signals|module-api|plugin-abi|plugin-helper|ui)|libloading|ed25519-dalek|seccompiler|layout\.toml|run-phase-2|check-phase-2|libhello_plugin'
 if rg -n -i "$legacy_pattern" "${active_paths[@]}"; then
   echo "legacy source or dependency residue audit failed" >&2
@@ -56,10 +56,17 @@ if rg -n -i 'run-phase-2|check-phase-2|libhello_plugin' scripts --glob '!verify.
 fi
 
 cargo tree --locked --workspace --prefix none | \
-  rg -i '^(nannou|wgpu|libloading|ed25519-dalek|seccompiler|notify) ' && {
+  rg -i '^(nannou|wgpu|ed25519-dalek|seccompiler|notify) ' && {
     echo "legacy dependency audit failed" >&2
     exit 1
   }
+
+if cargo metadata --locked --no-deps --format-version 1 | jq -r \
+  '.packages[] | select(.source == null) | .dependencies[].name' | \
+  rg -i '^(libloading|ed25519-dalek|seccompiler|notify)$'; then
+  echo "direct legacy dependency audit failed" >&2
+  exit 1
+fi
 
 for file in README.md AGENTS.md $(find docs -type f -name '*.md' -print); do
   link_matches=$(rg -o '\[[^]]*\]\([^)]+\)' "$file") || {

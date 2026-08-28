@@ -8,6 +8,9 @@ use std::{
 };
 use thiserror::Error;
 
+mod activation;
+pub use activation::{activation_channel, ActivationBoundary, ActivationController};
+
 #[derive(Debug, Default)]
 struct MockState {
     pending: VecDeque<ActivationRequest>,

@@ -8,13 +8,14 @@ certified without exact evidence.
 
 ## Active boundaries
 
-- The workspace has exactly seven members: domain, protocol, client,
-  application, runtime, desktop, and studio-web.
+- The workspace has eight members: domain, protocol, client, application,
+  runtime, audio, desktop, and studio-web.
 - Native Rust owns authoritative state and telemetry production. Leptos owns
   presentation and disposable session state.
-- The current runtime and descriptors are synthetic. Device, audio, ASR,
-  filesystem persistence, GPU computation, and hardware certification are not
-  implemented.
+- Native audio block transport, explicit conversion primitives, block-boundary
+  activation, and Linux PipeWire discovery are implemented. Live PipeWire
+  stream capture, devices beyond discovery, ASR, filesystem persistence, GPU
+  computation, and hardware certification are not.
 - There is no Nannou shell, legacy signal/plugin system, compatibility bridge,
   layout importer, or replacement plugin architecture. Git history is the
   archive.
