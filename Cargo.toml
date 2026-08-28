@@ -2,6 +2,11 @@
 resolver = "2"
 members = [
     "core",
+    "crates/magnolia-domain",
+    "crates/magnolia-protocol",
+    "crates/magnolia-client",
+    "crates/magnolia-application",
+    "crates/magnolia-runtime",
     "crates/aphrodite",
     "crates/audio_dsp",
     "crates/audio_input",
@@ -23,8 +28,14 @@ members = [
     "apps/stt_bench",
     "examples/hello_plugin",
 ]
+
 default-members = [
     "core",
+    "crates/magnolia-domain",
+    "crates/magnolia-protocol",
+    "crates/magnolia-client",
+    "crates/magnolia-application",
+    "crates/magnolia-runtime",
     "crates/audio_dsp",
     "crates/audio_replay",
     "crates/caption_state",
@@ -40,3 +51,11 @@ default-members = [
     "apps/stt_bench",
     "examples/hello_plugin",
 ]
+
+[workspace.dependencies]
+hex = "0.4"
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["serde", "v4"] }

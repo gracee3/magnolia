@@ -1,0 +1,21 @@
+{
+  "protocol_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "client_id": "00000000-0000-0000-0000-000000000001",
+  "request_id": "00000000-0000-0000-0000-000000000002",
+  "request_sequence": 7,
+  "expected_document_revision": 3,
+  "command": {
+    "kind": "apply_workspace_edit",
+    "batch": {
+      "edits": [
+        {
+          "kind": "remove_promoted_setting",
+          "key": "gain"
+        }
+      ]
+    }
+  }
+}

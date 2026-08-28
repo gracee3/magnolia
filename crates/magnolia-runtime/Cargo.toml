@@ -1,0 +1,15 @@
+[package]
+name = "magnolia-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+magnolia-application = { path = "../magnolia-application" }
+magnolia-domain = { path = "../magnolia-domain" }
+thiserror.workspace = true
+
+[dev-dependencies]
+magnolia-client = { path = "../magnolia-client" }
+magnolia-protocol = { path = "../magnolia-protocol" }
+serde_json.workspace = true

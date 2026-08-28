@@ -687,6 +687,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1239,6 +1248,18 @@ name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "env_logger"
@@ -2311,6 +2332,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "magnolia-application"
+version = "0.1.0"
+dependencies = [
+ "magnolia-client",
+ "magnolia-domain",
+ "magnolia-protocol",
+ "serde_json",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "magnolia-client"
+version = "0.1.0"
+dependencies = [
+ "magnolia-domain",
+ "magnolia-protocol",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "magnolia-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "uuid",
+]
+
+[[package]]
 name = "magnolia-plugin-abi"
 version = "0.1.0"
 
@@ -2320,6 +2371,30 @@ version = "0.1.0"
 dependencies = [
  "magnolia-plugin-abi",
  "magnolia_signals",
+]
+
+[[package]]
+name = "magnolia-protocol"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "magnolia-domain",
+ "postcard",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "magnolia-runtime"
+version = "0.1.0"
+dependencies = [
+ "magnolia-application",
+ "magnolia-client",
+ "magnolia-domain",
+ "magnolia-protocol",
+ "serde_json",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3316,6 +3391,18 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide 0.8.9",
+]
+
+[[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "serde",
 ]
 
 [[package]]
@@ -4570,6 +4657,7 @@ checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
 dependencies = [
  "getrandom 0.3.4",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
