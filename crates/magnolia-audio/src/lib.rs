@@ -4,6 +4,8 @@
 //! API works only with fixed-capacity blocks and slices.
 
 mod block;
+#[cfg(target_os = "linux")]
+mod capture;
 mod convert;
 mod pool;
 mod quantum;
@@ -13,6 +15,11 @@ mod registry;
 pub mod pipewire;
 
 pub use block::{AudioBlock, AudioFormat, BlockIndex, Discontinuity};
+#[cfg(target_os = "linux")]
+pub use capture::{
+    CaptureConfiguration, CaptureError, CaptureSnapshot, CaptureState, NativeSampleFormat,
+    PipeWireCapture,
+};
 pub use convert::{
     downmix_to_mono, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, LinearResampler, ProcessError,
 };

@@ -1,6 +1,9 @@
 use magnolia_application::{ActivationRequest, RuntimeControl, RuntimeEvent, RuntimePort};
 #[cfg(target_os = "linux")]
-use magnolia_audio::pipewire::PipeWireRegistryManager;
+use magnolia_audio::{
+    pipewire::PipeWireRegistryManager, CaptureConfiguration, CaptureState, NativeSampleFormat,
+    PipeWireCapture,
+};
 use magnolia_domain::DeviceSelector;
 use magnolia_protocol::{AudioRuntimeProjection, AudioRuntimeState};
 use std::{
@@ -101,7 +104,25 @@ fn run_worker(
     let mut input_selector: Option<DeviceSelector> = None;
     #[cfg(target_os = "linux")]
     let registry = PipeWireRegistryManager::start().ok();
-    while let Ok(message) = receiver.recv() {
+    #[cfg(target_os = "linux")]
+    let mut capture: Option<PipeWireCapture> = None;
+    loop {
+        let message = match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(message) => message,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                #[cfg(target_os = "linux")]
+                if let Some(capture) = capture.as_ref() {
+                    let before = audio.clone();
+                    apply_capture_snapshot(&mut audio, capture);
+                    if audio != before {
+                        audio.runtime_revision = audio.runtime_revision.saturating_add(1);
+                        push_event(events, RuntimeEvent::AudioProjection(audio.clone()));
+                    }
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         match message {
             WorkerMessage::Activate(request) => {
                 input_selector = request
@@ -138,15 +159,26 @@ fn run_worker(
                     RuntimeControl::StartAudio => {
                         audio.desired_running = true;
                         #[cfg(target_os = "linux")]
-                        resolve_desired_input(
+                        if let Some(target_node_name) = resolve_desired_input(
                             &mut audio,
                             input_selector.as_ref(),
                             registry.as_ref(),
-                        );
+                        ) {
+                            match PipeWireCapture::start(CaptureConfiguration { target_node_name })
+                            {
+                                Ok(started) => capture = Some(started),
+                                Err(error) => {
+                                    audio.state = AudioRuntimeState::Failed;
+                                    audio.last_error = Some(error.to_string());
+                                }
+                            }
+                        }
                         #[cfg(not(target_os = "linux"))]
                         resolve_desired_input(&mut audio, input_selector.as_ref());
                     }
                     RuntimeControl::StopAudio => {
+                        #[cfg(target_os = "linux")]
+                        capture.take();
                         audio.desired_running = false;
                         audio.monitor_enabled = false;
                         audio.monitor_muted = true;
@@ -167,6 +199,10 @@ fn run_worker(
                         audio.monitor_gain_millionths = gain;
                     }
                 }
+                #[cfg(target_os = "linux")]
+                if let Some(capture) = capture.as_ref() {
+                    apply_capture_snapshot(&mut audio, capture);
+                }
                 audio.runtime_revision = audio.runtime_revision.saturating_add(1);
                 push_event(events, RuntimeEvent::AudioProjection(audio.clone()));
             }
@@ -180,11 +216,11 @@ fn resolve_desired_input(
     audio: &mut AudioRuntimeProjection,
     selector: Option<&DeviceSelector>,
     registry: Option<&PipeWireRegistryManager>,
-) {
+) -> Option<String> {
     let Some(selector) = selector else {
         audio.state = AudioRuntimeState::Degraded;
         audio.last_error = Some("no durable input device selector is configured".to_owned());
-        return;
+        return None;
     };
     if let Some(registry) = registry {
         match registry.snapshot().resolve_input(selector) {
@@ -194,6 +230,7 @@ fn resolve_desired_input(
                 audio.last_error = Some(
                     "PipeWire input resolved; capture stream preparation is pending".to_owned(),
                 );
+                return Some(device.fingerprint.node_name.clone());
             }
             Err(error) => {
                 audio.resolved_input_id = None;
@@ -201,10 +238,37 @@ fn resolve_desired_input(
                 audio.last_error = Some(error.to_string());
             }
         }
-        return;
+        return None;
     }
     audio.state = AudioRuntimeState::Failed;
     audio.last_error = Some("PipeWire registry manager is unavailable".to_owned());
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn apply_capture_snapshot(audio: &mut AudioRuntimeProjection, capture: &PipeWireCapture) {
+    let snapshot = capture.snapshot();
+    audio.state = match snapshot.state {
+        CaptureState::Running => AudioRuntimeState::Running,
+        CaptureState::Preparing | CaptureState::Paused => AudioRuntimeState::Preparing,
+        CaptureState::Failed => AudioRuntimeState::Degraded,
+        CaptureState::Stopped => AudioRuntimeState::Stopped,
+    };
+    audio.sample_format = snapshot.sample_format.map(|format| match format {
+        NativeSampleFormat::F32Le => magnolia_protocol::AudioSampleFormat::F32Le,
+        NativeSampleFormat::S16Le => magnolia_protocol::AudioSampleFormat::S16Le,
+        NativeSampleFormat::S32Le => magnolia_protocol::AudioSampleFormat::S32Le,
+    });
+    audio.sample_rate = (snapshot.sample_rate != 0).then_some(snapshot.sample_rate);
+    audio.channels = u16::try_from(snapshot.channels)
+        .ok()
+        .filter(|value| *value != 0);
+    audio.quantum_frames = (snapshot.quantum_frames != 0).then_some(snapshot.quantum_frames);
+    audio.callback_count = snapshot.callbacks;
+    audio.dropped_frames = snapshot.faults;
+    if snapshot.state == CaptureState::Running {
+        audio.last_error = None;
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
