@@ -1,4 +1,4 @@
-use crate::{CallbackScope, ConsumeOutcome, MonitorEdge};
+use crate::{CallbackScope, CallbackTiming, ConsumeOutcome, MonitorEdge};
 use pipewire as pw;
 use pw::{properties::properties, spa};
 use spa::pod::Pod;
@@ -9,7 +9,6 @@ use std::{
         Arc,
     },
     thread::{self, JoinHandle},
-    time::Instant,
 };
 use thiserror::Error;
 
@@ -28,6 +27,8 @@ pub struct OutputSnapshot {
     pub callbacks: u64,
     pub underruns: u64,
     pub callback_max_ns: u64,
+    pub callback_p99_ns: u64,
+    pub callback_p999_ns: u64,
 }
 
 #[derive(Debug, Default)]
@@ -35,9 +36,8 @@ struct OutputControls {
     state: AtomicU8,
     target_gain_millionths: AtomicU32,
     muted: AtomicBool,
-    callbacks: AtomicU64,
+    timing: CallbackTiming,
     underruns: AtomicU64,
-    callback_max_ns: AtomicU64,
 }
 
 pub struct PipeWireOutput {
@@ -87,11 +87,14 @@ impl PipeWireOutput {
 
     #[must_use]
     pub fn snapshot(&self) -> OutputSnapshot {
+        let timing = self.controls.timing.snapshot();
         OutputSnapshot {
             running: self.controls.state.load(Ordering::Acquire) == 1,
-            callbacks: self.controls.callbacks.load(Ordering::Relaxed),
+            callbacks: timing.callbacks,
             underruns: self.controls.underruns.load(Ordering::Relaxed),
-            callback_max_ns: self.controls.callback_max_ns.load(Ordering::Relaxed),
+            callback_max_ns: timing.maximum_ns,
+            callback_p99_ns: timing.p99_ns,
+            callback_p999_ns: timing.p999_ns,
         }
     }
 }
@@ -182,7 +185,7 @@ fn run_output_loop(
 
 fn process_output(stream: &pw::stream::Stream, data: &mut OutputData) {
     let _callback_scope = CallbackScope::enter();
-    let started = Instant::now();
+    let _callback_timing = data.controls.timing.start();
     let Some(mut buffer) = stream.dequeue_buffer() else {
         data.controls.underruns.fetch_add(1, Ordering::Relaxed);
         return;
@@ -246,10 +249,6 @@ fn process_output(stream: &pw::stream::Stream, data: &mut OutputData) {
     *chunk.offset_mut() = 0;
     *chunk.stride_mut() = (CHANNELS * size_of::<f32>()) as i32;
     *chunk.size_mut() = (samples_needed * size_of::<f32>()) as u32;
-    data.controls.callbacks.fetch_add(1, Ordering::Relaxed);
-    data.controls
-        .callback_max_ns
-        .fetch_max(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
 }
 
 fn ramp_gain(current: f32, target: f32) -> f32 {

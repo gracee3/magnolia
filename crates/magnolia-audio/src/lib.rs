@@ -20,11 +20,12 @@ pub mod pipewire;
 pub use block::{AudioBlock, AudioFormat, BlockIndex, Discontinuity};
 #[cfg(target_os = "linux")]
 pub use capture::{
-    CaptureConfiguration, CaptureError, CaptureSnapshot, CaptureState, MonitorEdge,
-    NativeSampleFormat, PipeWireCapture,
+    CaptureConfiguration, CaptureConfigurationError, CaptureError, CaptureSnapshot, CaptureState,
+    MonitorEdge, NativeChannelLayout, NativeSampleFormat, PipeWireCapture,
 };
 pub use convert::{
     downmix_to_mono, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, LinearResampler, ProcessError,
+    StereoLinearResampler,
 };
 #[cfg(target_os = "linux")]
 pub use output::{OutputConfiguration, OutputError, OutputSnapshot, PipeWireOutput};
@@ -42,5 +43,5 @@ pub use registry::{
 };
 pub use rt_audit::{
     callback_allocation_counts, reset_callback_allocation_counts, CallbackCountingAllocator,
-    CallbackScope,
+    CallbackScope, CallbackTiming, CallbackTimingSnapshot,
 };

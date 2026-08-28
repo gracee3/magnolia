@@ -1,7 +1,7 @@
 use crate::{
     block_channel, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, AudioFormat, BlockConsumer,
-    BlockIndex, BlockProducer, CallbackScope, PublishOutcome, QuantumAdapter,
-    MAX_PIPEWIRE_QUANTUM_FRAMES,
+    BlockIndex, BlockProducer, CallbackScope, CallbackTiming, PublishOutcome, QuantumAdapter,
+    StereoLinearResampler, MAX_PIPEWIRE_QUANTUM_FRAMES,
 };
 use pipewire as pw;
 use pw::{properties::properties, spa};
@@ -38,12 +38,16 @@ pub struct CaptureSnapshot {
     pub sample_format: Option<NativeSampleFormat>,
     pub sample_rate: u32,
     pub channels: u32,
+    pub channel_layout: Option<NativeChannelLayout>,
+    pub configuration_error: Option<CaptureConfigurationError>,
     pub quantum_frames: u32,
     pub callbacks: u64,
     pub source_frames: u64,
     pub emitted_blocks: u64,
     pub faults: u64,
     pub callback_max_ns: u64,
+    pub callback_p99_ns: u64,
+    pub callback_p999_ns: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,18 +58,35 @@ pub enum NativeSampleFormat {
     S32Le = 3,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum NativeChannelLayout {
+    Mono = 1,
+    Stereo = 2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CaptureConfigurationError {
+    UnsupportedSampleFormat = 1,
+    UnsupportedChannelLayout = 2,
+    UnsupportedSampleRate = 3,
+}
+
 #[derive(Debug)]
 struct CaptureCounters {
     state: AtomicU8,
     sample_format: AtomicU8,
     sample_rate: AtomicU32,
     channels: AtomicU32,
+    channel_layout: AtomicU8,
+    configuration_supported: AtomicBool,
+    configuration_error: AtomicU8,
     quantum_frames: AtomicU32,
-    callbacks: AtomicU64,
+    timing: CallbackTiming,
     source_frames: AtomicU64,
     emitted_blocks: AtomicU64,
     faults: AtomicU64,
-    callback_max_ns: AtomicU64,
     capture_muted: AtomicBool,
 }
 
@@ -76,12 +97,14 @@ impl Default for CaptureCounters {
             sample_format: AtomicU8::new(0),
             sample_rate: AtomicU32::new(0),
             channels: AtomicU32::new(0),
+            channel_layout: AtomicU8::new(0),
+            configuration_supported: AtomicBool::new(false),
+            configuration_error: AtomicU8::new(0),
             quantum_frames: AtomicU32::new(0),
-            callbacks: AtomicU64::new(0),
+            timing: CallbackTiming::default(),
             source_frames: AtomicU64::new(0),
             emitted_blocks: AtomicU64::new(0),
             faults: AtomicU64::new(0),
-            callback_max_ns: AtomicU64::new(0),
             capture_muted: AtomicBool::new(false),
         }
     }
@@ -153,17 +176,42 @@ impl PipeWireCapture {
             3 => Some(NativeSampleFormat::S32Le),
             _ => None,
         };
+        let mut state = decode_state(self.counters.state.load(Ordering::Acquire));
+        if state == CaptureState::Running
+            && !self
+                .counters
+                .configuration_supported
+                .load(Ordering::Acquire)
+        {
+            state = CaptureState::Failed;
+        }
+        let channel_layout = match self.counters.channel_layout.load(Ordering::Relaxed) {
+            1 => Some(NativeChannelLayout::Mono),
+            2 => Some(NativeChannelLayout::Stereo),
+            _ => None,
+        };
+        let configuration_error = match self.counters.configuration_error.load(Ordering::Relaxed) {
+            1 => Some(CaptureConfigurationError::UnsupportedSampleFormat),
+            2 => Some(CaptureConfigurationError::UnsupportedChannelLayout),
+            3 => Some(CaptureConfigurationError::UnsupportedSampleRate),
+            _ => None,
+        };
+        let timing = self.counters.timing.snapshot();
         CaptureSnapshot {
-            state: decode_state(self.counters.state.load(Ordering::Acquire)),
+            state,
             sample_format,
             sample_rate: self.counters.sample_rate.load(Ordering::Relaxed),
             channels: self.counters.channels.load(Ordering::Relaxed),
+            channel_layout,
+            configuration_error,
             quantum_frames: self.counters.quantum_frames.load(Ordering::Relaxed),
-            callbacks: self.counters.callbacks.load(Ordering::Relaxed),
+            callbacks: timing.callbacks,
             source_frames: self.counters.source_frames.load(Ordering::Relaxed),
             emitted_blocks: self.counters.emitted_blocks.load(Ordering::Relaxed),
             faults: self.counters.faults.load(Ordering::Relaxed),
-            callback_max_ns: self.counters.callback_max_ns.load(Ordering::Relaxed),
+            callback_max_ns: timing.maximum_ns,
+            callback_p99_ns: timing.p99_ns,
+            callback_p999_ns: timing.p999_ns,
         }
     }
 
@@ -209,10 +257,14 @@ struct CallbackData {
     format: spa::param::audio::AudioInfoRaw,
     native_format: Option<NativeSampleFormat>,
     converted: Box<[f32]>,
+    stereo: Box<[f32]>,
+    resampled: Box<[f32]>,
+    resampler: Option<StereoLinearResampler>,
     adapter: Option<QuantumAdapter>,
     counters: Arc<CaptureCounters>,
     producer: BlockProducer,
     monitor_edge_enabled: Arc<AtomicBool>,
+    monotonic_epoch: Instant,
 }
 
 fn run_capture_loop(
@@ -240,10 +292,14 @@ fn run_capture_loop(
         format: spa::param::audio::AudioInfoRaw::new(),
         native_format: None,
         converted: vec![0.0; MAX_PIPEWIRE_QUANTUM_FRAMES * 2].into_boxed_slice(),
+        stereo: vec![0.0; MAX_PIPEWIRE_QUANTUM_FRAMES * 2].into_boxed_slice(),
+        resampled: vec![0.0; MAX_PIPEWIRE_QUANTUM_FRAMES * 12].into_boxed_slice(),
+        resampler: None,
         adapter: None,
         counters: Arc::clone(&counters),
         producer,
         monitor_edge_enabled,
+        monotonic_epoch: Instant::now(),
     };
     let _listener = stream
         .add_local_listener_with_user_data(callback_data)
@@ -288,16 +344,57 @@ fn run_capture_loop(
             };
             let channels = data.format.channels();
             let rate = data.format.rate();
-            data.adapter = usize::try_from(channels)
-                .ok()
-                .and_then(|channels| QuantumAdapter::new(channels, rate).ok());
+            let positions = data.format.position();
+            data.counters
+                .configuration_supported
+                .store(false, Ordering::Release);
+            let channel_layout = match channels {
+                1 if positions[0] == 0 || positions[0] == spa::sys::SPA_AUDIO_CHANNEL_MONO => {
+                    Some(NativeChannelLayout::Mono)
+                }
+                2 if (positions[0] == 0 && positions[1] == 0)
+                    || (positions[0] == spa::sys::SPA_AUDIO_CHANNEL_FL
+                        && positions[1] == spa::sys::SPA_AUDIO_CHANNEL_FR) =>
+                {
+                    Some(NativeChannelLayout::Stereo)
+                }
+                _ => None,
+            };
+            let rate_supported = (8_000..=192_000).contains(&rate);
+            data.adapter = (channel_layout.is_some() && rate_supported)
+                .then(|| QuantumAdapter::new(2, 48_000).ok())
+                .flatten();
+            data.resampler = (channel_layout.is_some() && rate_supported)
+                .then(|| StereoLinearResampler::new(rate, 48_000).ok())
+                .flatten();
             data.counters.sample_format.store(
                 data.native_format.map_or(0, |format| format as u8),
                 Ordering::Relaxed,
             );
             data.counters.sample_rate.store(rate, Ordering::Relaxed);
             data.counters.channels.store(channels, Ordering::Relaxed);
-            if data.native_format.is_none() || data.adapter.is_none() {
+            data.counters.channel_layout.store(
+                channel_layout.map_or(0, |layout| layout as u8),
+                Ordering::Relaxed,
+            );
+            let supported =
+                data.native_format.is_some() && data.adapter.is_some() && data.resampler.is_some();
+            let configuration_error = if data.native_format.is_none() {
+                CaptureConfigurationError::UnsupportedSampleFormat as u8
+            } else if channel_layout.is_none() {
+                CaptureConfigurationError::UnsupportedChannelLayout as u8
+            } else if !rate_supported {
+                CaptureConfigurationError::UnsupportedSampleRate as u8
+            } else {
+                0
+            };
+            data.counters
+                .configuration_error
+                .store(configuration_error, Ordering::Relaxed);
+            data.counters
+                .configuration_supported
+                .store(supported, Ordering::Release);
+            if !supported {
                 data.counters.faults.fetch_add(1, Ordering::Relaxed);
             }
         })
@@ -334,7 +431,7 @@ fn run_capture_loop(
 
 fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
     let _callback_scope = CallbackScope::enter();
-    let started = Instant::now();
+    let _callback_timing = data.counters.timing.start();
     let Some(mut buffer) = stream.dequeue_buffer() else {
         data.counters.faults.fetch_add(1, Ordering::Relaxed);
         return;
@@ -368,6 +465,10 @@ fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
         return;
     }
     let frames = samples / channels;
+    if frames > MAX_PIPEWIRE_QUANTUM_FRAMES {
+        data.counters.faults.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
     data.counters
         .quantum_frames
         .store(frames as u32, Ordering::Relaxed);
@@ -375,52 +476,79 @@ fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
         .counters
         .source_frames
         .fetch_add(frames as u64, Ordering::Relaxed);
+    let stereo_samples = frames * 2;
+    match channels {
+        1 => {
+            for (sample, frame) in data.converted[..samples]
+                .iter()
+                .zip(data.stereo[..stereo_samples].chunks_exact_mut(2))
+            {
+                frame[0] = *sample;
+                frame[1] = *sample;
+            }
+        }
+        2 => data.stereo[..stereo_samples].copy_from_slice(&data.converted[..samples]),
+        _ => {
+            data.counters.faults.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+    }
+    let Some(resampler) = data.resampler.as_mut() else {
+        data.counters.faults.fetch_add(1, Ordering::Relaxed);
+        return;
+    };
+    let Ok(resampled_frames) =
+        resampler.process(&data.stereo[..stereo_samples], &mut data.resampled)
+    else {
+        data.counters.faults.fetch_add(1, Ordering::Relaxed);
+        return;
+    };
     let Some(adapter) = data.adapter.as_mut() else {
         data.counters.faults.fetch_add(1, Ordering::Relaxed);
         return;
     };
     let producer = &mut data.producer;
     let counters = &data.counters;
+    let monitor_edge_enabled = &data.monitor_edge_enabled;
     let muted = counters.capture_muted.load(Ordering::Acquire);
-    let canonical_format = data.format.rate() == 48_000 && data.format.channels() == 2;
-    let emitted = adapter.push(
-        &data.converted[..samples],
-        source_position,
-        0,
-        |samples, meta| {
-            if !data.monitor_edge_enabled.load(Ordering::Acquire) {
-                return;
-            }
-            if !canonical_format {
-                counters.faults.fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-            let outcome = producer.publish(BlockIndex(meta.sequence), 256, |destination| {
-                if muted {
-                    destination.fill(0.0);
-                } else {
-                    destination.copy_from_slice(samples);
+    let monotonic_ns = data.monotonic_epoch.elapsed().as_nanos() as u64;
+    let mut offset_frames = 0;
+    let mut emitted_blocks = 0_u64;
+    while offset_frames < resampled_frames {
+        let available = MAX_PIPEWIRE_QUANTUM_FRAMES - adapter.buffered_frames();
+        let chunk_frames = available.min(resampled_frames - offset_frames);
+        let start_sample = offset_frames * 2;
+        let end_sample = start_sample + chunk_frames * 2;
+        let emitted = adapter.push(
+            &data.resampled[start_sample..end_sample],
+            source_position.saturating_add(offset_frames as u64),
+            monotonic_ns,
+            |samples, meta| {
+                if !monitor_edge_enabled.load(Ordering::Acquire) {
+                    return;
                 }
-            });
-            if outcome != PublishOutcome::Published {
-                counters.faults.fetch_add(1, Ordering::Relaxed);
-            }
-        },
-    );
-    match emitted {
-        Ok(blocks) => {
-            data.counters
-                .emitted_blocks
-                .fetch_add(blocks as u64, Ordering::Relaxed);
-        }
-        Err(_) => {
+                let outcome = producer.publish(BlockIndex(meta.sequence), 256, |destination| {
+                    if muted {
+                        destination.fill(0.0);
+                    } else {
+                        destination.copy_from_slice(samples);
+                    }
+                });
+                if outcome != PublishOutcome::Published {
+                    counters.faults.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+        );
+        let Ok(blocks) = emitted else {
             data.counters.faults.fetch_add(1, Ordering::Relaxed);
-        }
+            break;
+        };
+        emitted_blocks = emitted_blocks.saturating_add(blocks as u64);
+        offset_frames += chunk_frames;
     }
-    data.counters.callbacks.fetch_add(1, Ordering::Relaxed);
     data.counters
-        .callback_max_ns
-        .fetch_max(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        .emitted_blocks
+        .fetch_add(emitted_blocks, Ordering::Relaxed);
 }
 
 fn serialize_format(format: spa::param::audio::AudioFormat) -> Result<Vec<u8>, CaptureError> {

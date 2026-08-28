@@ -1,8 +1,9 @@
 use magnolia_application::{ActivationRequest, RuntimeControl, RuntimeEvent, RuntimePort};
 #[cfg(target_os = "linux")]
 use magnolia_audio::{
-    pipewire::PipeWireRegistryManager, CaptureConfiguration, CaptureState, DeviceDirection,
-    NativeSampleFormat, OutputConfiguration, PipeWireCapture, PipeWireOutput,
+    pipewire::PipeWireRegistryManager, CaptureConfiguration, CaptureConfigurationError,
+    CaptureState, DeviceDirection, NativeChannelLayout, NativeSampleFormat, OutputConfiguration,
+    PipeWireCapture, PipeWireOutput,
 };
 use magnolia_domain::{native_audio, DeviceSelector, EntityId, WorkspaceGraph};
 use magnolia_protocol::{
@@ -406,11 +407,33 @@ fn apply_capture_snapshot(audio: &mut AudioRuntimeProjection, capture: &PipeWire
     audio.channels = u16::try_from(snapshot.channels)
         .ok()
         .filter(|value| *value != 0);
+    audio.channel_positions = match snapshot.channel_layout {
+        Some(NativeChannelLayout::Mono) => vec!["MONO".to_owned()],
+        Some(NativeChannelLayout::Stereo) => vec!["FL".to_owned(), "FR".to_owned()],
+        None => Vec::new(),
+    };
     audio.quantum_frames = (snapshot.quantum_frames != 0).then_some(snapshot.quantum_frames);
     audio.callback_count = snapshot.callbacks;
+    audio.callback_p99_ns = snapshot.callback_p99_ns;
+    audio.callback_p999_ns = snapshot.callback_p999_ns;
     audio.dropped_frames = snapshot.faults;
     if snapshot.state == CaptureState::Running {
         audio.last_error = None;
+    } else if let Some(error) = snapshot.configuration_error {
+        audio.last_error = Some(
+            match error {
+                CaptureConfigurationError::UnsupportedSampleFormat => {
+                    "PipeWire negotiated an unsupported sample format"
+                }
+                CaptureConfigurationError::UnsupportedChannelLayout => {
+                    "PipeWire negotiated an unsupported channel layout; only mono or FL/FR stereo is accepted"
+                }
+                CaptureConfigurationError::UnsupportedSampleRate => {
+                    "PipeWire negotiated an unsupported sample rate outside 8000-192000 Hz"
+                }
+            }
+            .to_owned(),
+        );
     }
 }
 

@@ -703,14 +703,17 @@ fn AudioControls(state: StudioState) -> impl IntoView {
             <pre data-testid="audio-runtime-status">{move || projection.projection.get().map_or_else(
                 || "audio projection pending".to_owned(),
                 |value| format!(
-                    "state={:?} format={:?} rate={:?} channels={:?} quantum={:?} runtime_rev={} callbacks={} underruns={} drops={} discontinuities={} monitor={}/{}/{} error={}",
+                    "state={:?} format={:?} rate={:?} channels={:?}/{:?} quantum={:?} runtime_rev={} callbacks={} p99_ns={} p999_ns={} underruns={} drops={} discontinuities={} monitor={}/{}/{} error={}",
                     value.audio.state,
                     value.audio.sample_format,
                     value.audio.sample_rate,
                     value.audio.channels,
+                    value.audio.channel_positions,
                     value.audio.quantum_frames,
                     value.audio.runtime_revision,
                     value.audio.callback_count,
+                    value.audio.callback_p99_ns,
+                    value.audio.callback_p999_ns,
                     value.audio.underruns,
                     value.audio.dropped_frames,
                     value.audio.discontinuities,
