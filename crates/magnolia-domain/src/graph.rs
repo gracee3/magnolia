@@ -697,18 +697,46 @@ pub mod synthetic {
             version: SchemaVersion::new(1, 0),
             execution_lane: lane,
             ports,
-            controls: vec![ControlDefinition {
-                id: ControlId::new("enabled").unwrap(),
-                label: "Enabled".to_owned(),
-                kind: ControlKind::Toggle,
-                setting_key: "enabled".to_owned(),
-                default_value: json!(true),
-            }],
+            controls: vec![
+                ControlDefinition {
+                    id: ControlId::new("enabled").unwrap(),
+                    label: "Enabled".to_owned(),
+                    kind: ControlKind::Toggle,
+                    setting_key: "enabled".to_owned(),
+                    default_value: json!(true),
+                },
+                ControlDefinition {
+                    id: ControlId::new("gain").unwrap(),
+                    label: "Gain".to_owned(),
+                    kind: ControlKind::Number,
+                    setting_key: "gain".to_owned(),
+                    default_value: json!(1.0),
+                },
+                ControlDefinition {
+                    id: ControlId::new("mode").unwrap(),
+                    label: "Mode".to_owned(),
+                    kind: ControlKind::Choice {
+                        options: vec!["steady".to_owned(), "pulse".to_owned()],
+                    },
+                    setting_key: "mode".to_owned(),
+                    default_value: json!("steady"),
+                },
+                ControlDefinition {
+                    id: ControlId::new("label").unwrap(),
+                    label: "Label".to_owned(),
+                    kind: ControlKind::Text,
+                    setting_key: "label".to_owned(),
+                    default_value: json!(name),
+                },
+            ],
             capabilities: BTreeSet::from(["synthetic".to_owned()]),
             configuration_schema: json!({
                 "type": "object",
                 "properties": {
-                    "enabled": {"type": "boolean"}
+                    "enabled": {"type": "boolean"},
+                    "gain": {"type": "number"},
+                    "mode": {"type": "string", "enum": ["steady", "pulse"]},
+                    "label": {"type": "string"}
                 },
                 "additionalProperties": true
             }),
