@@ -1,6 +1,6 @@
 # Migration and verification
 
-Status: Phases 1 and 2 implemented; phases 3 through 7 are prescribed future work.
+Status: Phases 1 and 2 implemented; Phase 3 in progress; phases 4 through 7 are prescribed future work.
 
 ## Commit-sized migration
 
@@ -104,11 +104,12 @@ Exit gate: automated gates and applicable measured targets pass with evidence; d
 - Persistence: atomic save/restore, interrupted recording recovery, transcript paging, unsupported schemas, and replay comparisons.
 - Hardware: 30-minute T14 continuity/latency and corpus ASR runs; separate actual-provider RTX 3090 run.
 
-Phase 1 provides `scripts/check.sh` as its focused fast gate. Phase 2 extends
-`scripts/verify.sh` with the native desktop tests, studio WASM/Trunk build,
-Chromium E2E, documentation, changed-path, and whitespace gates through
-`scripts/check-phase-2.sh`. Later audio/ASR phases must extend these same entry
-points only when their prerequisites become applicable.
+`scripts/verify.sh` is the authoritative, non-skippable local gate for an exact
+candidate SHA. It includes the focused Rust checks, native desktop tests, studio
+WASM/Trunk build, Chromium E2E, documentation, repository-policy, and whitespace
+audits. Magnolia has no repository Actions workflow or required remote status;
+the PR must record the exact locally verified SHA and results. Later audio/ASR
+phases must extend this entry point only when their prerequisites apply.
 
 ## Risks and required evidence
 

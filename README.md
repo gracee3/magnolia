@@ -45,7 +45,10 @@ The local Sherpa setup and LibriSpeech scripts remain prototype tooling. They do
 
 Phase 2 adds the isolated `magnolia-desktop`/`magnolia-studio-web` workspace,
 loopback control and bounded binary telemetry transports, the retained cockpit,
-and real Chromium automation. It does not add PipeWire, real-time audio, device
+and real Chromium automation. Phase 2 was merged by PR #5 after the exact head
+passed the owner-authorized local gate; Actions run `33206890066` was canceled,
+not passed. Phase 3 is performing the hard cutover under the same exact-SHA
+local verification policy. It does not add PipeWire, real-time audio, device
 access, model downloads, ASR, benchmarks, filesystem persistence, legacy
 deletion, or hardware certification. T14 and RTX 3090 figures remain acceptance
 targets until evidence from the exact build, model, corpus, and provider is
