@@ -10,6 +10,7 @@ magnolia-domain = { path = "../magnolia-domain" }
 thiserror.workspace = true
 
 [dev-dependencies]
+futures.workspace = true
 magnolia-client = { path = "../magnolia-client" }
 magnolia-protocol = { path = "../magnolia-protocol" }
 serde_json.workspace = true

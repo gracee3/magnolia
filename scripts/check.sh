@@ -18,6 +18,10 @@ for package in "${packages[@]}"; do
 done
 
 cargo fmt --all --check
+cargo check --locked --target wasm32-unknown-unknown \
+  --package magnolia-domain \
+  --package magnolia-protocol \
+  --package magnolia-client
 cargo check --locked "${package_args[@]}" --all-targets
 cargo test --locked "${package_args[@]}"
 cargo clippy --locked "${package_args[@]}" --all-targets -- -D warnings

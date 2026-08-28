@@ -7,8 +7,9 @@ use magnolia_protocol::{
 };
 use std::{
     collections::VecDeque,
+    future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 use thiserror::Error;
 
@@ -16,25 +17,30 @@ mod scenario;
 
 pub use scenario::*;
 
-pub trait ApplicationClient: Send + Sync {
-    fn connect(&self, request: ConnectRequest) -> Result<ConnectResponse, ClientError>;
+/// A client operation that can run on either a native or browser-local executor.
+///
+/// The future deliberately has no `Send` bound: a browser adapter may borrow
+/// `Rc`/`RefCell` WebSocket state owned by the JavaScript event loop.
+pub type ClientFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ClientError>> + 'a>>;
 
-    fn snapshot(&self) -> Result<Arc<RuntimeProjection>, ClientError>;
+pub trait ApplicationClient {
+    fn connect(&self, request: ConnectRequest) -> ClientFuture<'_, ConnectResponse>;
+
+    fn snapshot(&self) -> ClientFuture<'_, Arc<RuntimeProjection>>;
 
     fn wait_for_projection(
         &self,
         after: ProjectionRevision,
-        timeout: Duration,
-    ) -> Result<Arc<RuntimeProjection>, ClientError>;
+    ) -> ClientFuture<'_, Arc<RuntimeProjection>>;
 
-    fn dispatch(&self, command: CommandEnvelope) -> Result<CommandReceipt, ClientError>;
+    fn dispatch(&self, command: CommandEnvelope) -> ClientFuture<'_, CommandReceipt>;
 
     fn subscribe_telemetry(
         &self,
         subscription: TelemetrySubscription,
-    ) -> Result<TelemetryLease, ClientError>;
+    ) -> ClientFuture<'_, TelemetryLease>;
 
-    fn transcript_page(&self, after: u64, limit: u32) -> Result<TranscriptPage, ClientError>;
+    fn transcript_page(&self, after: u64, limit: u32) -> ClientFuture<'_, TranscriptPage>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -48,8 +54,6 @@ pub enum ClientError {
     },
     #[error("script arguments did not match for {0}")]
     ArgumentMismatch(&'static str),
-    #[error("projection wait timed out")]
-    Timeout,
     #[error("operation is not available in this implementation: {0}")]
     Unsupported(&'static str),
     #[error("application client internal lock was poisoned")]
@@ -62,16 +66,10 @@ pub enum ClientError {
 pub enum ApplicationCall {
     Connect(ConnectRequest),
     Snapshot,
-    WaitForProjection {
-        after: ProjectionRevision,
-        timeout: Duration,
-    },
+    WaitForProjection { after: ProjectionRevision },
     Dispatch(CommandEnvelope),
     SubscribeTelemetry(TelemetrySubscription),
-    TranscriptPage {
-        after: u64,
-        limit: u32,
-    },
+    TranscriptPage { after: u64, limit: u32 },
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +83,6 @@ pub enum ScriptStep {
     },
     WaitForProjection {
         expected_after: ProjectionRevision,
-        expected_timeout: Duration,
         result: Result<Arc<RuntimeProjection>, ClientError>,
     },
     Dispatch {
@@ -173,87 +170,100 @@ impl MockApplicationClient {
 }
 
 impl ApplicationClient for MockApplicationClient {
-    fn connect(&self, request: ConnectRequest) -> Result<ConnectResponse, ClientError> {
-        self.record(ApplicationCall::Connect(request.clone()))?;
-        match self.next("connect")? {
-            ScriptStep::Connect { expected, result } if expected == request => result,
-            ScriptStep::Connect { .. } => Err(ClientError::ArgumentMismatch("connect")),
-            _ => unreachable!("step name checked"),
-        }
+    fn connect(&self, request: ConnectRequest) -> ClientFuture<'_, ConnectResponse> {
+        Box::pin(async move {
+            self.record(ApplicationCall::Connect(request.clone()))?;
+            match self.next("connect")? {
+                ScriptStep::Connect { expected, result } if expected == request => result,
+                ScriptStep::Connect { .. } => Err(ClientError::ArgumentMismatch("connect")),
+                _ => unreachable!("step name checked"),
+            }
+        })
     }
 
-    fn snapshot(&self) -> Result<Arc<RuntimeProjection>, ClientError> {
-        self.record(ApplicationCall::Snapshot)?;
-        match self.next("snapshot")? {
-            ScriptStep::Snapshot { result } => result,
-            _ => unreachable!("step name checked"),
-        }
+    fn snapshot(&self) -> ClientFuture<'_, Arc<RuntimeProjection>> {
+        Box::pin(async move {
+            self.record(ApplicationCall::Snapshot)?;
+            match self.next("snapshot")? {
+                ScriptStep::Snapshot { result } => result,
+                _ => unreachable!("step name checked"),
+            }
+        })
     }
 
     fn wait_for_projection(
         &self,
         after: ProjectionRevision,
-        timeout: Duration,
-    ) -> Result<Arc<RuntimeProjection>, ClientError> {
-        self.record(ApplicationCall::WaitForProjection { after, timeout })?;
-        match self.next("wait_for_projection")? {
-            ScriptStep::WaitForProjection {
-                expected_after,
-                expected_timeout,
-                result,
-            } if expected_after == after && expected_timeout == timeout => result,
-            ScriptStep::WaitForProjection { .. } => {
-                Err(ClientError::ArgumentMismatch("wait_for_projection"))
+    ) -> ClientFuture<'_, Arc<RuntimeProjection>> {
+        Box::pin(async move {
+            self.record(ApplicationCall::WaitForProjection { after })?;
+            match self.next("wait_for_projection")? {
+                ScriptStep::WaitForProjection {
+                    expected_after,
+                    result,
+                } if expected_after == after => result,
+                ScriptStep::WaitForProjection { .. } => {
+                    Err(ClientError::ArgumentMismatch("wait_for_projection"))
+                }
+                _ => unreachable!("step name checked"),
             }
-            _ => unreachable!("step name checked"),
-        }
+        })
     }
 
-    fn dispatch(&self, command: CommandEnvelope) -> Result<CommandReceipt, ClientError> {
-        self.record(ApplicationCall::Dispatch(command.clone()))?;
-        match self.next("dispatch")? {
-            ScriptStep::Dispatch { expected, result } if expected == command => result,
-            ScriptStep::Dispatch { .. } => Err(ClientError::ArgumentMismatch("dispatch")),
-            _ => unreachable!("step name checked"),
-        }
+    fn dispatch(&self, command: CommandEnvelope) -> ClientFuture<'_, CommandReceipt> {
+        Box::pin(async move {
+            self.record(ApplicationCall::Dispatch(command.clone()))?;
+            match self.next("dispatch")? {
+                ScriptStep::Dispatch { expected, result } if expected == command => result,
+                ScriptStep::Dispatch { .. } => Err(ClientError::ArgumentMismatch("dispatch")),
+                _ => unreachable!("step name checked"),
+            }
+        })
     }
 
     fn subscribe_telemetry(
         &self,
         subscription: TelemetrySubscription,
-    ) -> Result<TelemetryLease, ClientError> {
-        self.record(ApplicationCall::SubscribeTelemetry(subscription.clone()))?;
-        match self.next("subscribe_telemetry")? {
-            ScriptStep::SubscribeTelemetry { expected, result } if expected == subscription => {
-                result
+    ) -> ClientFuture<'_, TelemetryLease> {
+        Box::pin(async move {
+            self.record(ApplicationCall::SubscribeTelemetry(subscription.clone()))?;
+            match self.next("subscribe_telemetry")? {
+                ScriptStep::SubscribeTelemetry { expected, result } if expected == subscription => {
+                    result
+                }
+                ScriptStep::SubscribeTelemetry { .. } => {
+                    Err(ClientError::ArgumentMismatch("subscribe_telemetry"))
+                }
+                _ => unreachable!("step name checked"),
             }
-            ScriptStep::SubscribeTelemetry { .. } => {
-                Err(ClientError::ArgumentMismatch("subscribe_telemetry"))
-            }
-            _ => unreachable!("step name checked"),
-        }
+        })
     }
 
-    fn transcript_page(&self, after: u64, limit: u32) -> Result<TranscriptPage, ClientError> {
-        self.record(ApplicationCall::TranscriptPage { after, limit })?;
-        match self.next("transcript_page")? {
-            ScriptStep::TranscriptPage {
-                expected_after,
-                expected_limit,
-                result,
-            } if expected_after == after && expected_limit == limit => result,
-            ScriptStep::TranscriptPage { .. } => {
-                Err(ClientError::ArgumentMismatch("transcript_page"))
+    fn transcript_page(&self, after: u64, limit: u32) -> ClientFuture<'_, TranscriptPage> {
+        Box::pin(async move {
+            self.record(ApplicationCall::TranscriptPage { after, limit })?;
+            match self.next("transcript_page")? {
+                ScriptStep::TranscriptPage {
+                    expected_after,
+                    expected_limit,
+                    result,
+                } if expected_after == after && expected_limit == limit => result,
+                ScriptStep::TranscriptPage { .. } => {
+                    Err(ClientError::ArgumentMismatch("transcript_page"))
+                }
+                _ => unreachable!("step name checked"),
             }
-            _ => unreachable!("step name checked"),
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use magnolia_domain::{ClientId, DocumentRevision, RequestId, TargetGraphRevision};
+    use futures::executor::block_on;
+    use magnolia_domain::{
+        ClientId, DocumentRevision, RequestId, TargetGraphRevision, TranscriptRevision,
+    };
     use magnolia_protocol::{
         CommandError, CommandErrorCode, ReceiptOutcome, RequestSequence, SemanticCommand,
         PROTOCOL_VERSION,
@@ -287,11 +297,68 @@ mod tests {
             result: Ok(receipt.clone()),
         }]);
 
-        assert_eq!(client.dispatch(command.clone()).unwrap(), receipt);
+        assert_eq!(block_on(client.dispatch(command.clone())).unwrap(), receipt);
         assert_eq!(
             client.calls().unwrap(),
             vec![ApplicationCall::Dispatch(command)]
         );
         assert_eq!(client.assert_exhausted(), Ok(()));
+    }
+
+    #[test]
+    fn browser_local_state_can_implement_and_await_the_client_boundary() {
+        use std::{cell::RefCell, rc::Rc};
+
+        struct BrowserShapedClient {
+            calls: Rc<RefCell<Vec<(u64, u32)>>>,
+        }
+
+        impl ApplicationClient for BrowserShapedClient {
+            fn connect(&self, _request: ConnectRequest) -> ClientFuture<'_, ConnectResponse> {
+                Box::pin(async { Err(ClientError::Unsupported("connect")) })
+            }
+
+            fn snapshot(&self) -> ClientFuture<'_, Arc<RuntimeProjection>> {
+                Box::pin(async { Err(ClientError::Unsupported("snapshot")) })
+            }
+
+            fn wait_for_projection(
+                &self,
+                _after: ProjectionRevision,
+            ) -> ClientFuture<'_, Arc<RuntimeProjection>> {
+                Box::pin(async { Err(ClientError::Unsupported("projection stream")) })
+            }
+
+            fn dispatch(&self, _command: CommandEnvelope) -> ClientFuture<'_, CommandReceipt> {
+                Box::pin(async { Err(ClientError::Unsupported("dispatch")) })
+            }
+
+            fn subscribe_telemetry(
+                &self,
+                _subscription: TelemetrySubscription,
+            ) -> ClientFuture<'_, TelemetryLease> {
+                Box::pin(async { Err(ClientError::Unsupported("telemetry")) })
+            }
+
+            fn transcript_page(&self, after: u64, limit: u32) -> ClientFuture<'_, TranscriptPage> {
+                Box::pin(async move {
+                    self.calls.borrow_mut().push((after, limit));
+                    Ok(TranscriptPage {
+                        revision: TranscriptRevision::ZERO,
+                        segments: Vec::new(),
+                        next_cursor: None,
+                    })
+                })
+            }
+        }
+
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let client = BrowserShapedClient {
+            calls: Rc::clone(&calls),
+        };
+        let page = block_on(client.transcript_page(7, 25)).unwrap();
+
+        assert_eq!(page.revision, TranscriptRevision::ZERO);
+        assert_eq!(*calls.borrow(), vec![(7, 25)]);
     }
 }

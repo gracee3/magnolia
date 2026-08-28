@@ -108,10 +108,14 @@ pub struct ModuleDescriptor {
     pub controls: Vec<ControlDefinition>,
     #[serde(default)]
     pub capabilities: BTreeSet<String>,
-    #[serde(default)]
+    #[serde(default = "permissive_configuration_schema")]
     pub configuration_schema: Value,
     #[serde(default)]
     pub introduces_delay: bool,
+}
+
+fn permissive_configuration_schema() -> Value {
+    Value::Bool(true)
 }
 
 impl ModuleDescriptor {
@@ -203,6 +207,8 @@ pub enum DescriptorError {
     InvalidChoiceOptions,
     #[error("control {0} has a default value incompatible with its kind")]
     InvalidControlDefault(ControlId),
+    #[error("descriptor has an invalid or unsupported configuration schema: {0}")]
+    InvalidConfigurationSchema(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -218,6 +224,11 @@ pub enum GraphValidationError {
     },
     #[error("module {module_id} has a blank type identifier")]
     BlankModuleType { module_id: EntityId },
+    #[error("module {module_id} has invalid configuration: {message}")]
+    InvalidConfiguration {
+        module_id: EntityId,
+        message: String,
+    },
     #[error("edge {edge_id} references missing module {module_id}")]
     MissingModule {
         edge_id: EntityId,
@@ -237,6 +248,8 @@ pub enum GraphValidationError {
     ClockMismatch { edge_id: EntityId },
     #[error("edge {edge_id} crosses incompatible stream formats")]
     FormatMismatch { edge_id: EntityId },
+    #[error("edge {edge_id} crosses incompatible delivery policies")]
+    DeliveryPolicyMismatch { edge_id: EntityId },
     #[error("edge {edge_id} crosses execution lanes without a non-zero capacity")]
     UnboundedCrossLane { edge_id: EntityId },
     #[error("input {module_id}:{port_id} rejects fan-in")]
@@ -252,6 +265,8 @@ fn validate_descriptor(descriptor: &ModuleDescriptor) -> Result<(), DescriptorEr
     if descriptor.module_type.is_blank() {
         return Err(DescriptorError::BlankIdentifier);
     }
+    validate_configuration_schema(&descriptor.configuration_schema)
+        .map_err(DescriptorError::InvalidConfigurationSchema)?;
     let mut ports = BTreeSet::new();
     for port in &descriptor.ports {
         if port.id.is_blank() || port.stream.type_id.is_blank() {
@@ -296,6 +311,173 @@ fn validate_descriptor(descriptor: &ModuleDescriptor) -> Result<(), DescriptorEr
     Ok(())
 }
 
+/// Validates the portable configuration-schema subset used by foundation
+/// descriptors. Boolean schemas and the listed structural keywords follow
+/// JSON Schema semantics; unsupported assertion keywords are rejected.
+fn validate_configuration_schema(schema: &Value) -> Result<(), String> {
+    fn validate_at(schema: &Value, path: &str) -> Result<(), String> {
+        if schema.is_boolean() {
+            return Ok(());
+        }
+        let object = schema
+            .as_object()
+            .ok_or_else(|| format!("{path} must be a boolean or object schema"))?;
+        for keyword in object.keys() {
+            match keyword.as_str() {
+                "type"
+                | "enum"
+                | "properties"
+                | "required"
+                | "additionalProperties"
+                | "items"
+                | "title"
+                | "description"
+                | "default"
+                | "$schema"
+                | "$id" => {}
+                _ => return Err(format!("{path} uses unsupported keyword {keyword:?}")),
+            }
+        }
+        if let Some(value_type) = object.get("type") {
+            let value_type = value_type
+                .as_str()
+                .ok_or_else(|| format!("{path}.type must be a string"))?;
+            if !matches!(
+                value_type,
+                "object" | "array" | "string" | "number" | "integer" | "boolean" | "null"
+            ) {
+                return Err(format!("{path}.type has unsupported value {value_type:?}"));
+            }
+        }
+        if let Some(values) = object.get("enum") {
+            if values.as_array().is_none_or(Vec::is_empty) {
+                return Err(format!("{path}.enum must be a non-empty array"));
+            }
+        }
+        if let Some(properties) = object.get("properties") {
+            let properties = properties
+                .as_object()
+                .ok_or_else(|| format!("{path}.properties must be an object"))?;
+            for (key, property_schema) in properties {
+                validate_at(property_schema, &format!("{path}.properties.{key}"))?;
+            }
+        }
+        if let Some(required) = object.get("required") {
+            let required = required
+                .as_array()
+                .ok_or_else(|| format!("{path}.required must be an array"))?;
+            let mut unique = BTreeSet::new();
+            for key in required {
+                let key = key
+                    .as_str()
+                    .ok_or_else(|| format!("{path}.required entries must be strings"))?;
+                if !unique.insert(key) {
+                    return Err(format!("{path}.required contains duplicate key {key:?}"));
+                }
+            }
+        }
+        if let Some(additional) = object.get("additionalProperties") {
+            validate_at(additional, &format!("{path}.additionalProperties"))?;
+        }
+        if let Some(items) = object.get("items") {
+            validate_at(items, &format!("{path}.items"))?;
+        }
+        for annotation in ["title", "description", "$schema", "$id"] {
+            if object
+                .get(annotation)
+                .is_some_and(|value| !value.is_string())
+            {
+                return Err(format!("{path}.{annotation} must be a string"));
+            }
+        }
+        Ok(())
+    }
+
+    validate_at(schema, "$")
+}
+
+fn validate_configuration(schema: &Value, configuration: &Value) -> Result<(), String> {
+    fn value_type(value: &Value) -> &'static str {
+        match value {
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }
+    }
+
+    fn matches_type(value: &Value, expected: &str) -> bool {
+        match expected {
+            "object" => value.is_object(),
+            "array" => value.is_array(),
+            "string" => value.is_string(),
+            "number" => value.is_number(),
+            "integer" => value
+                .as_f64()
+                .is_some_and(|number| number.is_finite() && number.fract() == 0.0),
+            "boolean" => value.is_boolean(),
+            "null" => value.is_null(),
+            _ => false,
+        }
+    }
+
+    fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> {
+        if let Some(accepts) = schema.as_bool() {
+            return accepts
+                .then_some(())
+                .ok_or_else(|| format!("{path} is rejected by the declared schema"));
+        }
+        let schema = schema
+            .as_object()
+            .expect("configuration schema was checked during registration");
+        if let Some(allowed) = schema.get("enum").and_then(Value::as_array) {
+            if !allowed.iter().any(|candidate| candidate == value) {
+                return Err(format!("{path} is not one of the declared enum values"));
+            }
+        }
+        if let Some(expected) = schema.get("type").and_then(Value::as_str) {
+            if !matches_type(value, expected) {
+                return Err(format!(
+                    "{path} expected {expected}, received {}",
+                    value_type(value)
+                ));
+            }
+        }
+        if let Some(values) = value.as_object() {
+            if let Some(required) = schema.get("required").and_then(Value::as_array) {
+                for key in required.iter().filter_map(Value::as_str) {
+                    if !values.contains_key(key) {
+                        return Err(format!("{path} is missing required property {key:?}"));
+                    }
+                }
+            }
+            let properties = schema.get("properties").and_then(Value::as_object);
+            for (key, property_value) in values {
+                if let Some(property_schema) = properties.and_then(|known| known.get(key)) {
+                    validate_at(property_schema, property_value, &format!("{path}.{key}"))?;
+                    continue;
+                }
+                if let Some(additional) = schema.get("additionalProperties") {
+                    if additional == &Value::Bool(false) {
+                        return Err(format!("{path} contains undeclared property {key:?}"));
+                    }
+                    validate_at(additional, property_value, &format!("{path}.{key}"))?;
+                }
+            }
+        }
+        if let (Some(values), Some(items)) = (value.as_array(), schema.get("items")) {
+            for (index, item) in values.iter().enumerate() {
+                validate_at(items, item, &format!("{path}[{index}]"))?;
+            }
+        }
+        Ok(())
+    }
+
+    validate_at(schema, configuration, "$")
+}
+
 fn validate_graph(
     registry: &DescriptorRegistry,
     graph: &WorkspaceGraph,
@@ -311,12 +493,18 @@ fn validate_graph(
                 module_id: module.id,
             });
         }
-        if registry.get(&module.module_type).is_none() {
-            return Err(GraphValidationError::UnknownModuleType {
+        let descriptor = registry.get(&module.module_type).ok_or_else(|| {
+            GraphValidationError::UnknownModuleType {
                 module_id: module.id,
                 module_type: module.module_type.clone(),
-            });
-        }
+            }
+        })?;
+        validate_configuration(&descriptor.configuration_schema, &module.configuration).map_err(
+            |message| GraphValidationError::InvalidConfiguration {
+                module_id: module.id,
+                message,
+            },
+        )?;
     }
 
     let mut fan_in: BTreeMap<(EntityId, PortId), usize> = BTreeMap::new();
@@ -376,6 +564,9 @@ fn validate_graph(
         }
         if from_port.stream.format != to_port.stream.format {
             return Err(GraphValidationError::FormatMismatch { edge_id: edge.id });
+        }
+        if from_port.stream.delivery != to_port.stream.delivery {
+            return Err(GraphValidationError::DeliveryPolicyMismatch { edge_id: edge.id });
         }
         if from_descriptor.execution_lane != to_descriptor.execution_lane
             && !matches!(edge.capacity, Some(capacity) if capacity > 0)
@@ -514,7 +705,13 @@ pub mod synthetic {
                 default_value: json!(true),
             }],
             capabilities: BTreeSet::from(["synthetic".to_owned()]),
-            configuration_schema: json!({"type": "object"}),
+            configuration_schema: json!({
+                "type": "object",
+                "properties": {
+                    "enabled": {"type": "boolean"}
+                },
+                "additionalProperties": true
+            }),
             introduces_delay: delay,
         }
     }
@@ -595,6 +792,22 @@ mod tests {
     }
 
     #[test]
+    fn validates_module_configuration_against_the_declared_schema() {
+        let mut graph = source_sink_graph();
+        graph
+            .modules
+            .get_mut(&EntityId::from_u128(1))
+            .unwrap()
+            .configuration = serde_json::json!({"enabled": "not-a-boolean"});
+
+        assert!(matches!(
+            synthetic::registry().validate_graph(&graph),
+            Err(GraphValidationError::InvalidConfiguration { module_id, .. })
+                if module_id == EntityId::from_u128(1)
+        ));
+    }
+
+    #[test]
     fn rejects_unbounded_cross_lane_edge() {
         let registry = synthetic::registry();
         let mut graph = WorkspaceGraph::default();
@@ -657,6 +870,24 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unsupported_configuration_schema_keywords() {
+        let base = synthetic::registry();
+        let mut descriptor = base
+            .get(&ModuleTypeId::new(synthetic::SOURCE).unwrap())
+            .unwrap()
+            .clone();
+        descriptor.configuration_schema = serde_json::json!({
+            "type": "object",
+            "minProperties": 1
+        });
+
+        assert!(matches!(
+            DescriptorRegistry::new().register(descriptor),
+            Err(DescriptorError::InvalidConfigurationSchema(_))
+        ));
+    }
+
+    #[test]
     fn rejects_missing_port_and_stream_schema_mismatch() {
         let mut missing_port = source_sink_graph();
         missing_port
@@ -698,6 +929,18 @@ mod tests {
         assert!(matches!(
             format_registry.validate_graph(&source_sink_graph()),
             Err(GraphValidationError::FormatMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_delivery_policy_mismatch() {
+        let registry = registry_with_sink_change(|sink| {
+            sink.ports[0].stream.delivery = DeliveryPolicy::Latest;
+        });
+
+        assert!(matches!(
+            registry.validate_graph(&source_sink_graph()),
+            Err(GraphValidationError::DeliveryPolicyMismatch { .. })
         ));
     }
 

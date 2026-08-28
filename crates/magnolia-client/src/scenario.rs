@@ -16,20 +16,23 @@ pub struct FoundationScenarioResult {
 }
 
 /// Runs the portable portion of the foundation scenario against any client adapter.
-pub fn run_foundation_edit_scenario<C: ApplicationClient>(
+pub async fn run_foundation_edit_scenario<C: ApplicationClient>(
     client: &C,
     client_id: ClientId,
     request_id: RequestId,
     batch: WorkspaceEditBatch,
 ) -> Result<FoundationScenarioResult, FoundationScenarioError> {
-    let initial = match client.connect(ConnectRequest {
-        client_id,
-        supported_versions: vec![ProtocolVersionRange {
-            major: PROTOCOL_VERSION.major,
-            minimum_minor: PROTOCOL_VERSION.minor,
-            maximum_minor: PROTOCOL_VERSION.minor,
-        }],
-    })? {
+    let initial = match client
+        .connect(ConnectRequest {
+            client_id,
+            supported_versions: vec![ProtocolVersionRange {
+                major: PROTOCOL_VERSION.major,
+                minimum_minor: PROTOCOL_VERSION.minor,
+                maximum_minor: PROTOCOL_VERSION.minor,
+            }],
+        })
+        .await?
+    {
         ConnectResponse::Accepted {
             negotiated_version,
             snapshot,
@@ -56,15 +59,15 @@ pub fn run_foundation_edit_scenario<C: ApplicationClient>(
         expected_document_revision: initial.document_revision,
         command: SemanticCommand::ApplyWorkspaceEdit { batch },
     };
-    let receipt = client.dispatch(envelope.clone())?;
+    let receipt = client.dispatch(envelope.clone()).await?;
     if let magnolia_protocol::ReceiptOutcome::Rejected { error } = &receipt.outcome {
         return Err(FoundationScenarioError::CommandRejected(error.clone()));
     }
-    let retried = client.dispatch(envelope)?;
+    let retried = client.dispatch(envelope).await?;
     if retried != receipt {
         return Err(FoundationScenarioError::RetryMismatch);
     }
-    let after_dispatch = client.snapshot()?;
+    let after_dispatch = client.snapshot().await?;
     if after_dispatch.document_revision != receipt.document_revision
         || after_dispatch.target_graph_revision != receipt.target_graph_revision
     {

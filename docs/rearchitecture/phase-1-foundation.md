@@ -11,10 +11,10 @@ hardware certification.
 
 | Crate | Implemented responsibility |
 |---|---|
-| `magnolia-domain` | UUID role newtypes, checked revision newtypes, static descriptors/control definitions, typed graph and layout/document data, atomic `WorkspaceEdit` batches, graph/document validation, pretty-JSON round trips, and synthetic descriptors. |
+| `magnolia-domain` | UUID role newtypes, checked revision newtypes, static descriptors/control definitions, typed graph and layout/document data, atomic `WorkspaceEdit` batches, delivery-policy and portable configuration-schema validation, pretty-JSON round trips, and synthetic descriptors. |
 | `magnolia-protocol` | Major/minor negotiation, strict JSON command DTOs, sequenced envelopes, receipts/errors, dynamic control manifests, immutable full projections, operation/module/device/stream status types, transcript/diagnostic placeholders, clocked telemetry DTOs, and JSON/postcard golden fixtures. |
-| `magnolia-client` | Portable `ApplicationClient` plus an ordered, argument-checking scripted `MockApplicationClient`. |
-| `magnolia-application` | Authoritative transactions, handshake-bound commands, optimistic revision checks, a per-client 1,024-receipt replay window, atomic in-memory persistence, undo/redo, control-manifest materialization, non-consuming projection waits, runtime ports, and an in-process client. |
+| `magnolia-client` | Async portable `ApplicationClient` with non-`Send` futures suitable for a browser-local executor, plus an ordered, argument-checking scripted `MockApplicationClient`. |
+| `magnolia-application` | Authoritative transactions, handshake-bound commands, optimistic revision checks, a per-client 1,024-receipt replay window, atomic in-memory persistence, undo/redo, control-manifest materialization, non-consuming event-driven projection waits, graph-change activation classification, runtime ports, and an in-process client. |
 | `magnolia-runtime` | Explicitly driven deterministic `MockRuntime`, captured activation requests, ordered success/failure injection, and target-specific completion. |
 
 The new crates do not depend on Nannou, PipeWire, Sherpa, Leptos, Chromium,
@@ -32,10 +32,12 @@ The integration scenario in
 2. one atomic batch adds a valid synthetic source-to-sink graph;
 3. persistence succeeds before document/target publication and activation is
    enqueued with an operation ID;
-4. an explicit mock success advances the active revision;
-5. a later injected activation failure advances target/error/operation state
+4. a presentation-only durable edit advances the document while leaving a
+   pending target, active revision, operation, and runtime request unchanged;
+5. an explicit mock success advances the active revision;
+6. a later injected activation failure advances target/error/operation state
    while retaining the prior active revision as last-good;
-6. a completion for a superseded target is ignored without publishing a new
+7. a completion for a superseded target is ignored without publishing a new
    projection, while the current target can subsequently activate.
 
 Focused tests additionally cover malformed/unknown wire fields, JSON and
@@ -43,15 +45,18 @@ postcard goldens, unsupported protocol/document majors, descriptor and graph
 errors, cross-lane capacity, cycles/delay, atomic edit rollback, persistence
 failure rollback, optimistic revision conflicts, exact receipt replay,
 conflicting/expired sequences, request-ID reuse, handshake enforcement,
-undo/redo, stateful control manifests, and concurrent non-consuming observers.
+undo/redo, stateful control manifests, delivery-policy mismatches, configuration
+schema enforcement, non-object control-edit preservation, a browser-shaped
+`Rc`/`RefCell` async adapter, and concurrent non-consuming observers.
 
 ## Gates
 
-`./scripts/check.sh` runs formatting, locked checks/tests, and warning-denying
-Clippy for exactly the five foundation crates. `./scripts/verify.sh` reruns that
-gate, explicitly exercises the full integration scenario, checks patch
-whitespace, and validates internal Markdown links. CI invokes the handoff gate;
-the separate legacy baseline remains manually runnable.
+`./scripts/check.sh` runs formatting, a locked `wasm32-unknown-unknown` check for
+domain/protocol/client, locked native checks/tests, and warning-denying Clippy
+for exactly the five foundation crates. `./scripts/verify.sh` reruns that gate,
+explicitly exercises the full integration scenario, checks patch whitespace,
+and validates internal Markdown links. The manual CI workflow can run the
+foundation gate independently from the separate legacy baseline.
 
 ## Explicitly deferred
 

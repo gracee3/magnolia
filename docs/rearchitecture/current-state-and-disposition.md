@@ -83,7 +83,7 @@ must never do automatically.
 | `aphrodite`, `kamea`, `logos`, `text_tools`, `caption_demo` | Remove from active workspace | Later capabilities return only as typed modules after the first slice. |
 | Legacy fonts, visual assets, glyph maps/tweaks | Delete unless proven necessary and licensed | New design assets require separate provenance and licensing evidence. |
 | `.cargo/config.toml`, `rust-toolchain.toml` | Retain and revise as needed | Keep the local Cargo alias and pinned minimal Rust toolchain until replacement gates require a change. |
-| `.github/workflows/ci.yml` | Replace during foundation/cutover | The manually dispatched legacy CI checks old core and the whole old workspace; new gates must cover the portable foundation before cutover. |
+| `.github/workflows/ci.yml` | Split now; replace legacy baseline at cutover | Manual dispatch selects the portable foundation gate or the old-workspace baseline; the foundation job includes the portable WASM check, while the baseline remains only until hard cutover. |
 | `scripts/setup_sherpa_captioning.sh`, `scripts/setup_librispeech_test_clean.sh`, `scripts/run_librispeech_bench.sh` | Delete in the second cutover; reconstruct later | Download/setup and legacy benchmark commands depend on the old ASR applications and are excluded from the foundation slice. |
 | `tools/audio_snapshot.sh` | Delete in the second cutover; reconstruct for native audio | It is host-oriented PipeWire diagnostic knowledge, not a portable-foundation dependency. |
 | `config/magnolia.env.example` | Delete in the second cutover | It describes legacy local model paths; typed resource configuration replaces it in a later ASR phase. |

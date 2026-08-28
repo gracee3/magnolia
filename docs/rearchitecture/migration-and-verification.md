@@ -15,18 +15,20 @@ operation/epoch newtypes; checked `u64` revision newtypes; documents and typed
 graphs; static domain `ControlDefinition`s; dynamic protocol
 `ControlManifest`s; major/minor negotiation; sequenced commands and a per-client
 1,024-receipt replay window; atomic typed `WorkspaceEdit` batches; immutable full
-projections with non-consuming waits; transactions, undo/redo, persistence and
-runtime ports; in-process and scripted mock clients; in-memory persistence; a
-deterministic `MockRuntime`; golden fixtures; and shared scenarios. Use synthetic
-descriptors only.
+projections with async non-consuming waits; an async browser-compatible client
+boundary; transactions, undo/redo, persistence and runtime ports; in-process and
+scripted mock clients; in-memory persistence; a deterministic `MockRuntime`;
+golden fixtures; and shared scenarios. Use synthetic descriptors only.
 
 Exit gate: malformed graphs and frames fail deterministically; supported
 in-window retries return the original receipt, while expired/conflicting
 sequences are rejected without execution; supported documents round-trip;
 unsupported protocol/schema majors are rejected; concurrent projection observers
-do not consume one another's updates; the full mock round trip covers persistence,
-revision conflicts, successful activation, last-good failure, and stale
-completion rejection.
+do not consume one another's updates; stream delivery and module configuration
+schemas are validated; document-only edits do not create or supersede runtime
+operations; domain/protocol/client compile for `wasm32-unknown-unknown`; the full
+mock round trip covers persistence, revision conflicts, successful activation,
+last-good failure, and stale completion rejection.
 
 Microphone, PipeWire, Sherpa, Leptos, Chromium transport, and legacy deletion are
 excluded from this first slice.
@@ -90,7 +92,7 @@ Exit gate: automated gates and applicable measured targets pass with evidence; d
 
 ## Automated gates
 
-- Graph: port/schema/format/clock mismatch, cycles, delay, fan-in, capacities, activation failure, and last-good retention.
+- Graph: port/schema/format/clock/delivery mismatch, module-configuration schemas, cycles, delay, fan-in, capacities, activation failure, and last-good retention.
 - Real-time: counting allocator plus review/instrumentation for forbidden locks, logging, serialization, filesystem, blocking, and per-sample queues.
 - Protocol: JSON and `postcard` goldens, major-version rejection, malformed frames, idempotency, revision conflicts, and reconnect cursors.
 - Web: WASM compile, release Trunk build, focus, shortcut conflicts, pointer parity, layout, captions, reconnect, reload, and accessibility.
@@ -101,8 +103,9 @@ Exit gate: automated gates and applicable measured targets pass with evidence; d
 
 Phase 1 provides `scripts/check.sh` as its focused fast gate and
 `scripts/verify.sh` as its foundation handoff gate. Later phases must extend the
-same entry points with native/WASM/Trunk/browser and applicable hardware gates;
-the current scripts do not claim those later validations.
+same entry points with native runtime, studio WASM/Trunk/browser, and applicable
+hardware gates; the current scripts prove only the three portable crates compile
+for WASM and do not claim those later validations.
 
 ## Risks and required evidence
 

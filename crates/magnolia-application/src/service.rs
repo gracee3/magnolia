@@ -1,4 +1,5 @@
 use crate::{ActivationRequest, PersistenceError, PersistencePort, RuntimeEvent, RuntimePort};
+use event_listener::Event;
 use magnolia_domain::{
     ActiveGraphRevision, ClientId, ControlKind, DescriptorRegistry, EntityId, OperationId,
     ProjectionRevision, RequestId, RuntimeEpochId, TargetGraphRevision, WorkspaceDocument,
@@ -11,11 +12,10 @@ use magnolia_protocol::{
     ProtocolVersion, ReceiptOutcome, RequestSequence, RuntimeError, RuntimeProjection,
     SemanticCommand, TranscriptSummary,
 };
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::{Arc, Condvar, Mutex, MutexGuard},
-    time::{Duration, Instant},
+    sync::{Arc, Mutex, MutexGuard},
 };
 use thiserror::Error;
 
@@ -35,7 +35,7 @@ impl<P: PersistencePort, R: RuntimePort> Clone for ApplicationService<P, R> {
 
 struct Shared<P: PersistencePort, R: RuntimePort> {
     inner: Mutex<Inner<P, R>>,
-    projection_changed: Condvar,
+    projection_changed: Event,
 }
 
 struct Inner<P: PersistencePort, R: RuntimePort> {
@@ -86,8 +86,6 @@ pub enum ApplicationError {
     Persistence(#[from] PersistenceError),
     #[error("revision overflow: {0}")]
     RevisionOverflow(String),
-    #[error("projection wait timed out")]
-    Timeout,
 }
 
 impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
@@ -144,7 +142,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
                     clients: BTreeMap::new(),
                     projection: Arc::new(initial),
                 }),
-                projection_changed: Condvar::new(),
+                projection_changed: Event::new(),
             }),
         })
     }
@@ -175,31 +173,17 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
         Ok(Arc::clone(&self.lock()?.projection))
     }
 
-    pub fn wait_for_projection(
+    pub async fn wait_for_projection(
         &self,
         after: ProjectionRevision,
-        timeout: Duration,
     ) -> Result<Arc<RuntimeProjection>, ApplicationError> {
-        let started = Instant::now();
-        let mut inner = self.lock()?;
         loop {
-            if inner.projection.revision > after {
-                return Ok(Arc::clone(&inner.projection));
+            let listener = self.shared.projection_changed.listen();
+            let projection = self.snapshot_arc()?;
+            if projection.revision > after {
+                return Ok(projection);
             }
-            let elapsed = started.elapsed();
-            if elapsed >= timeout {
-                return Err(ApplicationError::Timeout);
-            }
-            let remaining = timeout.saturating_sub(elapsed);
-            let (next, timed_out) = self
-                .shared
-                .projection_changed
-                .wait_timeout(inner, remaining)
-                .map_err(|_| ApplicationError::Poisoned)?;
-            inner = next;
-            if timed_out.timed_out() && inner.projection.revision <= after {
-                return Err(ApplicationError::Timeout);
-            }
+            listener.await;
         }
     }
 
@@ -215,7 +199,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
         let receipt = process_new_command(&mut inner, &envelope)?;
         cache_receipt(&mut inner, envelope, receipt.clone());
         if receipt.accepted() {
-            self.shared.projection_changed.notify_all();
+            self.shared.projection_changed.notify(usize::MAX);
         }
         Ok(receipt)
     }
@@ -276,7 +260,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
             report.handled += 1;
         }
         if report.handled > 0 {
-            self.shared.projection_changed.notify_all();
+            self.shared.projection_changed.notify(usize::MAX);
         }
         Ok(report)
     }
@@ -366,14 +350,15 @@ fn process_new_command<P: PersistencePort, R: RuntimePort>(
         Ok(candidate) => candidate,
         Err((code, message)) => return Ok(rejected_receipt(inner, envelope, code, message)),
     };
+    let graph_changed = candidate.graph != inner.document.graph;
     let next_document = inner
         .document
         .revision
         .checked_next()
         .map_err(|error| ApplicationError::RevisionOverflow(error.to_string()))?;
-    let next_target = inner
-        .target_revision
-        .checked_next()
+    let next_target = graph_changed
+        .then(|| inner.target_revision.checked_next())
+        .transpose()
         .map_err(|error| ApplicationError::RevisionOverflow(error.to_string()))?;
     inner
         .projection_revision
@@ -403,28 +388,33 @@ fn process_new_command<P: PersistencePort, R: RuntimePort>(
             inner.undo.push(inner.document.clone());
         }
     }
-    for operation in inner.operations.values_mut() {
-        if operation.state == OperationState::Pending {
-            operation.state = OperationState::Superseded;
-        }
-    }
     inner.document = candidate;
-    inner.target_revision = next_target;
-    let operation_id = OperationId::new();
-    inner.operations.insert(
-        operation_id,
-        OperationStatus {
+    let operation_id = if let Some(next_target) = next_target {
+        for operation in inner.operations.values_mut() {
+            if operation.state == OperationState::Pending {
+                operation.state = OperationState::Superseded;
+            }
+        }
+        inner.target_revision = next_target;
+        let operation_id = OperationId::new();
+        inner.operations.insert(
+            operation_id,
+            OperationStatus {
+                operation_id,
+                target_graph_revision: next_target,
+                state: OperationState::Pending,
+                error: None,
+            },
+        );
+        inner.runtime.enqueue_activation(ActivationRequest {
             operation_id,
             target_graph_revision: next_target,
-            state: OperationState::Pending,
-            error: None,
-        },
-    );
-    inner.runtime.enqueue_activation(ActivationRequest {
-        operation_id,
-        target_graph_revision: next_target,
-        graph: inner.document.graph.clone(),
-    });
+            graph: inner.document.graph.clone(),
+        });
+        Some(operation_id)
+    } else {
+        None
+    };
     publish(inner)?;
 
     Ok(CommandReceipt {
@@ -432,8 +422,8 @@ fn process_new_command<P: PersistencePort, R: RuntimePort>(
         request_sequence: envelope.request_sequence,
         outcome: ReceiptOutcome::Accepted,
         document_revision: next_document,
-        target_graph_revision: next_target,
-        operation_id: Some(operation_id),
+        target_graph_revision: inner.target_revision,
+        operation_id,
     })
 }
 
@@ -486,11 +476,13 @@ fn prepare_candidate<P: PersistencePort, R: RuntimePort>(
                     format!("value is incompatible with control {control_id}"),
                 ));
             }
-            let mut configuration = instance
-                .configuration
-                .as_object()
-                .cloned()
-                .unwrap_or_else(Map::new);
+            let mut configuration =
+                instance.configuration.as_object().cloned().ok_or_else(|| {
+                    (
+                        CommandErrorCode::InvalidWorkspaceEdit,
+                        format!("module {module_id} configuration must be an object"),
+                    )
+                })?;
             configuration.insert(control.setting_key.clone(), value.clone());
             inner
                 .document
@@ -696,8 +688,10 @@ fn materialize_controls(
 mod tests {
     use super::*;
     use crate::InMemoryPersistence;
+    use futures::{executor::block_on, FutureExt};
     use magnolia_domain::{synthetic, DocumentRevision, ModuleInstance, ModuleTypeId};
     use magnolia_protocol::{ProtocolVersionRange, PROTOCOL_VERSION};
+    use serde_json::Map;
 
     #[derive(Default)]
     struct TestRuntime {
@@ -851,17 +845,13 @@ mod tests {
         let first_waiter = {
             let service = service.clone();
             std::thread::spawn(move || {
-                service
-                    .wait_for_projection(ProjectionRevision::ZERO, Duration::from_secs(1))
-                    .unwrap()
+                block_on(service.wait_for_projection(ProjectionRevision::ZERO)).unwrap()
             })
         };
         let second_waiter = {
             let service = service.clone();
             std::thread::spawn(move || {
-                service
-                    .wait_for_projection(ProjectionRevision::ZERO, Duration::from_secs(1))
-                    .unwrap()
+                block_on(service.wait_for_projection(ProjectionRevision::ZERO)).unwrap()
             })
         };
         assert!(service.dispatch(command(1, 0)).unwrap().accepted());
@@ -869,6 +859,17 @@ mod tests {
         let second = second_waiter.join().unwrap();
         assert_eq!(first.revision, second.revision);
         assert_eq!(first.document_revision, DocumentRevision::new(1));
+    }
+
+    #[test]
+    fn cancelled_projection_wait_unregisters_its_listener() {
+        let service = service();
+
+        assert!(service
+            .wait_for_projection(ProjectionRevision::ZERO)
+            .now_or_never()
+            .is_none());
+        assert_eq!(service.shared.projection_changed.total_listeners(), 0);
     }
 
     #[test]
@@ -911,6 +912,105 @@ mod tests {
             .graph
             .modules
             .is_empty());
+    }
+
+    #[test]
+    fn configuration_edits_cannot_bypass_the_descriptor_schema() {
+        let service = service();
+        assert!(service.dispatch(command(1, 0)).unwrap().accepted());
+        let before = service.snapshot().unwrap();
+        let module_id = EntityId::from_u128(101);
+        let invalid = CommandEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            client_id: ClientId::from_u128(1),
+            request_id: RequestId::from_u128(900),
+            request_sequence: RequestSequence::new(2),
+            expected_document_revision: DocumentRevision::new(1),
+            command: SemanticCommand::ApplyWorkspaceEdit {
+                batch: WorkspaceEditBatch::new(vec![WorkspaceEdit::SetModuleConfiguration {
+                    module_id,
+                    configuration: serde_json::json!({"enabled": "not-a-boolean"}),
+                }]),
+            },
+        };
+
+        assert!(matches!(
+            service.dispatch(invalid).unwrap().outcome,
+            ReceiptOutcome::Rejected {
+                error: CommandError {
+                    code: CommandErrorCode::InvalidWorkspaceEdit,
+                    ..
+                }
+            }
+        ));
+        let after = service.snapshot().unwrap();
+        assert_eq!(after.document_revision, before.document_revision);
+        assert_eq!(after.target_graph_revision, before.target_graph_revision);
+        assert_eq!(after.operations, before.operations);
+        assert_eq!(
+            after.workspace.graph.modules[&module_id].configuration,
+            Value::Object(Map::new())
+        );
+    }
+
+    #[test]
+    fn set_control_rejects_non_object_configuration_without_discarding_it() {
+        let module_id = EntityId::from_u128(77);
+        let module_type = ModuleTypeId::new(synthetic::SOURCE).unwrap();
+        let base = synthetic::registry();
+        let mut descriptor = base.get(&module_type).unwrap().clone();
+        descriptor.configuration_schema = Value::Bool(true);
+        let mut registry = DescriptorRegistry::new();
+        registry.register(descriptor).unwrap();
+        let mut document = WorkspaceDocument::default();
+        document.graph.modules.insert(
+            module_id,
+            ModuleInstance {
+                id: module_id,
+                module_type,
+                configuration: Value::String("preserve-me".to_owned()),
+            },
+        );
+        let persistence = InMemoryPersistence::with_document(document);
+        let service = ApplicationService::new(
+            persistence.clone(),
+            TestRuntime::default(),
+            registry,
+            RuntimeEpochId::from_u128(1),
+        )
+        .unwrap();
+        connect_client(&service);
+        let set_control = CommandEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            client_id: ClientId::from_u128(1),
+            request_id: RequestId::from_u128(901),
+            request_sequence: RequestSequence::new(1),
+            expected_document_revision: DocumentRevision::ZERO,
+            command: SemanticCommand::SetControl {
+                module_id,
+                control_id: magnolia_domain::ControlId::new("enabled").unwrap(),
+                value: Value::Bool(false),
+            },
+        };
+
+        assert!(matches!(
+            service.dispatch(set_control).unwrap().outcome,
+            ReceiptOutcome::Rejected {
+                error: CommandError {
+                    code: CommandErrorCode::InvalidWorkspaceEdit,
+                    ..
+                }
+            }
+        ));
+        let snapshot = service.snapshot().unwrap();
+        assert_eq!(
+            snapshot.workspace.graph.modules[&module_id].configuration,
+            Value::String("preserve-me".to_owned())
+        );
+        assert_eq!(snapshot.document_revision, DocumentRevision::ZERO);
+        assert_eq!(snapshot.target_graph_revision, TargetGraphRevision::ZERO);
+        assert!(snapshot.operations.is_empty());
+        assert_eq!(persistence.save_count().unwrap(), 0);
     }
 
     #[test]

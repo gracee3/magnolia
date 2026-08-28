@@ -8,3 +8,6 @@ license = "AGPL-3.0-or-later"
 magnolia-domain = { path = "../magnolia-domain" }
 magnolia-protocol = { path = "../magnolia-protocol" }
 thiserror.workspace = true
+
+[dev-dependencies]
+futures.workspace = true

@@ -1306,6 +1306,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "event-listener"
+version = "5.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
+dependencies = [
+ "parking",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "fax"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2335,6 +2345,8 @@ dependencies = [
 name = "magnolia-application"
 version = "0.1.0"
 dependencies = [
+ "event-listener",
+ "futures",
  "magnolia-client",
  "magnolia-domain",
  "magnolia-protocol",
@@ -2346,6 +2358,7 @@ dependencies = [
 name = "magnolia-client"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "magnolia-domain",
  "magnolia-protocol",
  "thiserror 2.0.17",
@@ -2389,6 +2402,7 @@ dependencies = [
 name = "magnolia-runtime"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "magnolia-application",
  "magnolia-client",
  "magnolia-domain",
@@ -3220,6 +3234,12 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
+
+[[package]]
+name = "parking"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
 
 [[package]]
 name = "parking_lot"
