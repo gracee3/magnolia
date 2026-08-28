@@ -1,42 +1,23 @@
 # Contributor and agent guidance
 
-Magnolia is experimental signal-processing research. The tree contains a Rust
-workspace with modular runtime, plugin, audio, text, caption, and visual-host
-components, but README and planning feature lists include intended behavior that
-is not uniformly hardened or independently validated. Treat implementation and
-tests—not aspirational prose—as the authority for current capability.
+Magnolia's accepted target architecture is documented under `docs/rearchitecture/` and `docs/adr/`; it is not the current implementation. Before editing, read the rearchitecture index, current-state disposition, the document for the phase in scope, and relevant source/tests. Never describe a target contract or threshold as implemented or certified.
 
-Before changing implementation, read `README.md`,
-`docs/MAGNOLIA_REFOUNDATION_PLAN.md`, `docs/PHASE_0_INVENTORY.md`, and the
-relevant crate manifests and tests. Read `docs/STT_BACKEND_PLAN.md` before
-caption or speech-backend work.
+## Current and target boundaries
 
-## Validation boundary
+- The current tree remains a legacy experimental Rust/Nannou prototype until the migration gates say otherwise.
+- Native Rust will own devices, graph/runtime state, scheduling, ASR, persistence, telemetry production, and authoritative GPU computation/resources. Leptos owns presentation/session state; browser GPU APIs may accelerate presentation only.
+- Modules and tiles are independent many-to-many concepts.
+- Magnolia remains domain-neutral and does not share a framework with Mirabile, Digital Liquid Light Lab, astrology, tarot, people, journal, or vault domains.
+- No legacy layout/plugin compatibility importer is planned.
 
-No sufficiently narrow ordinary check has yet been reviewed for this workspace.
-For instruction-only changes, run:
+## Validation and provenance
 
-```bash
-git diff --check
-```
+For documentation-only changes run `git diff --check` and validate links/path references with focused searches. Future implementation must add and use `scripts/check.sh` and `scripts/verify.sh` at the gates prescribed by `docs/rearchitecture/migration-and-verification.md`.
 
-Before changing code, identify a bounded crate or package check and record what
-it excludes. Do not download models or corpora, access audio devices, run live
-capture, execute benchmarks, build plugins, start the visual host, or use a GPU
-without separate explicit authorization.
+Do not download models or corpora, access devices, run capture/benchmarks, launch the GUI, build plugins, or use a GPU without explicit authorization. Never commit recordings, transcripts, model/corpus payloads, `.env`, secrets, local paths, raw host captures, unjustified binaries, or unlicensed assets. Record provenance and actual execution providers. Do not claim ABI stability, sandbox/signing/hot-reload enforcement, real-time performance, ASR accuracy, browser continuity, or GPU support without evidence for the exact path and host.
 
-## Scope, provenance, and delivery
+## Migration discipline
 
-- Magnolia remains domain-neutral and independent of astrology, tarot, people,
-  client, journal, and encrypted-vault types.
-- Do not claim plugin ABI stability, sandboxing, signing, hot reload, real-time
-  performance, recognition accuracy, or GPU acceleration without tests and
-  evidence for the exact path.
-- Never commit recordings, transcripts, model/corpus payloads, `.env` files,
-  secrets, local paths, raw host captures, or unjustified generated binaries.
-  Record copied/adapted code, assets, model/corpus terms, and AI assistance.
-- Use a focused feature branch. Commit and push the validated change and open a
-  pull request; incomplete or higher-risk work stays draft.
-- After publication, send the exact commit, PR, validation, outcome, risks, and
-  next action to the repository's external coordination record. Do not claim
-  completion until that remote handoff is verified.
+Keep implementation phases commit-sized. Do not create a Nannou/Leptos bridge, park deleted compatibility code, or perform the hard cutover before its synthetic shell gates pass. The legacy shell and plugin deletions occur at the exact two breaking commits in the migration plan. Preserve active worktrees and user-owned changes; inspect status and topology before modifying or integrating branches.
+
+Use a focused branch. Delivery expectations (commit, push, PR, or local-only) are set by the current task; do not infer remote publication authorization.
