@@ -62,6 +62,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if allocation_counts != (0, 0) {
         return Err("capture or output callback allocated or deallocated".into());
     }
+    if capture_snapshot.faults != 0
+        || capture_snapshot.dropped_frames != 0
+        || output_snapshot.underruns != 0
+    {
+        return Err("muted monitoring reported a callback fault, drop, or underrun".into());
+    }
+    let output_quantum_ns = 256_u64.saturating_mul(1_000_000_000) / 48_000;
+    if output_snapshot.callback_p99_ns.saturating_mul(4) >= output_quantum_ns
+        || output_snapshot.callback_p999_ns.saturating_mul(2) >= output_quantum_ns
+    {
+        return Err("output callback percentile exceeded the Phase 4 quantum budget".into());
+    }
     Ok(())
 }
 

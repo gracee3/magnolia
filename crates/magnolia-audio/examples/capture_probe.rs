@@ -37,6 +37,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if allocation_counts != (0, 0) {
         return Err("capture callback allocated or deallocated".into());
     }
+    let quantum_ns = u64::from(snapshot.quantum_frames).saturating_mul(1_000_000_000)
+        / u64::from(snapshot.sample_rate);
+    if snapshot.callback_p99_ns.saturating_mul(4) >= quantum_ns
+        || snapshot.callback_p999_ns.saturating_mul(2) >= quantum_ns
+    {
+        return Err("capture callback percentile exceeded the Phase 4 quantum budget".into());
+    }
     Ok(())
 }
 

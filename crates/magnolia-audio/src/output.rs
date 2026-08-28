@@ -153,13 +153,17 @@ fn run_output_loop(
         .add_local_listener_with_user_data(data)
         .state_changed({
             let controls = Arc::clone(controls);
-            move |_stream, _data, _old, state| {
+            move |_stream, data, _old, state| {
                 let value = match state {
                     pw::stream::StreamState::Streaming => 1,
                     pw::stream::StreamState::Paused => 2,
                     pw::stream::StreamState::Error(_) => 3,
                     _ => 0,
                 };
+                data.edge.enabled.store(value == 1, Ordering::Release);
+                if value != 1 {
+                    data.edge.primed.store(false, Ordering::Release);
+                }
                 controls.state.store(value, Ordering::Release);
             }
         })
@@ -219,7 +223,9 @@ fn process_output(stream: &pw::stream::Stream, data: &mut OutputData) {
                     data.held_samples = samples;
                 }
                 ConsumeOutcome::Empty | ConsumeOutcome::RingFault => {
-                    data.controls.underruns.fetch_add(1, Ordering::Relaxed);
+                    if data.edge.primed.load(Ordering::Acquire) {
+                        data.controls.underruns.fetch_add(1, Ordering::Relaxed);
+                    }
                     break;
                 }
             }

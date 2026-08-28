@@ -934,6 +934,7 @@ struct TestStatus {
     projection: magnolia_protocol::RuntimeProjection,
     pending_activations: usize,
     observed_activations: usize,
+    observed_controls: usize,
     telemetry: TelemetryStatus,
 }
 
@@ -952,6 +953,10 @@ async fn test_status(State(state): State<HostState>, headers: HeaderMap) -> Resp
                 .runtime
                 .as_ref()
                 .map_or(0, |runtime| runtime.observed_requests().len()),
+            observed_controls: state
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.observed_controls().len()),
             telemetry,
         })
         .into_response(),

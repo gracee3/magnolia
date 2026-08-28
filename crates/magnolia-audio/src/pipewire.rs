@@ -208,22 +208,22 @@ fn run_registry_loop(
                 let Some(node_name) = properties.get(*pw::keys::NODE_NAME) else {
                     return;
                 };
-                let Some(device_id) = properties
+                let device_id = properties
                     .get(*pw::keys::DEVICE_ID)
-                    .and_then(|value| value.parse::<u32>().ok())
-                else {
-                    return;
-                };
-                let Some(device_api) = apis_for_global.borrow().get(&device_id).cloned() else {
-                    return;
-                };
-                let Some(object_path) = properties.get(*pw::keys::OBJECT_PATH) else {
-                    return;
-                };
+                    .and_then(|value| value.parse::<u32>().ok());
+                let device_api = properties
+                    .get(*pw::keys::DEVICE_API)
+                    .map(str::to_owned)
+                    .or_else(|| device_id.and_then(|id| apis_for_global.borrow().get(&id).cloned()))
+                    .unwrap_or_else(|| "pipewire".to_owned());
+                let object_path = properties
+                    .get(*pw::keys::OBJECT_PATH)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("node:{node_name}"));
                 let fingerprint = DeviceFingerprint {
                     node_name: node_name.to_owned(),
                     device_api,
-                    object_path: object_path.to_owned(),
+                    object_path,
                 };
                 let label = properties
                     .get(*pw::keys::NODE_DESCRIPTION)

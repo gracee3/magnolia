@@ -1,6 +1,6 @@
 # Magnolia
 
-**Current status:** Phase 3 hard cutover implemented; Phase 4 native audio has begun. The Leptos desktop is the default native application. The new audio crate currently provides fixed preallocated blocks, bounded `rtrb` edges with visible overflow, explicit conversion/downmix/resampling primitives, block-boundary activation support, and Linux PipeWire input discovery. Live stream capture and hardware certification are not yet implemented. Implementation and tests—not old feature claims—are authoritative.
+**Current status:** Phase 3 hard cutover is implemented and the Phase 4 native-audio candidate is undergoing its final exact-head gate. The Leptos desktop composes the native runtime in production and retains an injected deterministic mock only for tests. The audio path provides persistent PipeWire registry/default metadata, durable exact/default selectors, negotiated capture, preallocated format/channel/rate adaptation, safe muted monitoring, bounded callback edges, hotplug recovery, and runtime diagnostics. The 30-minute promotion soak remains the boundary between implemented and Phase 4 accepted. Implementation and tests—not old feature claims—are authoritative.
 
 **Accepted target:** a native authoritative, typed, fixed-block runtime with a Leptos 0.8 CSR/Trunk studio served over authenticated loopback and opened in a dedicated Chromium app window. Phases 1 through 3 are implemented and Phase 4 is in progress. ASR reconstruction, filesystem persistence, and hardware certification are not implemented.
 
@@ -28,8 +28,10 @@ dedicated Chromium app window with:
 ```
 
 The desktop cockpit is the default native application after the Phase 3
-cutover. It uses only synthetic source/processor/sink descriptors and the native
-`MockRuntime`; it does not access audio or other devices.
+cutover. Normal composition uses `NativeRuntime`; `--test-mode` injects
+`MockRuntime`. The Diagnostics tile exposes native input selection, capture and
+monitor controls, negotiated values, callback percentiles, loss counters, and
+the last runtime error. Monitoring starts disabled, muted, and at zero gain.
 
 ## Current boundary
 
@@ -40,6 +42,7 @@ passed the owner-authorized local gate; Actions run `33206890066` was canceled,
 not passed. Phase 3 completed the hard cutover under the same exact-SHA local
 verification policy. It does not add PipeWire, real-time audio, device access,
 model downloads, ASR, benchmarks, filesystem persistence, or hardware
-certification. T14 and RTX 3090 figures remain acceptance
-targets until evidence from the exact build, model, corpus, and provider is
-recorded.
+certification. Phase 4 host evidence is recorded in the
+[Phase 4 record](docs/rearchitecture/phase-4-native-audio.md). ASR model and GPU
+figures remain later-phase acceptance targets until evidence from the exact
+build, model, corpus, and provider is recorded.

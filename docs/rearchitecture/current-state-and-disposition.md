@@ -1,6 +1,6 @@
 # Current state and disposition
 
-Status: Phase 3 hard cutover implemented on 2026-08-28.
+Status: Phase 4 native-audio promotion candidate on 2026-08-28.
 
 ## Active workspace
 
@@ -11,9 +11,11 @@ The root workspace contains the seven Phase 3 members plus the Phase 4
 - `magnolia-protocol`: versioned control and telemetry wire contracts;
 - `magnolia-client`: the browser-compatible client boundary;
 - `magnolia-application`: authoritative command and projection service;
-- `magnolia-runtime`: deterministic runtime port and current mock runtime;
+- `magnolia-runtime`: native audio composition plus an injected deterministic
+  runtime used only by tests;
 - `magnolia-audio`: preallocated audio blocks, bounded block edges, explicit
-  transforms, and Linux PipeWire discovery;
+  transforms, persistent Linux PipeWire registry/default tracking, negotiated
+  capture, muted monitoring, callback instrumentation, and hotplug recovery;
 - `magnolia-desktop`: loopback host, authentication, telemetry, and Chromium
   lifecycle; and
 - `magnolia-studio-web`: Leptos CSR presentation and disposable session state.
@@ -22,10 +24,13 @@ The root workspace contains the seven Phase 3 members plus the Phase 4
 authoritative. `./scripts/run.sh` builds the studio and launches the loopback
 desktop with a dedicated temporary Chromium profile.
 
-The implemented shell still uses synthetic descriptors and `MockRuntime`.
-PipeWire discovery is not live capture: the tree does not yet provide a stream
-callback, device-loss recovery, ASR, filesystem persistence, GPU computation,
-or production/hardware certification.
+The descriptor registry retains the synthetic chain for deterministic shell
+tests and adds a strict native path: PipeWire input, sample conversion, channel
+mapping, resampling, capture mute, and optional monitor output. Normal desktop
+composition uses `NativeRuntime`; `MockRuntime` is selected only by test mode.
+PipeWire device selection and live controls appear in the cockpit without
+mixing runtime-only state into workspace history. ASR, observation,
+recording/replay, filesystem persistence, and GPU computation remain deferred.
 
 ## Completed deletion
 
@@ -44,7 +49,8 @@ not describe active code.
 
 ## Deferred reconstruction
 
-Phase 4 begins native audio under the accepted typed fixed-block contracts.
-Observation, recording/replay, and ASR follow only in their documented later
-phases. Plugin/marketplace work, Tauri, SSR, legacy import, model downloads,
-device access, GPU work, and hardware certification remain explicitly deferred.
+Phase 4 is implemented but is not promoted until the clean exact head passes
+the 30-minute live gate and complete repository gate. Observation and
+recording/replay begin in Phase 5; ASR begins in Phase 6; persistence begins in
+Phase 7. Plugin/marketplace work, Tauri, SSR, legacy import, model downloads,
+and GPU work remain explicitly deferred.

@@ -112,6 +112,38 @@ test("keeps layout drafts local, commits document-only edits, and supports point
   expect(consoleErrors).toEqual([]);
 });
 
+test("keeps live audio controls ephemeral and activates durable device intent", async ({ host, app }) => {
+  const { page, consoleErrors } = app;
+  await loadDemo(page);
+  await activateInitialGraph(host, page);
+  await page.getByTestId("workspace-diagnose").click();
+  await expect(page.getByTestId("audio-controls")).toBeVisible();
+  const before = await status(host);
+
+  await page.getByRole("button", { name: "Start capture" }).click();
+  await page.getByRole("button", { name: "Capture mute" }).click();
+  await page.getByRole("button", { name: "Monitor enable" }).click();
+  await page.getByRole("button", { name: "Gain 3%" }).click();
+  await page.getByRole("button", { name: "Monitor mute" }).click();
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect.poll(async () => (await status(host)).observed_controls).toBe(6);
+
+  let native = await status(host);
+  expect(native.projection.document_revision).toBe(before.projection.document_revision);
+  expect(native.projection.target_graph_revision).toBe(before.projection.target_graph_revision);
+  expect(native.observed_activations).toBe(before.observed_activations);
+
+  await page.getByRole("button", { name: "Follow default input" }).click();
+  await expect(page.getByTestId("document-revision")).toHaveText("2");
+  await expect(page.getByTestId("target-revision")).toHaveText("2");
+  native = await status(host);
+  expect(native.observed_activations).toBe(before.observed_activations + 1);
+  expect(native.projection.workspace.device_selectors["audio.input"]).toEqual({
+    kind: "follow_default_input",
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
 test("bounds binary telemetry, isolates control receipts, and releases hidden leases", async ({ host, app }) => {
   const { page, consoleErrors } = app;
   await loadDemo(page);

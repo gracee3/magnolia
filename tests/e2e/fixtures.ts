@@ -29,6 +29,7 @@ export interface HostStatus {
         modules: Record<string, unknown>;
         edges: Record<string, unknown>;
       };
+      device_selectors: Record<string, unknown>;
     };
     operations: Array<{
       target_graph_revision: number;
@@ -41,6 +42,7 @@ export interface HostStatus {
   };
   pending_activations: number;
   observed_activations: number;
+  observed_controls: number;
   telemetry: {
     active_connections: number;
     total_connections: number;
@@ -89,7 +91,7 @@ export const test = base.extend<Fixtures>({
     await page.goto(host.launchUrl, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("studio-shell")).toBeVisible();
     await expect(page.getByTestId("connection-state")).toHaveAttribute("data-phase", "connected");
-    await expect(page.getByTestId("connection-state")).toContainText("protocol 1.0");
+    await expect(page.getByTestId("connection-state")).toContainText("protocol 1.1");
     expect(page.url()).not.toContain("token=");
     await use({ page, consoleErrors });
     if (testInfo.status !== testInfo.expectedStatus) {

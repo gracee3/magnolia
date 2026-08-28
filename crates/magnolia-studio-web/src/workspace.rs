@@ -60,6 +60,7 @@ pub fn WorkspaceArea(state: StudioState) -> impl IntoView {
                                 move |_| state.load_demo()
                             }
                         >"Load synthetic cockpit"</button>
+                        <AudioControls state=state.clone() />
                     </section>
                 }.into_any(),
                 |node| view! {

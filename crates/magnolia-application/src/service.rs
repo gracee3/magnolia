@@ -865,7 +865,9 @@ mod tests {
     use super::*;
     use crate::InMemoryPersistence;
     use futures::{executor::block_on, FutureExt};
-    use magnolia_domain::{synthetic, DocumentRevision, ModuleInstance, ModuleTypeId};
+    use magnolia_domain::{
+        synthetic, DeviceSelector, DocumentRevision, ModuleInstance, ModuleTypeId,
+    };
     use magnolia_protocol::{ProtocolVersionRange, PROTOCOL_VERSION};
     use serde_json::Map;
 
@@ -991,6 +993,43 @@ mod tests {
                 }
             }
         ));
+    }
+
+    #[test]
+    fn durable_device_selector_edits_persist_and_request_activation() {
+        let service = service();
+        let receipt = service
+            .dispatch(CommandEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                client_id: ClientId::from_u128(1),
+                request_id: RequestId::from_u128(92),
+                request_sequence: RequestSequence::new(1),
+                expected_document_revision: DocumentRevision::ZERO,
+                command: SemanticCommand::ApplyWorkspaceEdit {
+                    batch: WorkspaceEditBatch::new(vec![WorkspaceEdit::SetDeviceSelector {
+                        key: "audio.input".to_owned(),
+                        selector: DeviceSelector::FollowDefaultInput,
+                    }]),
+                },
+            })
+            .unwrap();
+        assert!(receipt.accepted());
+        assert_eq!(receipt.document_revision, DocumentRevision::new(1));
+        assert_eq!(receipt.target_graph_revision, TargetGraphRevision::new(1));
+        assert!(receipt.operation_id.is_some());
+
+        let inner = service.shared.inner.lock().unwrap();
+        assert_eq!(inner.runtime.requests.len(), 1);
+        assert_eq!(
+            inner.runtime.requests[0]
+                .device_selectors
+                .get("audio.input"),
+            Some(&DeviceSelector::FollowDefaultInput)
+        );
+        assert_eq!(
+            inner.document.device_selectors.get("audio.input"),
+            Some(&DeviceSelector::FollowDefaultInput)
+        );
     }
 
     #[test]
