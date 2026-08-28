@@ -1,6 +1,6 @@
 # Migration and verification
 
-Status: Phases 1 and 2 implemented; phases 3 through 7 are prescribed future work.
+Status: Phases 1 through 3 implemented; phases 4 through 7 are prescribed future work.
 
 ## Commit-sized migration
 
@@ -43,6 +43,8 @@ Add `magnolia-desktop` and `magnolia-studio-web` with synthetic modules. Prove a
 Exit gate: `wasm32-unknown-unknown` compiles, `trunk build --release` succeeds, Chromium E2E tests pass, twenty active-stream reloads retain the runtime/graph, and telemetry overload cannot delay control receipts. No Nannou/Leptos bridge is created.
 
 ### 3. Hard cutover and exact deletion point
+
+Status: implemented. See [Phase 3 hard cutover](phase-3-hard-cutover.md).
 
 Make the new desktop binary the default only after phase 2 gates pass. Then make two explicit breaking commits:
 
@@ -104,11 +106,12 @@ Exit gate: automated gates and applicable measured targets pass with evidence; d
 - Persistence: atomic save/restore, interrupted recording recovery, transcript paging, unsupported schemas, and replay comparisons.
 - Hardware: 30-minute T14 continuity/latency and corpus ASR runs; separate actual-provider RTX 3090 run.
 
-Phase 1 provides `scripts/check.sh` as its focused fast gate. Phase 2 extends
-`scripts/verify.sh` with the native desktop tests, studio WASM/Trunk build,
-Chromium E2E, documentation, changed-path, and whitespace gates through
-`scripts/check-phase-2.sh`. Later audio/ASR phases must extend these same entry
-points only when their prerequisites become applicable.
+`scripts/verify.sh` is the authoritative, non-skippable local gate for an exact
+candidate SHA. It includes the focused Rust checks, native desktop tests, studio
+WASM/Trunk build, Chromium E2E, documentation, repository-policy, and whitespace
+audits. Magnolia has no repository Actions workflow or required remote status;
+the PR must record the exact locally verified SHA and results. Later audio/ASR
+phases must extend this entry point only when their prerequisites apply.
 
 ## Risks and required evidence
 

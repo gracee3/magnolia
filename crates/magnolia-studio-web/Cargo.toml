@@ -3,7 +3,6 @@ name = "magnolia-studio-web"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-workspace = "../../apps/magnolia-desktop"
 
 [dependencies]
 futures.workspace = true

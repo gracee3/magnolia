@@ -1,6 +1,6 @@
 # ADR 0008: Delete legacy shell, signals, and plugin system
 
-Status: Accepted, 2026-08-27
+Status: Implemented, 2026-08-28
 
 ## Decision
 
@@ -8,4 +8,7 @@ After the synthetic new-shell proof becomes default, delete the Nannou shell, ti
 
 ## Consequences
 
-There is no legacy importer or parking crate. Static first-party factories are the initial extension path. Git history retains old work. The migration plan fixes the two deletion commits and gates.
+There is no legacy importer or parking crate. Static first-party factories are
+the initial extension path. Git history retains old work. Phase 3 implemented
+the two deletion commits and gates without rewriting this decision's accepted
+history.

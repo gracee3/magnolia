@@ -107,10 +107,10 @@ async function startHost(): Promise<HostInfo> {
   const binary = process.env.MAGNOLIA_DESKTOP_BIN ?? resolve(repositoryRoot, "target/phase2/debug/magnolia-desktop");
   const assets = process.env.MAGNOLIA_WEB_ASSETS ?? resolve(repositoryRoot, "target/magnolia-studio-web-dist");
   await access(binary).catch(() => {
-    throw new Error(`missing native test host: ${binary}; run the Phase 2 build gate first`);
+    throw new Error(`missing native test host: ${binary}; run the browser build gate first`);
   });
   await access(resolve(assets, "index.html")).catch(() => {
-    throw new Error(`missing Trunk assets: ${assets}; run the Phase 2 build gate first`);
+    throw new Error(`missing Trunk assets: ${assets}; run the browser build gate first`);
   });
 
   const child = spawn(binary, ["--assets", assets, "--no-browser", "--test-mode"], {

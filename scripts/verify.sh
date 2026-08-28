@@ -1,55 +1,65 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v rg >/dev/null 2>&1; then
-  echo "required verification dependency is missing: rg" >&2
-  exit 1
-fi
+for tool in cargo git jq rg rustup trunk; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "required verification dependency is missing: $tool" >&2
+    exit 1
+  fi
+done
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
 ./scripts/check.sh
+./scripts/check-browser.sh
 
-cargo test --locked --package magnolia-runtime \
-  --test foundation_round_trip \
-  portable_foundation_round_trip_preserves_last_good_and_ignores_stale_results \
-  -- --exact
-
-verification_suite=${MAGNOLIA_VERIFY_SUITE:-all}
-case "$verification_suite" in
-  all) ./scripts/check-phase-2.sh ;;
-  foundation) ;;
-  *)
-    echo "unknown Magnolia verification suite: $verification_suite" >&2
-    exit 1
-    ;;
-esac
-
-verification_base=${MAGNOLIA_VERIFY_BASE:-origin/main}
-if git rev-parse --verify "$verification_base^{commit}" >/dev/null 2>&1; then
-  git diff --check "$verification_base"...HEAD
-  changed_paths=$(
-    {
-      git diff --name-only "$verification_base"...HEAD
-      git diff --name-only
-      git diff --cached --name-only
-      git ls-files --others --exclude-standard
-    } | sort -u
-  )
-  while IFS= read -r changed_path; do
-    [[ -z "$changed_path" ]] && continue
-    case "$changed_path" in
-      .github/workflows/*|.gitignore|AGENTS.md|Cargo.toml|README.md|docs/*|scripts/*|tests/*|apps/magnolia-desktop/*|crates/magnolia-application/*|crates/magnolia-client/*|crates/magnolia-domain/*|crates/magnolia-protocol/*|crates/magnolia-studio-web/*) ;;
-      *)
-        echo "Phase 2 changed-path audit rejected: $changed_path" >&2
-        exit 1
-        ;;
-    esac
-  done <<< "$changed_paths"
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "verification requires a clean exact-SHA worktree" >&2
+  exit 1
 fi
+
+verification_base=807b032a12e737cdeca5137004697ea0a2a97537
+git merge-base --is-ancestor "$verification_base" HEAD
+git diff --check "$verification_base"...HEAD
 git diff --check
 git diff --cached --check
+
+expected_members=$'magnolia-application\nmagnolia-client\nmagnolia-desktop\nmagnolia-domain\nmagnolia-protocol\nmagnolia-runtime\nmagnolia-studio-web'
+actual_members=$(cargo metadata --locked --no-deps --format-version 1 | jq -r \
+  '.workspace_members as $members | [.packages[] | select(.id as $id | $members | index($id)) | .name] | sort | .[]')
+if [[ "$actual_members" != "$expected_members" ]]; then
+  echo "workspace member audit failed" >&2
+  diff -u <(printf '%s\n' "$expected_members") <(printf '%s\n' "$actual_members") || true
+  exit 1
+fi
+
+if find .github/workflows -type f -print -quit 2>/dev/null | rg --quiet .; then
+  echo "repository workflow audit failed" >&2
+  exit 1
+fi
+
+if git ls-files | rg --quiet '\.(so|dylib|dll|exe)$'; then
+  echo "tracked binary audit failed" >&2
+  exit 1
+fi
+
+active_paths=(Cargo.toml Cargo.lock .cargo apps crates tests)
+legacy_pattern='nannou|magnolia[_-](core|signals|module-api|plugin-abi|plugin-helper|ui)|libloading|ed25519-dalek|seccompiler|layout\.toml|run-phase-2|check-phase-2|libhello_plugin'
+if rg -n -i "$legacy_pattern" "${active_paths[@]}"; then
+  echo "legacy source or dependency residue audit failed" >&2
+  exit 1
+fi
+if rg -n -i 'run-phase-2|check-phase-2|libhello_plugin' scripts --glob '!verify.sh'; then
+  echo "legacy script residue audit failed" >&2
+  exit 1
+fi
+
+cargo tree --locked --workspace --prefix none | \
+  rg -i '^(nannou|wgpu|libloading|ed25519-dalek|seccompiler|notify) ' && {
+    echo "legacy dependency audit failed" >&2
+    exit 1
+  }
 
 for file in README.md AGENTS.md $(find docs -type f -name '*.md' -print); do
   link_matches=$(rg -o '\[[^]]*\]\([^)]+\)' "$file") || {

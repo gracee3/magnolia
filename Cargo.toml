@@ -1,68 +1,34 @@
 [workspace]
 resolver = "2"
 members = [
-    "core",
     "crates/magnolia-domain",
     "crates/magnolia-protocol",
     "crates/magnolia-client",
     "crates/magnolia-application",
     "crates/magnolia-runtime",
-    "crates/aphrodite",
-    "crates/audio_dsp",
-    "crates/audio_input",
-    "crates/audio_output",
-    "crates/audio_replay",
-    "crates/caption_state",
-    "crates/kamea",
-    "crates/logos",
-    "crates/magnolia-config",
-    "crates/magnolia-module-api",
-    "crates/magnolia-plugin-abi",
-    "crates/magnolia-plugin-helper",
-    "crates/magnolia-signals",
-    "crates/speech_to_text",
-    "crates/magnolia-ui",
-    "crates/text_tools",
-    "apps/daemon",
-    "apps/caption_demo",
-    "apps/stt_bench",
-    "examples/hello_plugin",
-]
-
-exclude = [
     "apps/magnolia-desktop",
     "crates/magnolia-studio-web",
 ]
 
 default-members = [
-    "core",
-    "crates/magnolia-domain",
-    "crates/magnolia-protocol",
-    "crates/magnolia-client",
-    "crates/magnolia-application",
-    "crates/magnolia-runtime",
-    "crates/audio_dsp",
-    "crates/audio_replay",
-    "crates/caption_state",
-    "crates/logos",
-    "crates/magnolia-config",
-    "crates/magnolia-module-api",
-    "crates/magnolia-plugin-abi",
-    "crates/magnolia-plugin-helper",
-    "crates/magnolia-signals",
-    "crates/speech_to_text",
-    "crates/text_tools",
-    "apps/caption_demo",
-    "apps/stt_bench",
-    "examples/hello_plugin",
+    "apps/magnolia-desktop",
 ]
 
 [workspace.dependencies]
+base64 = "0.22"
 event-listener = "5.4"
 futures = "0.3"
+getrandom = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
 hex = "0.4"
+js-sys = "0.3"
+leptos = { version = "0.8.20", features = ["csr"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
+send_wrapper = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = "0.3"
