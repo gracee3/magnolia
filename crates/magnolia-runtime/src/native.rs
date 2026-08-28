@@ -4,7 +4,7 @@ use magnolia_audio::{
     pipewire::PipeWireRegistryManager, CaptureConfiguration, CaptureState, DeviceDirection,
     NativeSampleFormat, OutputConfiguration, PipeWireCapture, PipeWireOutput,
 };
-use magnolia_domain::DeviceSelector;
+use magnolia_domain::{native_audio, DeviceSelector, EntityId, WorkspaceGraph};
 use magnolia_protocol::{
     AudioDeviceDirection, AudioDeviceProjection, AudioRuntimeProjection, AudioRuntimeState,
 };
@@ -150,19 +150,15 @@ fn run_worker(
                     .or_else(|| request.device_selectors.values().next().cloned());
                 audio.input_selector_key =
                     input_selector.as_ref().map(|_| "audio.input".to_owned());
-                // Graph compilation remains control-thread work. The initial
-                // native slice accepts the empty graph and rejects every
-                // module until its concrete audio compiler is registered.
-                let unsupported = request.graph.modules.values().next();
-                let event = if let Some(module) = unsupported {
+                // Compilation and validation stay on this control worker. A
+                // failed candidate never changes the application last-good
+                // revision.
+                let event = if let Err(error) = compile_audio_graph(&request.graph) {
                     RuntimeEvent::ActivationFailed {
                         operation_id: request.operation_id,
                         target_graph_revision: request.target_graph_revision,
-                        code: "audio.graph.unsupported_module".to_owned(),
-                        message: format!(
-                            "module {} is not supported by the initial native audio compiler",
-                            module.module_type
-                        ),
+                        code: error.code.to_owned(),
+                        message: error.message,
                     }
                 } else {
                     RuntimeEvent::ActivationSucceeded {
@@ -263,6 +259,99 @@ fn run_worker(
             WorkerMessage::Shutdown => break,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GraphCompileError {
+    code: &'static str,
+    message: String,
+}
+
+fn compile_audio_graph(graph: &WorkspaceGraph) -> Result<(), GraphCompileError> {
+    if graph.modules.is_empty() {
+        return graph
+            .edges
+            .is_empty()
+            .then_some(())
+            .ok_or(GraphCompileError {
+                code: "audio.graph.invalid_topology",
+                message: "an empty audio graph cannot contain edges".to_owned(),
+            });
+    }
+
+    let ordered_types = [
+        native_audio::PIPEWIRE_INPUT,
+        native_audio::FORMAT_CONVERT,
+        native_audio::CHANNEL_MAP,
+        native_audio::RESAMPLE,
+        native_audio::CAPTURE_MUTE,
+        native_audio::MONITOR,
+    ];
+    let mut ordered_ids: [Option<EntityId>; 6] = [None; 6];
+    for module in graph.modules.values() {
+        let Some(index) = ordered_types
+            .iter()
+            .position(|known| module.module_type.as_str() == *known)
+        else {
+            return Err(GraphCompileError {
+                code: "audio.graph.unsupported_module",
+                message: format!(
+                    "module {} is not supported by the native audio compiler",
+                    module.module_type
+                ),
+            });
+        };
+        if ordered_ids[index].replace(module.id).is_some() {
+            return Err(GraphCompileError {
+                code: "audio.graph.invalid_topology",
+                message: format!(
+                    "native audio path contains duplicate {} modules",
+                    ordered_types[index]
+                ),
+            });
+        }
+    }
+
+    for (index, module_type) in ordered_types[..5].iter().enumerate() {
+        if ordered_ids[index].is_none() {
+            return Err(GraphCompileError {
+                code: "audio.graph.incomplete_path",
+                message: format!("native audio path is missing required module {module_type}"),
+            });
+        }
+    }
+    let path_length = if ordered_ids[5].is_some() { 6 } else { 5 };
+    if graph.modules.len() != path_length || graph.edges.len() != path_length - 1 {
+        return Err(GraphCompileError {
+            code: "audio.graph.invalid_topology",
+            message: "native audio modules must form one bounded linear path".to_owned(),
+        });
+    }
+    for index in 0..path_length - 1 {
+        let (Some(from), Some(to)) = (ordered_ids[index], ordered_ids[index + 1]) else {
+            return Err(GraphCompileError {
+                code: "audio.graph.incomplete_path",
+                message: "native audio path contains an unresolved slot".to_owned(),
+            });
+        };
+        let connected = graph.edges.values().any(|edge| {
+            edge.from.module_id == from
+                && edge.from.port_id.as_str() == "out"
+                && edge.to.module_id == to
+                && edge.to.port_id.as_str() == "in"
+        });
+        if !connected {
+            return Err(GraphCompileError {
+                code: "audio.graph.invalid_topology",
+                message: format!(
+                    "native audio path must connect {} directly to {}",
+                    ordered_types[index],
+                    ordered_types[index + 1],
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -414,7 +503,10 @@ fn push_event(events: &Arc<Mutex<VecDeque<RuntimeEvent>>>, event: RuntimeEvent) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use magnolia_domain::{OperationId, TargetGraphRevision, WorkspaceGraph};
+    use magnolia_domain::{
+        Edge, ModuleInstance, ModuleTypeId, OperationId, PortId, PortRef, TargetGraphRevision,
+        WorkspaceGraph,
+    };
     use std::time::{Duration, Instant};
 
     fn next_event(runtime: &mut NativeRuntime) -> RuntimeEvent {
@@ -460,5 +552,64 @@ mod tests {
             next_event(&mut runtime),
             RuntimeEvent::ActivationSucceeded { .. }
         ));
+    }
+
+    fn native_audio_graph(include_monitor: bool) -> WorkspaceGraph {
+        let mut types = vec![
+            native_audio::PIPEWIRE_INPUT,
+            native_audio::FORMAT_CONVERT,
+            native_audio::CHANNEL_MAP,
+            native_audio::RESAMPLE,
+            native_audio::CAPTURE_MUTE,
+        ];
+        if include_monitor {
+            types.push(native_audio::MONITOR);
+        }
+        let mut graph = WorkspaceGraph::default();
+        for (index, module_type) in types.iter().enumerate() {
+            let id = EntityId::from_u128(index as u128 + 1);
+            graph.modules.insert(
+                id,
+                ModuleInstance {
+                    id,
+                    module_type: ModuleTypeId::new(*module_type).unwrap(),
+                    configuration: serde_json::json!({}),
+                },
+            );
+        }
+        for index in 0..types.len() - 1 {
+            let id = EntityId::from_u128(index as u128 + 100);
+            graph.edges.insert(
+                id,
+                Edge {
+                    id,
+                    from: PortRef {
+                        module_id: EntityId::from_u128(index as u128 + 1),
+                        port_id: PortId::new("out").unwrap(),
+                    },
+                    to: PortRef {
+                        module_id: EntityId::from_u128(index as u128 + 2),
+                        port_id: PortId::new("in").unwrap(),
+                    },
+                    capacity: None,
+                },
+            );
+        }
+        graph
+    }
+
+    #[test]
+    fn native_audio_compiler_accepts_capture_with_optional_monitor() {
+        assert_eq!(compile_audio_graph(&native_audio_graph(false)), Ok(()));
+        assert_eq!(compile_audio_graph(&native_audio_graph(true)), Ok(()));
+    }
+
+    #[test]
+    fn native_audio_compiler_rejects_out_of_order_edges() {
+        let mut graph = native_audio_graph(false);
+        let first = graph.edges.values_mut().next().unwrap();
+        first.to.module_id = EntityId::from_u128(3);
+        let error = compile_audio_graph(&graph).unwrap_err();
+        assert_eq!(error.code, "audio.graph.invalid_topology");
     }
 }

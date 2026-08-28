@@ -18,7 +18,7 @@ use magnolia_application::{
     ActivationRequest, ApplicationService, InMemoryPersistence, RuntimeControl, RuntimeEvent,
     RuntimePort,
 };
-use magnolia_domain::{synthetic, EntityId, RuntimeEpochId, TargetGraphRevision};
+use magnolia_domain::{production_registry, EntityId, RuntimeEpochId, TargetGraphRevision};
 use magnolia_protocol::{
     encode_telemetry_postcard, ConnectResponse, ControlClientMessage, ControlServerMessage,
     TelemetryClientMessage, TelemetryServerMessage, TranscriptSegment, TransportErrorCode,
@@ -171,7 +171,7 @@ impl MagnoliaHost {
         let service = ApplicationService::new(
             InMemoryPersistence::default(),
             runtime,
-            synthetic::registry(),
+            production_registry(),
             runtime_epoch,
         )?;
         let telemetry = TelemetryHub::default();
