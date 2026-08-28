@@ -1,0 +1,70 @@
+# Magnolia native runtime and Leptos studio rearchitecture
+
+Status: **accepted target architecture; implementation has not started**  
+Accepted: 2026-08-27  
+Scope of this branch: documentation and ADRs only
+
+This package is the controlling plan for replacing Magnolia's prototype runtime
+and Nannou shell. It does not claim that the target crates, protocols, real-time
+properties, browser studio, persistence model, or acceptance results exist.
+Current behavior remains whatever the source and tests on `main` demonstrate.
+
+## Controlling decisions
+
+- Native Rust is authoritative for devices, graph state, scheduling, ASR,
+  persistence, telemetry production, and GPU work.
+- Leptos 0.8 CSR, built with Trunk, owns presentation and disposable interaction
+  state only.
+- Modules and tiles are independent, many-to-many concepts. A module can have no
+  tile or several tiles; a tile can bind several typed runtime resources.
+- The first desktop shell is a loopback native service plus a dedicated Chromium
+  app window. Tauri is deferred and, if introduced, must use the same client
+  boundary. Linux Tauri uses WebKitGTK rather than Chromium; Tauri commands and
+  channels, not generic events, are the relevant later high-throughput boundary.
+- Correctness and continuity are certified on the current ThinkPad T14. The
+  separate ASR performance tier runs on an RTX 3090 host and reports the actual
+  execution provider.
+- The existing Sherpa streaming Zipformer implementation is refactored first.
+  An adapter boundary permits later native ASR engines.
+- There is no importer for `configs/layout.toml`, the plugin ABI, or other legacy
+  compatibility formats.
+- Raw recording is explicit and off by default. Final transcript text is durable
+  whenever a transcription session is active.
+- First-party module factories are statically registered. Magnolia does not
+  extract a shared framework with Mirabile or Digital Liquid Light Lab.
+
+## Terms
+
+- **Module**: a native executable capability with typed ports and a lifecycle.
+- **Tile**: a web presentation surface bound to zero or more runtime resources.
+- **Workspace document**: durable user intent: graph, configuration, bindings,
+  promoted settings, and named layout presets.
+- **Runtime state**: native, process-local facts about devices, nodes, queues,
+  clocks, operations, errors, and graph activation.
+- **Presentation session**: disposable browser state such as focus, selection,
+  inspectors, zoom, and drafts.
+- **Projection**: immutable, versioned native state published to clients.
+- **Runtime epoch**: identity of one native process lifetime; monotonic clocks and
+  sequence numbers are interpreted within it.
+- **Target graph**: validated graph requested by the durable document.
+- **Active graph**: last-good graph currently executing.
+
+## Document index
+
+- [Current state and disposition](current-state-and-disposition.md) maps current
+  paths and symbols to keep, refactor, or delete decisions.
+- [Target architecture and protocol](target-and-protocol.md) defines crate
+  direction, graph contracts, ownership, façade, transport, and studio rules.
+- [Microphone and ASR slice](microphone-asr-slice.md) defines the first complete
+  dataflow, commands, recording bundle, diagnostics, and acceptance criteria.
+- [Migration and verification](migration-and-verification.md) defines commit-sized
+  phases, exact deletion gates, tests, risks, and deferred work.
+- [ADRs](../adr/) record the eight accepted decisions.
+
+## Authority and change control
+
+The ADRs and this index settle target direction. The detailed documents settle
+the contracts and gates. Where implementation differs, that difference is an
+uncompleted migration or a proposed ADR amendment—not evidence that the target
+already exists. Benchmarks are targets until a recorded run identifies the host,
+build, input fixture, backend/provider, and result.
