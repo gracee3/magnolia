@@ -1,10 +1,13 @@
 # Migration and verification
 
-Status: prescribed future implementation; this planning branch performs none of these phases.
+Status: Phase 1 implemented; phases 2 through 7 are prescribed future work.
 
 ## Commit-sized migration
 
 ### 1. Portable contracts
+
+Status: implemented and covered by the Phase 1 handoff gate. See
+[Phase 1 foundation](phase-1-foundation.md).
 
 Add only `magnolia-domain`, `magnolia-protocol`, `magnolia-client`,
 `magnolia-application`, and `magnolia-runtime`. Include UUID entity/request/
@@ -96,7 +99,10 @@ Exit gate: automated gates and applicable measured targets pass with evidence; d
 - Persistence: atomic save/restore, interrupted recording recovery, transcript paging, unsupported schemas, and replay comparisons.
 - Hardware: 30-minute T14 continuity/latency and corpus ASR runs; separate actual-provider RTX 3090 run.
 
-Future implementation adds `scripts/check.sh` as the fast gate and `scripts/verify.sh` as the full native/WASM/Trunk/browser/hardware gate. This planning task adds no hosted CI, scripts, code, models, or downloads.
+Phase 1 provides `scripts/check.sh` as its focused fast gate and
+`scripts/verify.sh` as its foundation handoff gate. Later phases must extend the
+same entry points with native/WASM/Trunk/browser and applicable hardware gates;
+the current scripts do not claim those later validations.
 
 ## Risks and required evidence
 

@@ -1,6 +1,7 @@
 # Target architecture and protocol
 
-Status: accepted contract; not implemented.
+Status: accepted contract; the Phase 1 portable foundation is implemented, while
+native execution, audio, ASR, browser presentation, and transport are not.
 
 ## Crates and dependency direction
 

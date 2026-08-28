@@ -6,6 +6,16 @@ on:
   workflow_dispatch:
 
 jobs:
+  portable-foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: clippy,rustfmt
+      - run: ./scripts/verify.sh
+
   baseline:
     runs-on: ubuntu-latest
     steps:
