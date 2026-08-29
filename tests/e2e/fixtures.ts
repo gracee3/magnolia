@@ -91,7 +91,7 @@ export const test = base.extend<Fixtures>({
     await page.goto(host.launchUrl, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("studio-shell")).toBeVisible();
     await expect(page.getByTestId("connection-state")).toHaveAttribute("data-phase", "connected");
-    await expect(page.getByTestId("connection-state")).toContainText("protocol 1.1");
+    await expect(page.getByTestId("connection-state")).toContainText("protocol 1.2");
     expect(page.url()).not.toContain("token=");
     await use({ page, consoleErrors });
     if (testInfo.status !== testInfo.expectedStatus) {
