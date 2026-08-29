@@ -30,14 +30,15 @@ never invokes it.
 The accepted model is the official GitHub asset ID 191971614,
 `sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2`, size 310,414,022 bytes.
 The accepted Linux x64 CPU library is the official 1.13.4 no-TTS shared-library
-archive, size 9,006,130 bytes. On 2026-08-28 the GitHub asset API reported a null
-digest for both, and the official Sherpa documentation/repository published no
-archive SHA-256 file. The model repository establishes Apache-2.0 licensing, but
-license plus a locally calculated download hash is not an authoritative archive
-hash.
+archive, size 9,006,130 bytes, with the GitHub-published SHA-256
+`8a2c6d5f8d04e651c90e71ba3ee8b08dedb2b741ff5f316e12aa629423f91c9f`.
+On 2026-08-28 the GitHub asset API still reported a null digest for the model,
+and the official Sherpa documentation/repository published no model-archive
+SHA-256 file. The model repository establishes Apache-2.0 licensing, but license
+plus a locally calculated download hash is not an authoritative archive hash.
 
-The checked-in acquisition lock therefore retains null digests and the command
-fails closed before download. Model execution, live microphone transcription,
+The checked-in acquisition lock records the native-library digest and retains a
+null model digest, so the command fails closed before download. Model execution, live microphone transcription,
 fixtures, LibriSpeech WER/RTF evaluation, browser acceptance, and Phase 6
 promotion have not run. Filling those fields with self-computed values would
 weaken the explicit provenance gate and is not accepted evidence.

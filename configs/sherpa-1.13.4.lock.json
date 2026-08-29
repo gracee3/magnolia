@@ -14,7 +14,7 @@
     "name": "sherpa-onnx-v1.13.4-linux-x64-shared-no-tts-lib",
     "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-linux-x64-shared-no-tts-lib.tar.bz2",
     "expected_bytes": 9006130,
-    "sha256": null,
+    "sha256": "8a2c6d5f8d04e651c90e71ba3ee8b08dedb2b741ff5f316e12aa629423f91c9f",
     "extracted_sha256": {},
     "license": "Apache-2.0"
   }

@@ -58,8 +58,8 @@ not describe active code.
 
 Phases 4 and 5 were promoted after their clean exact heads passed complete
 repository and 30-minute live gates. Phase 6 has a tested model-free foundation,
-but the official model and native-library release records contain no
-authoritative SHA-256 digests, so acquisition, execution, WER/RTF acceptance,
-and promotion are blocked. Workspace persistence begins only after Phase 6 can
+but the official model release record contains no authoritative SHA-256 digest,
+so acquisition, execution, WER/RTF acceptance, and promotion are blocked. The
+matching native-library digest is established. Workspace persistence begins only after Phase 6 can
 be promoted. Plugin/marketplace work, Tauri, SSR, legacy import, unvalidated
 model downloads, and GPU work remain explicitly deferred.
