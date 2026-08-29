@@ -132,6 +132,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
             transcript: TranscriptSummary::default(),
             diagnostics: DiagnosticsSummary::default(),
             audio: AudioRuntimeProjection::default(),
+            asr: Default::default(),
         };
         Ok(Self {
             shared: Arc::new(Shared {
@@ -816,6 +817,7 @@ fn publish<P: PersistencePort, R: RuntimePort>(
             counters: inner.diagnostics.clone(),
         },
         audio: inner.audio.clone(),
+        asr: inner.projection.asr.clone(),
     });
     Ok(())
 }

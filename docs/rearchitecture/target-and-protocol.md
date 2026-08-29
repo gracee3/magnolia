@@ -1,8 +1,8 @@
 # Target architecture and protocol
 
-Status: accepted contract; Phases 1 through 3 are implemented and the Phase 4
-native-audio foundation is in progress. Later audio execution, ASR, and
-hardware certification remain unimplemented.
+Status: accepted contract; Phases 1 through 5 are promoted and the model-free
+Phase 6 ASR foundation is implemented. Sherpa execution and its CPU acceptance
+remain blocked on authoritative artifact hashes.
 
 ## Crates and dependency direction
 
@@ -14,8 +14,8 @@ hardware certification remain unimplemented.
 | `magnolia-application` | Authoritative service, transactions, undo/redo, persistence and runtime ports, manifest materialization, projection publication, and an in-process client. |
 | `magnolia-runtime` | Native runtime adapter; begins as deterministic `MockRuntime`, then gains graph compilation, lifecycle, activation, clocks, and execution lanes. |
 | `magnolia-audio` | PipeWire capture/output, explicit conversion/channel-map/resample nodes, monitoring. |
-| `magnolia-observe` | Counters, latency accounting, transcript journal, session recording, replay. |
-| `magnolia-asr` | Sherpa adapter and normalized ASR events. |
+| `magnolia-observe` | Counters, latency accounting, analyzer frames, session recording, replay. |
+| `magnolia-asr` | Bounded inference coordination, durable final journal, reducer, and feature-gated Sherpa adapter. |
 | `magnolia-studio-web` | Leptos 0.8 CSR workbench. |
 | `magnolia-desktop` | Composition root, static assets, loopback transport, authentication, Chromium launch. |
 

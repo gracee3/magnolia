@@ -7,6 +7,7 @@ cd "$repo_root"
 packages=(
   magnolia-audio
   magnolia-observe
+  magnolia-asr
   magnolia-domain
   magnolia-protocol
   magnolia-client
@@ -22,6 +23,7 @@ done
 cargo fmt --all --check
 cargo check --locked --target wasm32-unknown-unknown \
   --package magnolia-audio \
+  --package magnolia-asr \
   --package magnolia-domain \
   --package magnolia-protocol \
   --package magnolia-client

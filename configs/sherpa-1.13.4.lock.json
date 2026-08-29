@@ -1,0 +1,21 @@
+{
+  "schema_major": 1,
+  "adapter_version": "1.13.4",
+  "model_asset_id": 191971614,
+  "model": {
+    "name": "sherpa-onnx-streaming-zipformer-en-2023-06-26",
+    "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+    "expected_bytes": 310414022,
+    "sha256": null,
+    "extracted_sha256": {},
+    "license": "Apache-2.0"
+  },
+  "native_library": {
+    "name": "sherpa-onnx-v1.13.4-linux-x64-shared-no-tts-lib",
+    "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-v1.13.4-linux-x64-shared-no-tts-lib.tar.bz2",
+    "expected_bytes": 9006130,
+    "sha256": null,
+    "extracted_sha256": {},
+    "license": "Apache-2.0"
+  }
+}

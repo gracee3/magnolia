@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use thiserror::Error;
+use uuid::Uuid;
 
 mod transport;
 
 pub use transport::*;
 
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 2);
+pub const ASR_EVENT_SCHEMA_MAJOR: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -245,6 +247,33 @@ pub struct RuntimeProjection {
     pub diagnostics: DiagnosticsSummary,
     #[serde(default, skip_serializing_if = "AudioRuntimeProjection::is_empty")]
     pub audio: AudioRuntimeProjection,
+    #[serde(default, skip_serializing_if = "AsrRuntimeProjection::is_empty")]
+    pub asr: AsrRuntimeProjection,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AsrRuntimeProjection {
+    pub desired_running: bool,
+    pub active: bool,
+    pub session_id: Option<String>,
+    pub provider: Option<String>,
+    pub model_name: Option<String>,
+    pub model_sha256: Option<String>,
+    pub queue_depth: u32,
+    pub skipped_frames: u64,
+    pub discontinuities: u64,
+    pub first_partial_latency_ms: Option<u64>,
+    pub final_latency_ms: Option<u64>,
+    pub real_time_factor_millionths: Option<u64>,
+    pub last_error: Option<String>,
+}
+
+impl AsrRuntimeProjection {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -490,6 +519,96 @@ pub struct TranscriptPage {
     pub revision: TranscriptRevision,
     pub segments: Vec<TranscriptSegment>,
     pub next_cursor: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelProvenance {
+    pub provider: String,
+    pub adapter_version: String,
+    pub model_name: String,
+    pub model_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WordAlignment {
+    pub word: String,
+    pub start_frame: u64,
+    pub end_frame: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AsrEventHeader {
+    pub schema_major: u16,
+    pub schema_minor: u16,
+    pub session_id: Uuid,
+    pub segment_id: Option<Uuid>,
+    pub revision: u64,
+    pub sequence: u64,
+    pub runtime_monotonic_ns: u64,
+    pub audio_start_frame: u64,
+    pub audio_end_frame: u64,
+    pub provenance: ModelProvenance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AsrEventBody {
+    SessionStart,
+    PartialCreate {
+        text: String,
+    },
+    PartialRevise {
+        text: String,
+    },
+    AlignmentUpdate {
+        words: Vec<WordAlignment>,
+    },
+    Final {
+        text: String,
+        words: Vec<WordAlignment>,
+    },
+    Warning {
+        code: String,
+        message: String,
+    },
+    Discontinuity {
+        reason: DiscontinuityReason,
+        lost_frames: u64,
+    },
+    Reset {
+        reason: DiscontinuityReason,
+    },
+    SessionEnd {
+        cancelled: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscontinuityReason {
+    SourceLoss,
+    Restart,
+    Overflow,
+    Recovery,
+    Renegotiation,
+    RecordedGap,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AsrEvent {
+    pub header: AsrEventHeader,
+    pub body: AsrEventBody,
+}
+
+impl AsrEvent {
+    #[must_use]
+    pub fn is_final(&self) -> bool {
+        matches!(self.body, AsrEventBody::Final { .. })
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]

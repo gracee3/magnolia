@@ -1,6 +1,6 @@
 # Magnolia native runtime and Leptos studio rearchitecture
 
-Status: **accepted target architecture; Phases 1 through 4 promoted; Phase 5 in progress**
+Status: **accepted target architecture; Phases 1 through 5 promoted; Phase 6 provenance-blocked**
 
 Accepted: 2026-08-27
 
@@ -8,7 +8,8 @@ Implementation status: Phase 1 adds portable contracts and a deterministic mock
 round trip. Phase 2 adds the authenticated native desktop, Leptos cockpit,
 bounded synthetic telemetry, and Chromium lifecycle proof. Phase 3 completed the
 hard cutover. Phase 4 promoted native PipeWire capture/monitoring, and Phase 5
-now has an observation/record/replay promotion candidate.
+promoted observation/record/replay. Phase 6 has a tested model-free ASR
+foundation, but official release hashes are not currently provable.
 
 This package is the controlling plan for replacing Magnolia's prototype runtime
 and Nannou shell. Phase 1 source/tests establish only the portable contracts and
@@ -75,6 +76,8 @@ demonstrate.
   conversion, activation, and PipeWire discovery foundation and its limits.
 - [Phase 5 observation, recording, and replay](phase-5-observation.md) records
   analyzer, telemetry, bundle, replay, and acceptance evidence.
+- [Phase 6 native Sherpa ASR](phase-6-native-asr.md) records the model-free
+  foundation and the fail-closed artifact provenance blocker.
 - [Target architecture and protocol](target-and-protocol.md) defines crate
   direction, graph contracts, ownership, façade, transport, and studio rules.
 - [Microphone and ASR slice](microphone-asr-slice.md) defines a later native-audio
