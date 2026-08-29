@@ -6,6 +6,7 @@ use magnolia_audio::{
     PipeWireCapture, PipeWireOutput,
 };
 use magnolia_domain::{native_audio, DeviceSelector, EntityId, WorkspaceGraph};
+use magnolia_observe::{ObservationHub, ObservationWorker};
 use magnolia_protocol::{
     AudioDeviceDirection, AudioDeviceProjection, AudioRuntimeProjection, AudioRuntimeState,
 };
@@ -40,12 +41,17 @@ pub struct NativeRuntime {
 impl NativeRuntime {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_observation(ObservationHub::default())
+    }
+
+    #[must_use]
+    pub fn with_observation(observation: ObservationHub) -> Self {
         let (sender, receiver) = mpsc::channel();
         let events = Arc::new(Mutex::new(VecDeque::new()));
         let worker_events = Arc::clone(&events);
         let worker = thread::Builder::new()
             .name("magnolia-audio-control".to_owned())
-            .spawn(move || run_worker(receiver, &worker_events))
+            .spawn(move || run_worker(receiver, &worker_events, observation))
             .ok();
         Self {
             sender,
@@ -112,6 +118,7 @@ impl Drop for NativeRuntime {
 fn run_worker(
     receiver: mpsc::Receiver<WorkerMessage>,
     events: &Arc<Mutex<VecDeque<RuntimeEvent>>>,
+    observation: ObservationHub,
 ) {
     let mut audio = AudioRuntimeProjection::default();
     let mut input_selector: Option<DeviceSelector> = None;
@@ -121,6 +128,8 @@ fn run_worker(
     let mut capture: Option<PipeWireCapture> = None;
     #[cfg(target_os = "linux")]
     let mut output: Option<PipeWireOutput> = None;
+    #[cfg(target_os = "linux")]
+    let mut observation_worker: Option<ObservationWorker> = None;
     #[cfg(target_os = "linux")]
     let mut totals = StreamTotals::default();
     #[cfg(target_os = "linux")]
@@ -136,6 +145,11 @@ fn run_worker(
                 #[cfg(target_os = "linux")]
                 if let Some(registry) = registry.as_ref() {
                     update_registry_projection(&mut audio, registry);
+                    let recovery = CaptureRecovery {
+                        observation: &observation,
+                        observation_worker: &mut observation_worker,
+                        last_attempt: &mut last_recovery_attempt,
+                    };
                     maintain_capture(
                         &mut audio,
                         input_selector.as_ref(),
@@ -143,7 +157,7 @@ fn run_worker(
                         &mut capture,
                         &mut output,
                         &mut totals,
-                        &mut last_recovery_attempt,
+                        recovery,
                     );
                     apply_stream_totals(&mut audio, &totals);
                 }
@@ -207,6 +221,8 @@ fn run_worker(
                                 input_selector.as_ref(),
                                 registry.as_ref(),
                                 &mut capture,
+                                &observation,
+                                &mut observation_worker,
                                 &mut last_recovery_attempt,
                             );
                         }
@@ -216,6 +232,8 @@ fn run_worker(
                     RuntimeControl::StopAudio => {
                         #[cfg(target_os = "linux")]
                         retire_output(&mut output, &mut totals);
+                        #[cfg(target_os = "linux")]
+                        retire_observation(&mut observation_worker);
                         #[cfg(target_os = "linux")]
                         retire_capture(&mut capture, &mut totals);
                         audio.desired_running = false;
@@ -246,6 +264,7 @@ fn run_worker(
                                 .is_some_and(|capture| !capture.monitor_edge_available())
                             {
                                 retire_output(&mut output, &mut totals);
+                                retire_observation(&mut observation_worker);
                                 retire_capture(&mut capture, &mut totals);
                                 audio.discontinuities = audio.discontinuities.saturating_add(1);
                                 try_start_capture(
@@ -253,6 +272,8 @@ fn run_worker(
                                     input_selector.as_ref(),
                                     registry.as_ref(),
                                     &mut capture,
+                                    &observation,
+                                    &mut observation_worker,
                                     &mut last_recovery_attempt,
                                 );
                             }
@@ -423,6 +444,8 @@ fn try_start_capture(
     selector: Option<&DeviceSelector>,
     registry: Option<&PipeWireRegistryManager>,
     capture: &mut Option<PipeWireCapture>,
+    observation: &ObservationHub,
+    observation_worker: &mut Option<ObservationWorker>,
     last_attempt: &mut Instant,
 ) {
     *last_attempt = Instant::now();
@@ -439,8 +462,18 @@ fn try_start_capture(
     audio.state = AudioRuntimeState::Preparing;
     audio.last_error = Some("PipeWire capture stream preparation is pending".to_owned());
     match PipeWireCapture::start(CaptureConfiguration { target_node_name }) {
-        Ok(started) => {
+        Ok(mut started) => {
             started.set_muted(audio.capture_muted);
+            if let Some(edge) = started.take_analysis_edge() {
+                match observation.attach(edge, 48_000, 2) {
+                    Ok(worker) => *observation_worker = Some(worker),
+                    Err(error) => {
+                        audio.last_error = Some(format!(
+                            "native observation worker could not start: {error}"
+                        ));
+                    }
+                }
+            }
             *capture = Some(started);
         }
         Err(error) => {
@@ -458,7 +491,7 @@ fn maintain_capture(
     capture: &mut Option<PipeWireCapture>,
     output: &mut Option<PipeWireOutput>,
     totals: &mut StreamTotals,
-    last_attempt: &mut Instant,
+    recovery: CaptureRecovery<'_>,
 ) {
     if !audio.desired_running {
         return;
@@ -474,6 +507,7 @@ fn maintain_capture(
         Err(error) => {
             if capture.is_some() {
                 retire_output(output, totals);
+                retire_observation(recovery.observation_worker);
                 retire_capture(capture, totals);
                 audio.discontinuities = audio.discontinuities.saturating_add(1);
             }
@@ -485,18 +519,34 @@ fn maintain_capture(
             let changed = audio.resolved_input_id.as_deref() != Some(runtime_id.as_str());
             if changed || failed {
                 retire_output(output, totals);
+                retire_observation(recovery.observation_worker);
                 retire_capture(capture, totals);
                 audio.discontinuities = audio.discontinuities.saturating_add(1);
                 audio.resolved_input_id = Some(runtime_id);
             }
-            if capture.is_none() && last_attempt.elapsed() >= Duration::from_secs(1) {
-                try_start_capture(audio, selector, Some(registry), capture, last_attempt);
+            if capture.is_none() && recovery.last_attempt.elapsed() >= Duration::from_secs(1) {
+                try_start_capture(
+                    audio,
+                    selector,
+                    Some(registry),
+                    capture,
+                    recovery.observation,
+                    recovery.observation_worker,
+                    recovery.last_attempt,
+                );
                 if audio.monitor_enabled && capture.is_some() {
                     start_monitor_output(audio, Some(registry), capture.as_mut(), output);
                 }
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+struct CaptureRecovery<'a> {
+    observation: &'a ObservationHub,
+    observation_worker: &'a mut Option<ObservationWorker>,
+    last_attempt: &'a mut Instant,
 }
 
 #[cfg(target_os = "linux")]
@@ -582,6 +632,11 @@ fn retire_capture(capture: &mut Option<PipeWireCapture>, totals: &mut StreamTota
         totals.faults = totals.faults.saturating_add(snapshot.faults);
         drop(retired);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn retire_observation(worker: &mut Option<ObservationWorker>) {
+    drop(worker.take());
 }
 
 #[cfg(target_os = "linux")]

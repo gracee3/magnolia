@@ -11,6 +11,7 @@ futures.workspace = true
 getrandom.workspace = true
 magnolia-application = { path = "../../crates/magnolia-application" }
 magnolia-domain = { path = "../../crates/magnolia-domain" }
+magnolia-observe = { path = "../../crates/magnolia-observe" }
 magnolia-protocol = { path = "../../crates/magnolia-protocol" }
 magnolia-runtime = { path = "../../crates/magnolia-runtime" }
 postcard.workspace = true

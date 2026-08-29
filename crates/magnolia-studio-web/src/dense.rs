@@ -80,9 +80,9 @@ pub fn DenseCanvas(
     Effect::new(move || {
         let should_run = visible.get();
         effect_desired.set(should_run);
-        let next_generation = effect_generation.get().saturating_add(1);
-        effect_generation.set(next_generation);
         if should_run && !effect_leased.replace(true) {
+            let next_generation = effect_generation.get().saturating_add(1);
+            effect_generation.set(next_generation);
             lease_status.set("subscribing".to_owned());
             let client = effect_state.client.clone();
             let callback_buffer = Rc::clone(&effect_buffer);
@@ -124,24 +124,25 @@ pub fn DenseCanvas(
                             lease_status.set("streaming".to_owned());
                         }
                     }
-                    Ok(_) => {
+                    Ok(_) if !desired_for_async.get() => {
                         let _ = client.release_telemetry(stream_id).await;
-                        leased_for_async.set(false);
-                        observer_for_async.borrow_mut().take();
                         if alive_for_async.get() {
                             lease_status.set("released".to_owned());
                         }
                     }
-                    Err(error) => {
+                    Ok(_) => {}
+                    Err(error) if generation_for_async.get() == next_generation => {
                         leased_for_async.set(false);
                         observer_for_async.borrow_mut().take();
                         if alive_for_async.get() {
                             lease_status.set(format!("error: {error}"));
                         }
                     }
+                    Err(_) => {}
                 }
             });
         } else if !should_run && effect_leased.replace(false) {
+            effect_generation.set(effect_generation.get().saturating_add(1));
             effect_observer.borrow_mut().take();
             lease_status.set("releasing".to_owned());
             let client = effect_state.client.clone();

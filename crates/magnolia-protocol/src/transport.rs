@@ -177,7 +177,7 @@ pub enum TelemetryServerMessage {
 /// Payload carried inside [`TelemetryEnvelope::payload`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SyntheticTelemetryPayload {
+pub enum TelemetryPayload {
     Meter {
         level_milli: u16,
         peak_milli: u16,
@@ -199,6 +199,9 @@ pub enum SyntheticTelemetryPayload {
     },
 }
 
+/// Protocol-minor-compatible name retained for deterministic Phase 2 clients.
+pub type SyntheticTelemetryPayload = TelemetryPayload;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiagnosticTelemetryEntry {
@@ -218,12 +221,22 @@ pub enum DiagnosticSeverity {
 pub fn encode_synthetic_payload(
     payload: &SyntheticTelemetryPayload,
 ) -> Result<Vec<u8>, crate::FrameError> {
+    encode_telemetry_payload(payload)
+}
+
+pub fn encode_telemetry_payload(payload: &TelemetryPayload) -> Result<Vec<u8>, crate::FrameError> {
     Ok(postcard::to_allocvec(payload)?)
 }
 
 pub fn decode_synthetic_payload(
     envelope: &TelemetryEnvelope,
 ) -> Result<SyntheticTelemetryPayload, crate::FrameError> {
+    Ok(postcard::from_bytes(&envelope.payload)?)
+}
+
+pub fn decode_telemetry_payload(
+    envelope: &TelemetryEnvelope,
+) -> Result<TelemetryPayload, crate::FrameError> {
     Ok(postcard::from_bytes(&envelope.payload)?)
 }
 

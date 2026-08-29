@@ -17,11 +17,11 @@ mod rt_audit;
 #[cfg(target_os = "linux")]
 pub mod pipewire;
 
-pub use block::{AudioBlock, AudioFormat, BlockIndex, Discontinuity};
+pub use block::{AudioBlock, AudioFormat, BlockIndex, BlockProvenance, Discontinuity};
 #[cfg(target_os = "linux")]
 pub use capture::{
-    CaptureConfiguration, CaptureConfigurationError, CaptureError, CaptureSnapshot, CaptureState,
-    MonitorEdge, NativeChannelLayout, NativeSampleFormat, PipeWireCapture,
+    AnalysisEdge, CaptureConfiguration, CaptureConfigurationError, CaptureError, CaptureSnapshot,
+    CaptureState, MonitorEdge, NativeChannelLayout, NativeSampleFormat, PipeWireCapture,
 };
 pub use convert::{
     downmix_to_mono, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, LinearResampler, ProcessError,

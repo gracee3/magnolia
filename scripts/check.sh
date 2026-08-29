@@ -6,6 +6,7 @@ cd "$repo_root"
 
 packages=(
   magnolia-audio
+  magnolia-observe
   magnolia-domain
   magnolia-protocol
   magnolia-client

@@ -25,7 +25,7 @@ git diff --check "$verification_base"...HEAD
 git diff --check
 git diff --cached --check
 
-expected_members=$'magnolia-application\nmagnolia-audio\nmagnolia-client\nmagnolia-desktop\nmagnolia-domain\nmagnolia-protocol\nmagnolia-runtime\nmagnolia-studio-web'
+expected_members=$'magnolia-application\nmagnolia-audio\nmagnolia-client\nmagnolia-desktop\nmagnolia-domain\nmagnolia-observe\nmagnolia-protocol\nmagnolia-runtime\nmagnolia-studio-web'
 actual_members=$(cargo metadata --locked --no-deps --format-version 1 | jq -r \
   '.workspace_members as $members | [.packages[] | select(.id as $id | $members | index($id)) | .name] | sort | .[]')
 if [[ "$actual_members" != "$expected_members" ]]; then
