@@ -1,7 +1,8 @@
 use magnolia_domain::{DeliveryPolicy, EntityId, RuntimeEpochId, SchemaVersion};
+use magnolia_observe::{AnalyzerFrame, AnalyzerKind, ObservationHub};
 use magnolia_protocol::{
-    encode_synthetic_payload, SyntheticTelemetryPayload, TelemetryClock, TelemetryEnvelope,
-    TelemetryLease, TelemetrySubscription, PROTOCOL_VERSION, SYNTHETIC_CAPTION_SESSION_ID,
+    encode_telemetry_payload, TelemetryClock, TelemetryEnvelope, TelemetryLease, TelemetryPayload,
+    TelemetrySubscription, PROTOCOL_VERSION, SYNTHETIC_CAPTION_SESSION_ID,
     SYNTHETIC_CAPTION_STREAM_ID, SYNTHETIC_DIAGNOSTICS_STREAM_ID, SYNTHETIC_METER_STREAM_ID,
     SYNTHETIC_SPECTRUM_STREAM_ID, SYNTHETIC_WAVEFORM_STREAM_ID,
 };
@@ -72,6 +73,7 @@ fn stream_kind(stream_id: EntityId) -> Option<SyntheticStreamKind> {
 pub struct TelemetryHub {
     inner: Arc<Mutex<TelemetryState>>,
     started: Instant,
+    observation: Option<ObservationHub>,
 }
 
 #[derive(Default)]
@@ -96,11 +98,20 @@ impl Default for TelemetryHub {
                 ..TelemetryState::default()
             })),
             started: Instant::now(),
+            observation: None,
         }
     }
 }
 
 impl TelemetryHub {
+    #[must_use]
+    pub fn with_observation(observation: ObservationHub) -> Self {
+        Self {
+            observation: Some(observation),
+            ..Self::default()
+        }
+    }
+
     pub fn subscribe(
         &self,
         session_id: &str,
@@ -121,11 +132,16 @@ impl TelemetryHub {
             capacity: requested.capacity.clamp(1, 64),
             delivery: requested.delivery,
         };
-        self.lock()?
+        let replaced = self
+            .lock()?
             .sessions
             .entry(session_id.to_owned())
             .or_default()
-            .insert(lease.stream_id, lease.clone());
+            .insert(lease.stream_id, lease.clone())
+            .is_some();
+        if !replaced {
+            self.acquire_observer(kind);
+        }
         Ok(lease)
     }
 
@@ -137,6 +153,10 @@ impl TelemetryHub {
             .is_some_and(|leases| leases.remove(&stream_id).is_some());
         if released {
             state.released_leases = state.released_leases.saturating_add(1);
+            drop(state);
+            if let Some(kind) = stream_kind(stream_id) {
+                self.release_observer(kind);
+            }
         }
         Ok(released)
     }
@@ -152,14 +172,26 @@ impl TelemetryHub {
     /// its non-durable subscriptions from the browser's visible tiles.
     pub fn disconnect(&self, session_id: &str) -> Result<(), TelemetryError> {
         let mut state = self.lock()?;
-        release_session_leases(&mut state, session_id);
+        let released = release_session_leases(&mut state, session_id);
         state.active_connections = state.active_connections.saturating_sub(1);
+        drop(state);
+        for stream_id in released {
+            if let Some(kind) = stream_kind(stream_id) {
+                self.release_observer(kind);
+            }
+        }
         Ok(())
     }
 
     pub fn release_session_leases(&self, session_id: &str) -> Result<(), TelemetryError> {
         let mut state = self.lock()?;
-        release_session_leases(&mut state, session_id);
+        let released = release_session_leases(&mut state, session_id);
+        drop(state);
+        for stream_id in released {
+            if let Some(kind) = stream_kind(stream_id) {
+                self.release_observer(kind);
+            }
+        }
         Ok(())
     }
 
@@ -216,8 +248,22 @@ impl TelemetryHub {
                 } else {
                     0
                 };
-                let payload = synthetic_payload(kind, current, diagnostic_entries_lost);
+                let native = self
+                    .observation
+                    .as_ref()
+                    .and_then(|hub| analyzer_kind(kind).and_then(|kind| hub.latest(kind)));
+                if self.observation.is_some()
+                    && kind != SyntheticStreamKind::Caption
+                    && native.is_none()
+                {
+                    continue;
+                }
+                let payload = native
+                    .as_ref()
+                    .map(native_payload)
+                    .unwrap_or_else(|| synthetic_payload(kind, current, diagnostic_entries_lost));
                 let discontinuity = state.discontinuities.remove(&lease.stream_id);
+                let metadata = native.as_ref().map(frame_metadata);
                 frames.push(GeneratedFrame {
                     envelope: TelemetryEnvelope {
                         protocol_version: PROTOCOL_VERSION,
@@ -225,18 +271,22 @@ impl TelemetryHub {
                         stream_id: lease.stream_id,
                         schema_version: SchemaVersion::new(1, 0),
                         clock: TelemetryClock::RuntimeMonotonic,
-                        sequence: current,
-                        source_start: current.saturating_mul(128),
-                        source_end: current.saturating_add(1).saturating_mul(128),
-                        emitted_monotonic_ns: now,
+                        sequence: metadata.map_or(current, |value| value.0),
+                        source_start: metadata
+                            .map_or_else(|| current.saturating_mul(128), |value| value.1),
+                        source_end: metadata.map_or_else(
+                            || current.saturating_add(1).saturating_mul(128),
+                            |value| value.2,
+                        ),
+                        emitted_monotonic_ns: metadata.map_or(now, |value| value.3),
                         queue_depth: 0,
                         cumulative_dropped: state
                             .dropped
                             .get(&lease.stream_id)
                             .copied()
                             .unwrap_or(0),
-                        discontinuity,
-                        payload: encode_synthetic_payload(&payload)
+                        discontinuity: discontinuity || metadata.is_some_and(|value| value.4),
+                        payload: encode_telemetry_payload(&payload)
                             .map_err(|error| TelemetryError::Encoding(error.to_string()))?,
                     },
                     delivery: lease.delivery,
@@ -268,29 +318,120 @@ impl TelemetryHub {
     fn lock(&self) -> Result<MutexGuard<'_, TelemetryState>, TelemetryError> {
         self.inner.lock().map_err(|_| TelemetryError::Poisoned)
     }
+
+    fn acquire_observer(&self, kind: SyntheticStreamKind) {
+        if let (Some(hub), Some(kind)) = (&self.observation, analyzer_kind(kind)) {
+            hub.acquire(kind);
+        }
+    }
+
+    fn release_observer(&self, kind: SyntheticStreamKind) {
+        if let (Some(hub), Some(kind)) = (&self.observation, analyzer_kind(kind)) {
+            hub.release(kind);
+        }
+    }
 }
 
-fn release_session_leases(state: &mut TelemetryState, session_id: &str) {
+fn release_session_leases(state: &mut TelemetryState, session_id: &str) -> Vec<EntityId> {
     if let Some(leases) = state.sessions.remove(session_id) {
         state.released_leases = state
             .released_leases
             .saturating_add(u64::try_from(leases.len()).unwrap_or(u64::MAX));
+        let released = leases.into_keys().collect();
+        state
+            .emission_accumulators
+            .retain(|(candidate, _), _| candidate != session_id);
+        return released;
     }
     state
         .emission_accumulators
         .retain(|(candidate, _), _| candidate != session_id);
+    Vec::new()
 }
 
 const DIAGNOSTIC_ENTRIES_PER_FRAME: u64 = 2;
+
+fn analyzer_kind(kind: SyntheticStreamKind) -> Option<AnalyzerKind> {
+    match kind {
+        SyntheticStreamKind::Meter => Some(AnalyzerKind::Meter),
+        SyntheticStreamKind::Waveform => Some(AnalyzerKind::Waveform),
+        SyntheticStreamKind::Spectrum => Some(AnalyzerKind::Spectrum),
+        SyntheticStreamKind::Diagnostics => Some(AnalyzerKind::Diagnostics),
+        SyntheticStreamKind::Caption => None,
+    }
+}
+
+fn frame_metadata(frame: &AnalyzerFrame) -> (u64, u64, u64, u64, bool) {
+    let header = match frame {
+        AnalyzerFrame::Meter(frame) => &frame.header,
+        AnalyzerFrame::Waveform(frame) => &frame.header,
+        AnalyzerFrame::Spectrum(frame) => &frame.header,
+        AnalyzerFrame::Diagnostics(frame) => &frame.header,
+    };
+    (
+        header.sequence,
+        header.source_start,
+        header.source_end,
+        header.analyzer_monotonic_ns,
+        header.discontinuity,
+    )
+}
+
+fn native_payload(frame: &AnalyzerFrame) -> TelemetryPayload {
+    match frame {
+        AnalyzerFrame::Meter(frame) => TelemetryPayload::Meter {
+            level_milli: normalized_milli(frame.rms.iter().copied().fold(0.0, f32::max)),
+            peak_milli: normalized_milli(frame.peak.iter().copied().fold(0.0, f32::max)),
+        },
+        AnalyzerFrame::Waveform(frame) => TelemetryPayload::Waveform {
+            samples: frame
+                .envelopes
+                .iter()
+                .flat_map(|value| [value.minimum, value.maximum])
+                .map(normalized_i16)
+                .collect(),
+        },
+        AnalyzerFrame::Spectrum(frame) => TelemetryPayload::Spectrum {
+            bins: frame
+                .bins_db
+                .iter()
+                .map(|value| normalized_milli((value.clamp(-120.0, 0.0) + 120.0) / 120.0))
+                .collect(),
+        },
+        AnalyzerFrame::Diagnostics(frame) => TelemetryPayload::Diagnostics {
+            entries: vec![magnolia_protocol::DiagnosticTelemetryEntry {
+                sequence: frame.header.sequence,
+                severity: magnolia_protocol::DiagnosticSeverity::Info,
+                message: format!(
+                    "native queue={} utilization={}ppm processing={}ns latency={}ns discontinuities={}",
+                    frame.queue_depth,
+                    frame.utilization_millionths,
+                    frame.processing_ns,
+                    frame.latency_ns,
+                    frame.cumulative_discontinuities
+                ),
+            }],
+            lost_since_previous: 0,
+        },
+    }
+}
+
+fn normalized_milli(value: f32) -> u16 {
+    (value.clamp(0.0, 1.0) * 1_000.0).round() as u16
+}
+
+fn normalized_i16(value: f32) -> i16 {
+    (value.clamp(-1.0, 1.0) * f32::from(i16::MAX)).round() as i16
+}
 
 fn synthetic_payload(
     kind: SyntheticStreamKind,
     sequence: u64,
     diagnostics_lost: u64,
-) -> SyntheticTelemetryPayload {
+) -> TelemetryPayload {
     let phase = u16::try_from(sequence % 200).unwrap_or(0);
     match kind {
-        SyntheticStreamKind::Meter => SyntheticTelemetryPayload::Meter {
+        SyntheticStreamKind::Meter => TelemetryPayload::Meter {
             level_milli: if phase <= 100 {
                 phase.saturating_mul(9)
             } else {
@@ -305,7 +446,7 @@ fn synthetic_payload(
                     i16::try_from(saw.saturating_mul(900)).unwrap_or(0)
                 })
                 .collect();
-            SyntheticTelemetryPayload::Waveform { samples }
+            TelemetryPayload::Waveform { samples }
         }
         SyntheticStreamKind::Spectrum => {
             let center = usize::try_from(sequence % 48).unwrap_or(0) + 8;
@@ -315,11 +456,11 @@ fn synthetic_payload(
                     u16::try_from((24 - distance) * 38).unwrap_or(0)
                 })
                 .collect();
-            SyntheticTelemetryPayload::Spectrum { bins }
+            TelemetryPayload::Spectrum { bins }
         }
         SyntheticStreamKind::Diagnostics => {
             let first = sequence.saturating_mul(DIAGNOSTIC_ENTRIES_PER_FRAME);
-            SyntheticTelemetryPayload::Diagnostics {
+            TelemetryPayload::Diagnostics {
                 entries: [first.saturating_sub(1), first]
                     .into_iter()
                     .map(
@@ -333,7 +474,7 @@ fn synthetic_payload(
                 lost_since_previous: diagnostics_lost,
             }
         }
-        SyntheticStreamKind::Caption => SyntheticTelemetryPayload::PartialCaption {
+        SyntheticStreamKind::Caption => TelemetryPayload::PartialCaption {
             segment_id: EntityId::from_u128(0x2_200 + u128::from(sequence / 30)),
             segment_revision: sequence % 30,
             text: format!("synthetic phrase {:02}", sequence / 30),
@@ -599,6 +740,23 @@ mod tests {
     }
 
     #[test]
+    fn native_analyzer_leases_track_unique_browser_subscriptions() {
+        let observation = ObservationHub::default();
+        let hub = TelemetryHub::with_observation(observation.clone());
+        let request = TelemetrySubscription {
+            stream_id: METER_STREAM,
+            requested_rate_hz: 30,
+            capacity: 4,
+            delivery: DeliveryPolicy::Latest,
+        };
+        hub.subscribe("browser", request.clone()).unwrap();
+        hub.subscribe("browser", request).unwrap();
+        assert_eq!(observation.lease_count(AnalyzerKind::Meter), 1);
+        hub.release_session_leases("browser").unwrap();
+        assert_eq!(observation.lease_count(AnalyzerKind::Meter), 0);
+    }
+
+    #[test]
     fn negotiated_rate_capacity_and_diagnostic_loss_are_observable() {
         let hub = TelemetryHub::default();
         let session = "diagnostics";
@@ -636,7 +794,7 @@ mod tests {
         let resumed = hub.generate_frames(session, epoch).unwrap();
         assert!(resumed[0].envelope.discontinuity);
         let payload = magnolia_protocol::decode_synthetic_payload(&resumed[0].envelope).unwrap();
-        let SyntheticTelemetryPayload::Diagnostics {
+        let TelemetryPayload::Diagnostics {
             entries,
             lost_since_previous,
         } = payload

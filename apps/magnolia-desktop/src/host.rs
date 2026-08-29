@@ -19,6 +19,7 @@ use magnolia_application::{
     RuntimePort,
 };
 use magnolia_domain::{production_registry, EntityId, RuntimeEpochId, TargetGraphRevision};
+use magnolia_observe::ObservationHub;
 use magnolia_protocol::{
     encode_telemetry_postcard, ConnectResponse, ControlClientMessage, ControlServerMessage,
     TelemetryClientMessage, TelemetryServerMessage, TranscriptSegment, TransportErrorCode,
@@ -164,8 +165,9 @@ impl MagnoliaHost {
         let launch_url = format!("{origin}/#token={}", authority.launch_token());
         let runtime_epoch = RuntimeEpochId::new();
         let mock_runtime = configuration.test_mode.then(MockRuntime::new);
+        let observation = ObservationHub::default();
         let runtime = mock_runtime.clone().map_or_else(
-            || RuntimeBackend::Native(NativeRuntime::new()),
+            || RuntimeBackend::Native(NativeRuntime::with_observation(observation.clone())),
             RuntimeBackend::Mock,
         );
         let service = ApplicationService::new(
@@ -174,7 +176,11 @@ impl MagnoliaHost {
             production_registry(),
             runtime_epoch,
         )?;
-        let telemetry = TelemetryHub::default();
+        let telemetry = if configuration.test_mode {
+            TelemetryHub::default()
+        } else {
+            TelemetryHub::with_observation(observation)
+        };
         let test_authority = configuration.test_mode.then(random_token).transpose()?;
         let (test_disconnect, _) = watch::channel(0_u64);
         let (shutdown, shutdown_rx) = watch::channel(false);

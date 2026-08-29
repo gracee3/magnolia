@@ -1,4 +1,4 @@
-use crate::{AudioBlock, AudioFormat, BlockIndex, Discontinuity};
+use crate::{AudioBlock, AudioFormat, BlockIndex, BlockProvenance, Discontinuity};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -105,6 +105,27 @@ impl BlockProducer {
     where
         F: FnOnce(&mut [f32]),
     {
+        self.publish_with_provenance(
+            index,
+            valid_frames,
+            BlockProvenance {
+                source_frame_position: index.0.saturating_mul(u64::from(valid_frames)),
+                ..BlockProvenance::default()
+            },
+            fill,
+        )
+    }
+
+    pub fn publish_with_provenance<F>(
+        &mut self,
+        index: BlockIndex,
+        valid_frames: u32,
+        mut provenance: BlockProvenance,
+        fill: F,
+    ) -> PublishOutcome
+    where
+        F: FnOnce(&mut [f32]),
+    {
         if self.held_ready {
             if let Some(block) = self.held.take() {
                 if let Err(rtrb::PushError::Full(block)) = self.ready.push(block) {
@@ -135,8 +156,18 @@ impl BlockProducer {
         let discontinuity = (self.pending_drops > 0).then_some(Discontinuity {
             dropped_blocks_before: self.pending_drops,
         });
+        if let Some(gap) = discontinuity {
+            provenance.dropped_frames_before = provenance.dropped_frames_before.saturating_add(
+                gap.dropped_blocks_before
+                    .saturating_mul(u64::from(valid_frames)),
+            );
+            provenance.discontinuity = true;
+        }
         self.pending_drops = 0;
-        if block.commit(index, valid_frames, discontinuity).is_err() {
+        if block
+            .commit_with_provenance(index, valid_frames, discontinuity, provenance)
+            .is_err()
+        {
             self.held = Some(block);
             self.held_ready = false;
             self.counters.faults.fetch_add(1, Ordering::Relaxed);

@@ -44,12 +44,23 @@ pub struct Discontinuity {
     pub dropped_blocks_before: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct BlockProvenance {
+    pub source_frame_position: u64,
+    pub capture_monotonic_ns: u64,
+    pub block_complete_monotonic_ns: u64,
+    pub graph_monotonic_ns: u64,
+    pub dropped_frames_before: u64,
+    pub discontinuity: bool,
+}
+
 #[derive(Debug)]
 pub struct AudioBlock {
     format: AudioFormat,
     index: BlockIndex,
     valid_frames: u32,
     discontinuity: Option<Discontinuity>,
+    provenance: BlockProvenance,
     samples: Box<[f32]>,
 }
 
@@ -61,6 +72,7 @@ impl AudioBlock {
             index: BlockIndex(0),
             valid_frames: 0,
             discontinuity: None,
+            provenance: BlockProvenance::default(),
             samples: vec![0.0; format.samples_per_block()].into_boxed_slice(),
         }
     }
@@ -86,6 +98,11 @@ impl AudioBlock {
     }
 
     #[must_use]
+    pub fn provenance(&self) -> BlockProvenance {
+        self.provenance
+    }
+
+    #[must_use]
     pub fn samples(&self) -> &[f32] {
         let len = self.valid_frames as usize * self.format.channels as usize;
         &self.samples[..len]
@@ -102,6 +119,24 @@ impl AudioBlock {
         valid_frames: u32,
         discontinuity: Option<Discontinuity>,
     ) -> Result<(), AudioBlockError> {
+        self.commit_with_provenance(
+            index,
+            valid_frames,
+            discontinuity,
+            BlockProvenance {
+                source_frame_position: index.0.saturating_mul(u64::from(valid_frames)),
+                ..BlockProvenance::default()
+            },
+        )
+    }
+
+    pub fn commit_with_provenance(
+        &mut self,
+        index: BlockIndex,
+        valid_frames: u32,
+        discontinuity: Option<Discontinuity>,
+        provenance: BlockProvenance,
+    ) -> Result<(), AudioBlockError> {
         if valid_frames > self.format.frames_per_block {
             return Err(AudioBlockError::TooManyFrames {
                 valid_frames,
@@ -111,6 +146,7 @@ impl AudioBlock {
         self.index = index;
         self.valid_frames = valid_frames;
         self.discontinuity = discontinuity;
+        self.provenance = provenance;
         Ok(())
     }
 }

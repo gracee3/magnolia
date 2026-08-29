@@ -1,7 +1,7 @@
 use crate::{
     block_channel, f32_le_to_f32, i16_le_to_f32, i32_le_to_f32, AudioFormat, BlockConsumer,
-    BlockIndex, BlockProducer, CallbackScope, CallbackTiming, EdgeCounters, PublishOutcome,
-    QuantumAdapter, StereoLinearResampler, MAX_PIPEWIRE_QUANTUM_FRAMES,
+    BlockIndex, BlockProducer, BlockProvenance, CallbackScope, CallbackTiming, EdgeCounters,
+    PublishOutcome, QuantumAdapter, StereoLinearResampler, MAX_PIPEWIRE_QUANTUM_FRAMES,
 };
 use pipewire as pw;
 use pw::{properties::properties, spa};
@@ -119,12 +119,35 @@ pub struct PipeWireCapture {
     monitor_edge_enabled: Arc<AtomicBool>,
     monitor_edge_primed: Arc<AtomicBool>,
     edge_counters: Arc<EdgeCounters>,
+    analysis_consumer: Option<BlockConsumer>,
+    analysis_edge_enabled: Arc<AtomicBool>,
+    analysis_edge_counters: Arc<EdgeCounters>,
 }
 
 pub struct MonitorEdge {
     pub(crate) consumer: BlockConsumer,
     pub(crate) enabled: Arc<AtomicBool>,
     pub(crate) primed: Arc<AtomicBool>,
+}
+
+pub struct AnalysisEdge {
+    consumer: BlockConsumer,
+    enabled: Arc<AtomicBool>,
+}
+
+impl AnalysisEdge {
+    pub fn consume<F, R>(&mut self, consume: F) -> crate::ConsumeOutcome<R>
+    where
+        F: FnOnce(&crate::AudioBlock) -> R,
+    {
+        self.consumer.consume(consume)
+    }
+}
+
+impl Drop for AnalysisEdge {
+    fn drop(&mut self) {
+        self.enabled.store(false, Ordering::Release);
+    }
 }
 
 impl Drop for MonitorEdge {
@@ -144,8 +167,12 @@ impl PipeWireCapture {
         let monitor_edge_primed = Arc::new(AtomicBool::new(false));
         let worker_monitor_edge_enabled = Arc::clone(&monitor_edge_enabled);
         let worker_monitor_edge_primed = Arc::clone(&monitor_edge_primed);
+        let analysis_edge_enabled = Arc::new(AtomicBool::new(false));
+        let worker_analysis_edge_enabled = Arc::clone(&analysis_edge_enabled);
         let format = AudioFormat::new(48_000, 2, 256).map_err(|_| CaptureError::InternalFormat)?;
         let (producer, consumer, edge_counters) = block_channel(format, 16);
+        let (analysis_producer, analysis_consumer, analysis_edge_counters) =
+            block_channel(format, 32);
         let worker_counters = Arc::clone(&counters);
         let (stop, receiver) = pw::channel::channel();
         let worker = thread::Builder::new()
@@ -155,9 +182,13 @@ impl PipeWireCapture {
                     configuration,
                     receiver,
                     Arc::clone(&worker_counters),
-                    producer,
-                    worker_monitor_edge_enabled,
-                    worker_monitor_edge_primed,
+                    CaptureEdges {
+                        monitor_producer: producer,
+                        monitor_enabled: worker_monitor_edge_enabled,
+                        monitor_primed: worker_monitor_edge_primed,
+                        analysis_producer,
+                        analysis_enabled: worker_analysis_edge_enabled,
+                    },
                 )
                 .is_err()
                 {
@@ -175,6 +206,9 @@ impl PipeWireCapture {
             monitor_edge_enabled,
             monitor_edge_primed,
             edge_counters,
+            analysis_consumer: Some(analysis_consumer),
+            analysis_edge_enabled,
+            analysis_edge_counters,
         })
     }
 
@@ -208,6 +242,7 @@ impl PipeWireCapture {
         };
         let timing = self.counters.timing.snapshot();
         let edge = self.edge_counters.snapshot();
+        let analysis_edge = self.analysis_edge_counters.snapshot();
         CaptureSnapshot {
             state,
             sample_format,
@@ -223,8 +258,12 @@ impl PipeWireCapture {
                 .counters
                 .faults
                 .load(Ordering::Relaxed)
-                .saturating_add(edge.faults),
-            dropped_frames: edge.dropped.saturating_mul(256),
+                .saturating_add(edge.faults)
+                .saturating_add(analysis_edge.faults),
+            dropped_frames: edge
+                .dropped
+                .saturating_add(analysis_edge.dropped)
+                .saturating_mul(256),
             callback_max_ns: timing.maximum_ns,
             callback_p99_ns: timing.p99_ns,
             callback_p999_ns: timing.p999_ns,
@@ -244,6 +283,15 @@ impl PipeWireCapture {
     #[must_use]
     pub fn monitor_edge_available(&self) -> bool {
         self.consumer.is_some()
+    }
+
+    pub fn take_analysis_edge(&mut self) -> Option<AnalysisEdge> {
+        let consumer = self.analysis_consumer.take()?;
+        self.analysis_edge_enabled.store(true, Ordering::Release);
+        Some(AnalysisEdge {
+            consumer,
+            enabled: Arc::clone(&self.analysis_edge_enabled),
+        })
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -287,16 +335,24 @@ struct CallbackData {
     producer: BlockProducer,
     monitor_edge_enabled: Arc<AtomicBool>,
     monitor_edge_primed: Arc<AtomicBool>,
+    analysis_producer: BlockProducer,
+    analysis_edge_enabled: Arc<AtomicBool>,
     monotonic_epoch: Instant,
+}
+
+struct CaptureEdges {
+    monitor_producer: BlockProducer,
+    monitor_enabled: Arc<AtomicBool>,
+    monitor_primed: Arc<AtomicBool>,
+    analysis_producer: BlockProducer,
+    analysis_enabled: Arc<AtomicBool>,
 }
 
 fn run_capture_loop(
     configuration: CaptureConfiguration,
     stop: pw::channel::Receiver<()>,
     counters: Arc<CaptureCounters>,
-    producer: BlockProducer,
-    monitor_edge_enabled: Arc<AtomicBool>,
-    monitor_edge_primed: Arc<AtomicBool>,
+    edges: CaptureEdges,
 ) -> Result<(), CaptureError> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
@@ -321,9 +377,11 @@ fn run_capture_loop(
         resampler: None,
         adapter: None,
         counters: Arc::clone(&counters),
-        producer,
-        monitor_edge_enabled,
-        monitor_edge_primed,
+        producer: edges.monitor_producer,
+        monitor_edge_enabled: edges.monitor_enabled,
+        monitor_edge_primed: edges.monitor_primed,
+        analysis_producer: edges.analysis_producer,
+        analysis_edge_enabled: edges.analysis_enabled,
         monotonic_epoch: Instant::now(),
     };
     let _listener = stream
@@ -528,6 +586,7 @@ fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
         data.counters.faults.fetch_add(1, Ordering::Relaxed);
         return;
     };
+    let monotonic_epoch = &data.monotonic_epoch;
     let Some(adapter) = data.adapter.as_mut() else {
         data.counters.faults.fetch_add(1, Ordering::Relaxed);
         return;
@@ -536,8 +595,10 @@ fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
     let counters = &data.counters;
     let monitor_edge_enabled = &data.monitor_edge_enabled;
     let monitor_edge_primed = &data.monitor_edge_primed;
+    let analysis_edge_enabled = &data.analysis_edge_enabled;
+    let analysis_producer = &mut data.analysis_producer;
     let muted = counters.capture_muted.load(Ordering::Acquire);
-    let monotonic_ns = data.monotonic_epoch.elapsed().as_nanos() as u64;
+    let monotonic_ns = monotonic_epoch.elapsed().as_nanos() as u64;
     let mut offset_frames = 0;
     let mut emitted_blocks = 0_u64;
     while offset_frames < resampled_frames {
@@ -550,20 +611,38 @@ fn process_capture(stream: &pw::stream::Stream, data: &mut CallbackData) {
             source_position.saturating_add(offset_frames as u64),
             monotonic_ns,
             |samples, meta| {
-                if !monitor_edge_enabled.load(Ordering::Acquire) {
-                    return;
-                }
-                let outcome = producer.publish(BlockIndex(meta.sequence), 256, |destination| {
-                    if muted {
-                        destination.fill(0.0);
+                if monitor_edge_enabled.load(Ordering::Acquire) {
+                    let outcome = producer.publish(BlockIndex(meta.sequence), 256, |destination| {
+                        if muted {
+                            destination.fill(0.0);
+                        } else {
+                            destination.copy_from_slice(samples);
+                        }
+                    });
+                    if outcome != PublishOutcome::Published {
+                        counters.faults.fetch_add(1, Ordering::Relaxed);
                     } else {
-                        destination.copy_from_slice(samples);
+                        monitor_edge_primed.store(true, Ordering::Release);
                     }
-                });
-                if outcome != PublishOutcome::Published {
-                    counters.faults.fetch_add(1, Ordering::Relaxed);
-                } else {
-                    monitor_edge_primed.store(true, Ordering::Release);
+                }
+                if analysis_edge_enabled.load(Ordering::Acquire) {
+                    let complete_ns = monotonic_epoch.elapsed().as_nanos() as u64;
+                    let outcome = analysis_producer.publish_with_provenance(
+                        BlockIndex(meta.sequence),
+                        256,
+                        BlockProvenance {
+                            source_frame_position: meta.source_frame_position,
+                            capture_monotonic_ns: meta.monotonic_ns,
+                            block_complete_monotonic_ns: complete_ns,
+                            graph_monotonic_ns: complete_ns,
+                            dropped_frames_before: meta.dropped_frames_before,
+                            discontinuity: meta.discontinuity.is_some(),
+                        },
+                        |destination| destination.copy_from_slice(samples),
+                    );
+                    if outcome != PublishOutcome::Published {
+                        counters.faults.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             },
         );

@@ -8,6 +8,7 @@ license = "AGPL-3.0-or-later"
 magnolia-application = { path = "../magnolia-application" }
 magnolia-audio = { path = "../magnolia-audio" }
 magnolia-domain = { path = "../magnolia-domain" }
+magnolia-observe = { path = "../magnolia-observe" }
 magnolia-protocol = { path = "../magnolia-protocol" }
 thiserror.workspace = true
 rtrb.workspace = true

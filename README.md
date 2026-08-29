@@ -1,8 +1,8 @@
 # Magnolia
 
-**Current status:** Phase 3 hard cutover is implemented and the Phase 4 native-audio candidate is undergoing its final exact-head gate. The Leptos desktop composes the native runtime in production and retains an injected deterministic mock only for tests. The audio path provides persistent PipeWire registry/default metadata, durable exact/default selectors, negotiated capture, preallocated format/channel/rate adaptation, safe muted monitoring, bounded callback edges, hotplug recovery, and runtime diagnostics. The 30-minute promotion soak remains the boundary between implemented and Phase 4 accepted. Implementation and tests—not old feature claims—are authoritative.
+**Current status:** Phases 1–4 are promoted and the Phase 5 observation/record/replay candidate is undergoing its exact-head gates. The Leptos desktop composes the native runtime in production and retains an injected deterministic mock only for tests. Native analyzers are lease-driven and off-callback; explicit recordings use atomic provenance bundles and deterministic replay. The Phase 5 30-minute promotion soak remains pending. Implementation and tests—not old feature claims—are authoritative.
 
-**Accepted target:** a native authoritative, typed, fixed-block runtime with a Leptos 0.8 CSR/Trunk studio served over authenticated loopback and opened in a dedicated Chromium app window. Phases 1 through 3 are implemented and Phase 4 is in progress. ASR reconstruction, filesystem persistence, and hardware certification are not implemented.
+**Accepted target:** a native authoritative, typed, fixed-block runtime with a Leptos 0.8 CSR/Trunk studio served over authenticated loopback and opened in a dedicated Chromium app window. Phases 1 through 4 are promoted and Phase 5 is in progress. ASR reconstruction and filesystem workspace persistence are not implemented.
 
 Sherpa is the first ASR adapter reconstructed/refactored in the later native-ASR
 phase; it is not the first implementation work. Phase 1 is the portable
@@ -43,6 +43,8 @@ not passed. Phase 3 completed the hard cutover under the same exact-SHA local
 verification policy. It does not add PipeWire, real-time audio, device access,
 model downloads, ASR, benchmarks, filesystem persistence, or hardware
 certification. Phase 4 host evidence is recorded in the
-[Phase 4 record](docs/rearchitecture/phase-4-native-audio.md). ASR model and GPU
+[Phase 4 record](docs/rearchitecture/phase-4-native-audio.md); the current
+observation/record/replay candidate is recorded in the
+[Phase 5 record](docs/rearchitecture/phase-5-observation.md). ASR model and GPU
 figures remain later-phase acceptance targets until evidence from the exact
 build, model, corpus, and provider is recorded.
