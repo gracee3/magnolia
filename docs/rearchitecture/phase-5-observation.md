@@ -42,6 +42,18 @@ These measurements are development evidence, not the promotion result. Phase 5
 remains a candidate until the same clean exact head passes the default 1,800
 second `./scripts/verify-phase-5-live.sh` and complete `./scripts/verify.sh`.
 
+The first default-duration candidate run reached 84,451 callbacks and 337,804
+analyzed blocks with zero allocation, deallocation, drop, or ring faults;
+callback p99/p99.9 were 0.20/0.24 ms and analyzer p95 was 0.125 ms. Promotion was
+correctly rejected afterward when a rapid workspace transition left the
+spectrum lease released. The browser visibility effect had invalidated an
+in-flight subscription during an unrelated rerun, allowing its stale completion
+to release the replacement. The repair advances generations only at visibility
+boundaries and prevents stale completions from releasing a currently desired
+lease. A short post-repair gate passed ten consecutive Diagnose/Transcribe
+transitions. The full default-duration gate must be repeated at the repaired
+exact head; the rejected run is evidence, not acceptance.
+
 ## Deferred boundary
 
 Sherpa/model acquisition, ASR event reduction and journals, WER/RTF evaluation,

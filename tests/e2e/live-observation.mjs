@@ -76,10 +76,18 @@ try {
     { timeout: 15_000 },
   );
 
+  for (let transition = 0; transition < 10; transition += 1) {
+    await page.getByRole("button", { name: "Transcribe", exact: true }).click();
+    await page.getByTestId("tab-Spectrum").click();
+    await waitForFrames(page, "spectrum-canvas-frames");
+    await page.getByRole("button", { name: "Diagnose", exact: true }).click();
+    await page.getByTestId("diagnostics-tile").waitFor({ state: "visible" });
+  }
+
   await page.getByRole("button", { name: "Close Diagnostics" }).click();
   await page.getByRole("button", { name: "Reopen", exact: true }).click();
   await page.getByTestId("diagnostics-tile").waitFor({ state: "visible" });
-  console.log("LIVE_OBSERVATION meter=ok waveform=ok spectrum=ok diagnostics=ok lease_reopen=ok");
+  console.log("LIVE_OBSERVATION meter=ok waveform=ok spectrum=ok diagnostics=ok transitions=10 lease_reopen=ok");
   await context.close();
 } finally {
   await browser?.close();
