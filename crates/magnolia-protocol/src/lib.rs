@@ -15,7 +15,7 @@ mod transport;
 
 pub use transport::*;
 
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -115,20 +115,20 @@ pub fn negotiate_protocol(
             supported_major: PROTOCOL_VERSION.major,
         });
     }
-    if matching_major
+    if let Some(minor) = matching_major
         .iter()
-        .any(|range| minor_is_supported(PROTOCOL_VERSION.minor, range))
+        .filter_map(|range| {
+            let minor = PROTOCOL_VERSION.minor.min(range.maximum_minor);
+            (minor >= range.minimum_minor).then_some(minor)
+        })
+        .max()
     {
-        return Ok(PROTOCOL_VERSION);
+        return Ok(ProtocolVersion::new(PROTOCOL_VERSION.major, minor));
     }
     Err(HandshakeError::NoCompatibleMinor {
         major: PROTOCOL_VERSION.major,
         supported_minor: PROTOCOL_VERSION.minor,
     })
-}
-
-fn minor_is_supported(minor: u16, range: &ProtocolVersionRange) -> bool {
-    range.minimum_minor <= minor && minor <= range.maximum_minor
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,6 +155,20 @@ pub enum SemanticCommand {
     },
     Undo,
     Redo,
+    StartAudio,
+    StopAudio,
+    SetCaptureMuted {
+        muted: bool,
+    },
+    SetMonitorEnabled {
+        enabled: bool,
+    },
+    SetMonitorMuted {
+        muted: bool,
+    },
+    SetMonitorGain {
+        linear_millionths: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +217,7 @@ pub enum CommandErrorCode {
     PersistenceFailure,
     RevisionOverflow,
     UnknownControl,
+    InvalidRuntimeControl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -228,6 +243,115 @@ pub struct RuntimeProjection {
     pub control_manifests: BTreeMap<EntityId, Vec<ControlManifest>>,
     pub transcript: TranscriptSummary,
     pub diagnostics: DiagnosticsSummary,
+    #[serde(default, skip_serializing_if = "AudioRuntimeProjection::is_empty")]
+    pub audio: AudioRuntimeProjection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioRuntimeProjection {
+    pub desired_running: bool,
+    pub capture_muted: bool,
+    pub monitor_enabled: bool,
+    pub monitor_muted: bool,
+    pub monitor_gain_millionths: u32,
+    pub input_selector_key: Option<String>,
+    pub resolved_input_id: Option<String>,
+    pub resolved_output_id: Option<String>,
+    pub sample_format: Option<AudioSampleFormat>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channel_positions: Vec<String>,
+    pub quantum_frames: Option<u32>,
+    pub state: AudioRuntimeState,
+    pub runtime_revision: u64,
+    pub callback_count: u64,
+    pub callback_p99_ns: u64,
+    pub callback_p999_ns: u64,
+    pub overruns: u64,
+    pub underruns: u64,
+    pub dropped_frames: u64,
+    pub discontinuities: u64,
+    pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub available_devices: Vec<AudioDeviceProjection>,
+}
+
+impl Default for AudioRuntimeProjection {
+    fn default() -> Self {
+        Self {
+            desired_running: false,
+            capture_muted: false,
+            monitor_enabled: false,
+            monitor_muted: true,
+            monitor_gain_millionths: 0,
+            input_selector_key: None,
+            resolved_input_id: None,
+            resolved_output_id: None,
+            sample_format: None,
+            sample_rate: None,
+            channels: None,
+            channel_positions: Vec::new(),
+            quantum_frames: None,
+            state: AudioRuntimeState::Stopped,
+            runtime_revision: 0,
+            callback_count: 0,
+            callback_p99_ns: 0,
+            callback_p999_ns: 0,
+            overruns: 0,
+            underruns: 0,
+            dropped_frames: 0,
+            discontinuities: 0,
+            last_error: None,
+            available_devices: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioDeviceProjection {
+    pub runtime_id: String,
+    pub label: String,
+    pub direction: AudioDeviceDirection,
+    pub node_name: String,
+    pub device_api: String,
+    pub object_path: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioDeviceDirection {
+    Input,
+    Output,
+}
+
+impl AudioRuntimeProjection {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioRuntimeState {
+    #[default]
+    Stopped,
+    Preparing,
+    Running,
+    Degraded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioSampleFormat {
+    F32Le,
+    S16Le,
+    S32Le,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

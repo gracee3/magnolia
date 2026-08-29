@@ -9,6 +9,21 @@ use thiserror::Error;
 
 pub const DOCUMENT_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceFingerprint {
+    pub node_name: String,
+    pub device_api: String,
+    pub object_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DeviceSelector {
+    FollowDefaultInput,
+    Exact { fingerprint: DeviceFingerprint },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SplitAxis {
@@ -64,6 +79,8 @@ pub struct WorkspaceDocument {
     pub presets: BTreeMap<String, LayoutPreset>,
     #[serde(default)]
     pub promoted_settings: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub device_selectors: BTreeMap<String, DeviceSelector>,
 }
 
 impl Default for WorkspaceDocument {
@@ -75,6 +92,7 @@ impl Default for WorkspaceDocument {
             tile_bindings: BTreeMap::new(),
             presets: BTreeMap::new(),
             promoted_settings: BTreeMap::new(),
+            device_selectors: BTreeMap::new(),
         }
     }
 }
@@ -110,6 +128,23 @@ impl WorkspaceDocument {
             .any(|key| key.trim().is_empty())
         {
             return Err(WorkspaceError::BlankSettingKey);
+        }
+        if self
+            .device_selectors
+            .keys()
+            .any(|key| key.trim().is_empty())
+        {
+            return Err(WorkspaceError::BlankDeviceSelectorKey);
+        }
+        for selector in self.device_selectors.values() {
+            if let DeviceSelector::Exact { fingerprint } = selector {
+                if fingerprint.node_name.trim().is_empty()
+                    || fingerprint.device_api.trim().is_empty()
+                    || fingerprint.object_path.trim().is_empty()
+                {
+                    return Err(WorkspaceError::BlankDeviceFingerprintProperty);
+                }
+            }
         }
         Ok(())
     }
@@ -194,6 +229,13 @@ pub enum WorkspaceEdit {
     RemovePromotedSetting {
         key: String,
     },
+    SetDeviceSelector {
+        key: String,
+        selector: DeviceSelector,
+    },
+    RemoveDeviceSelector {
+        key: String,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -217,6 +259,10 @@ pub enum WorkspaceError {
     BlankPresetName,
     #[error("promoted setting key must not be blank")]
     BlankSettingKey,
+    #[error("device selector key must not be blank")]
+    BlankDeviceSelectorKey,
+    #[error("exact device fingerprint properties must not be blank")]
+    BlankDeviceFingerprintProperty,
     #[error("workspace edit batch must not be empty")]
     EmptyEditBatch,
     #[error("module {0} already exists")]
@@ -233,6 +279,8 @@ pub enum WorkspaceError {
     MissingPreset(String),
     #[error("promoted setting {0:?} does not exist")]
     MissingPromotedSetting(String),
+    #[error("device selector {0:?} does not exist")]
+    MissingDeviceSelector(String),
     #[error("failed to serialize workspace: {0}")]
     Serialize(serde_json::Error),
     #[error("failed to deserialize workspace: {0}")]
@@ -309,6 +357,17 @@ fn apply_edit(
                 .promoted_settings
                 .remove(key)
                 .ok_or_else(|| WorkspaceError::MissingPromotedSetting(key.clone()))?;
+        }
+        WorkspaceEdit::SetDeviceSelector { key, selector } => {
+            document
+                .device_selectors
+                .insert(key.clone(), selector.clone());
+        }
+        WorkspaceEdit::RemoveDeviceSelector { key } => {
+            document
+                .device_selectors
+                .remove(key)
+                .ok_or_else(|| WorkspaceError::MissingDeviceSelector(key.clone()))?;
         }
     }
     Ok(())

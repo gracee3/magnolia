@@ -6,12 +6,13 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 magnolia-application = { path = "../magnolia-application" }
+magnolia-audio = { path = "../magnolia-audio" }
 magnolia-domain = { path = "../magnolia-domain" }
+magnolia-protocol = { path = "../magnolia-protocol" }
 thiserror.workspace = true
 rtrb.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
 magnolia-client = { path = "../magnolia-client" }
-magnolia-protocol = { path = "../magnolia-protocol" }
 serde_json.workspace = true

@@ -1,4 +1,6 @@
-use crate::{ActivationRequest, PersistenceError, PersistencePort, RuntimeEvent, RuntimePort};
+use crate::{
+    ActivationRequest, PersistenceError, PersistencePort, RuntimeControl, RuntimeEvent, RuntimePort,
+};
 use event_listener::Event;
 use magnolia_domain::{
     ActiveGraphRevision, ClientId, ControlKind, DescriptorRegistry, EntityId, OperationId,
@@ -6,11 +8,11 @@ use magnolia_domain::{
     WorkspaceDocument, WorkspaceEdit, WorkspaceEditBatch,
 };
 use magnolia_protocol::{
-    negotiate_protocol, CommandEnvelope, CommandError, CommandErrorCode, CommandReceipt,
-    ConnectRequest, ConnectResponse, ControlAvailability, ControlCommandIdentity, ControlManifest,
-    DiagnosticsSummary, ModuleState, ModuleStatus, OperationState, OperationStatus,
-    ProtocolVersion, ReceiptOutcome, RequestSequence, RuntimeError, RuntimeProjection,
-    SemanticCommand, TranscriptPage, TranscriptSegment, TranscriptSummary,
+    negotiate_protocol, AudioRuntimeProjection, CommandEnvelope, CommandError, CommandErrorCode,
+    CommandReceipt, ConnectRequest, ConnectResponse, ControlAvailability, ControlCommandIdentity,
+    ControlManifest, DiagnosticsSummary, ModuleState, ModuleStatus, OperationState,
+    OperationStatus, ProtocolVersion, ReceiptOutcome, RequestSequence, RuntimeError,
+    RuntimeProjection, SemanticCommand, TranscriptPage, TranscriptSegment, TranscriptSummary,
 };
 use serde_json::Value;
 use std::{
@@ -56,6 +58,7 @@ struct Inner<P: PersistencePort, R: RuntimePort> {
     redo: Vec<WorkspaceDocument>,
     clients: BTreeMap<ClientId, ClientLedger>,
     projection: Arc<RuntimeProjection>,
+    audio: AudioRuntimeProjection,
 }
 
 #[derive(Default)]
@@ -128,6 +131,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
             control_manifests: materialize_controls(&document, &registry, false),
             transcript: TranscriptSummary::default(),
             diagnostics: DiagnosticsSummary::default(),
+            audio: AudioRuntimeProjection::default(),
         };
         Ok(Self {
             shared: Arc::new(Shared {
@@ -149,6 +153,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
                     redo: Vec::new(),
                     clients: BTreeMap::new(),
                     projection: Arc::new(initial),
+                    audio: AudioRuntimeProjection::default(),
                 }),
                 projection_changed: Event::new(),
             }),
@@ -219,6 +224,12 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
             ignored_stale: 0,
         };
         while let Some(event) = inner.runtime.poll_event() {
+            if let RuntimeEvent::AudioProjection(audio) = event {
+                inner.audio = audio;
+                publish(&mut inner)?;
+                report.handled += 1;
+                continue;
+            }
             let (operation_id, target_revision) = match &event {
                 RuntimeEvent::ActivationSucceeded {
                     operation_id,
@@ -229,6 +240,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
                     target_graph_revision,
                     ..
                 } => (*operation_id, *target_graph_revision),
+                RuntimeEvent::AudioProjection(_) => unreachable!("handled above"),
             };
             let is_current = target_revision == inner.target_revision
                 && inner
@@ -263,6 +275,7 @@ impl<P: PersistencePort, R: RuntimePort> ApplicationService<P, R> {
                     }
                     inner.errors.push(error);
                 }
+                RuntimeEvent::AudioProjection(_) => unreachable!("handled above"),
             }
             publish(&mut inner)?;
             report.handled += 1;
@@ -448,17 +461,52 @@ fn process_new_command<P: PersistencePort, R: RuntimePort>(
         ));
     }
 
+    let runtime_control = match envelope.command {
+        SemanticCommand::StartAudio => Some(RuntimeControl::StartAudio),
+        SemanticCommand::StopAudio => Some(RuntimeControl::StopAudio),
+        SemanticCommand::SetCaptureMuted { muted } => Some(RuntimeControl::SetCaptureMuted(muted)),
+        SemanticCommand::SetMonitorEnabled { enabled } => {
+            Some(RuntimeControl::SetMonitorEnabled(enabled))
+        }
+        SemanticCommand::SetMonitorMuted { muted } => Some(RuntimeControl::SetMonitorMuted(muted)),
+        SemanticCommand::SetMonitorGain { linear_millionths } => {
+            if linear_millionths > 1_000_000 {
+                return Ok(rejected_receipt(
+                    inner,
+                    envelope,
+                    CommandErrorCode::InvalidRuntimeControl,
+                    "monitor gain must be between zero and one million millionths",
+                ));
+            }
+            Some(RuntimeControl::SetMonitorGain(linear_millionths))
+        }
+        _ => None,
+    };
+    if let Some(control) = runtime_control {
+        inner.runtime.enqueue_control(control);
+        publish(inner)?;
+        return Ok(CommandReceipt {
+            request_id: envelope.request_id,
+            request_sequence: envelope.request_sequence,
+            outcome: ReceiptOutcome::Accepted,
+            document_revision: inner.document.revision,
+            target_graph_revision: inner.target_revision,
+            operation_id: None,
+        });
+    }
+
     let (mut candidate, history) = match prepare_candidate(inner, &envelope.command) {
         Ok(candidate) => candidate,
         Err((code, message)) => return Ok(rejected_receipt(inner, envelope, code, message)),
     };
-    let graph_changed = candidate.graph != inner.document.graph;
+    let runtime_changed = candidate.graph != inner.document.graph
+        || candidate.device_selectors != inner.document.device_selectors;
     let next_document = inner
         .document
         .revision
         .checked_next()
         .map_err(|error| ApplicationError::RevisionOverflow(error.to_string()))?;
-    let next_target = graph_changed
+    let next_target = runtime_changed
         .then(|| inner.target_revision.checked_next())
         .transpose()
         .map_err(|error| ApplicationError::RevisionOverflow(error.to_string()))?;
@@ -512,6 +560,7 @@ fn process_new_command<P: PersistencePort, R: RuntimePort>(
             operation_id,
             target_graph_revision: next_target,
             graph: inner.document.graph.clone(),
+            device_selectors: inner.document.device_selectors.clone(),
         });
         Some(operation_id)
     } else {
@@ -620,6 +669,15 @@ fn prepare_candidate<P: PersistencePort, R: RuntimePort>(
                     "there is no durable edit to redo".to_owned(),
                 )
             }),
+        SemanticCommand::StartAudio
+        | SemanticCommand::StopAudio
+        | SemanticCommand::SetCaptureMuted { .. }
+        | SemanticCommand::SetMonitorEnabled { .. }
+        | SemanticCommand::SetMonitorMuted { .. }
+        | SemanticCommand::SetMonitorGain { .. } => Err((
+            CommandErrorCode::InvalidRuntimeControl,
+            "runtime command reached the durable command path".to_owned(),
+        )),
     }
 }
 
@@ -757,6 +815,7 @@ fn publish<P: PersistencePort, R: RuntimePort>(
         diagnostics: DiagnosticsSummary {
             counters: inner.diagnostics.clone(),
         },
+        audio: inner.audio.clone(),
     });
     Ok(())
 }
@@ -806,7 +865,9 @@ mod tests {
     use super::*;
     use crate::InMemoryPersistence;
     use futures::{executor::block_on, FutureExt};
-    use magnolia_domain::{synthetic, DocumentRevision, ModuleInstance, ModuleTypeId};
+    use magnolia_domain::{
+        synthetic, DeviceSelector, DocumentRevision, ModuleInstance, ModuleTypeId,
+    };
     use magnolia_protocol::{ProtocolVersionRange, PROTOCOL_VERSION};
     use serde_json::Map;
 
@@ -889,6 +950,86 @@ mod tests {
         let second = service.dispatch(command).unwrap();
         assert_eq!(first, second);
         assert_eq!(persistence.save_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn runtime_audio_controls_do_not_enter_persistence_or_document_history() {
+        let persistence = InMemoryPersistence::default();
+        let service = ApplicationService::new(
+            persistence.clone(),
+            TestRuntime::default(),
+            synthetic::registry(),
+            RuntimeEpochId::from_u128(1),
+        )
+        .unwrap();
+        connect_client(&service);
+        let envelope = CommandEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            client_id: ClientId::from_u128(1),
+            request_id: RequestId::from_u128(90),
+            request_sequence: RequestSequence::new(1),
+            expected_document_revision: DocumentRevision::ZERO,
+            command: SemanticCommand::SetCaptureMuted { muted: true },
+        };
+        let receipt = service.dispatch(envelope).unwrap();
+        assert!(receipt.accepted());
+        assert_eq!(receipt.document_revision, DocumentRevision::ZERO);
+        assert_eq!(persistence.save_count().unwrap(), 0);
+
+        let undo = CommandEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            client_id: ClientId::from_u128(1),
+            request_id: RequestId::from_u128(91),
+            request_sequence: RequestSequence::new(2),
+            expected_document_revision: DocumentRevision::ZERO,
+            command: SemanticCommand::Undo,
+        };
+        assert!(matches!(
+            service.dispatch(undo).unwrap().outcome,
+            ReceiptOutcome::Rejected {
+                error: CommandError {
+                    code: CommandErrorCode::NothingToUndo,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn durable_device_selector_edits_persist_and_request_activation() {
+        let service = service();
+        let receipt = service
+            .dispatch(CommandEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                client_id: ClientId::from_u128(1),
+                request_id: RequestId::from_u128(92),
+                request_sequence: RequestSequence::new(1),
+                expected_document_revision: DocumentRevision::ZERO,
+                command: SemanticCommand::ApplyWorkspaceEdit {
+                    batch: WorkspaceEditBatch::new(vec![WorkspaceEdit::SetDeviceSelector {
+                        key: "audio.input".to_owned(),
+                        selector: DeviceSelector::FollowDefaultInput,
+                    }]),
+                },
+            })
+            .unwrap();
+        assert!(receipt.accepted());
+        assert_eq!(receipt.document_revision, DocumentRevision::new(1));
+        assert_eq!(receipt.target_graph_revision, TargetGraphRevision::new(1));
+        assert!(receipt.operation_id.is_some());
+
+        let inner = service.shared.inner.lock().unwrap();
+        assert_eq!(inner.runtime.requests.len(), 1);
+        assert_eq!(
+            inner.runtime.requests[0]
+                .device_selectors
+                .get("audio.input"),
+            Some(&DeviceSelector::FollowDefaultInput)
+        );
+        assert_eq!(
+            inner.document.device_selectors.get("audio.input"),
+            Some(&DeviceSelector::FollowDefaultInput)
+        );
     }
 
     #[test]

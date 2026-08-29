@@ -745,6 +745,88 @@ pub mod synthetic {
     }
 }
 
+/// Descriptors for the bounded native audio path. These are document-level
+/// module contracts; device and stream handles remain runtime-only.
+pub mod native_audio {
+    use super::*;
+    use serde_json::json;
+
+    pub const PIPEWIRE_INPUT: &str = "magnolia.audio.pipewire_input";
+    pub const FORMAT_CONVERT: &str = "magnolia.audio.format_convert";
+    pub const CHANNEL_MAP: &str = "magnolia.audio.channel_map";
+    pub const RESAMPLE: &str = "magnolia.audio.resample";
+    pub const CAPTURE_MUTE: &str = "magnolia.audio.capture_mute";
+    pub const MONITOR: &str = "magnolia.audio.monitor";
+
+    #[must_use]
+    pub fn descriptors() -> [ModuleDescriptor; 6] {
+        [
+            descriptor(PIPEWIRE_INPUT, false, true),
+            descriptor(FORMAT_CONVERT, true, true),
+            descriptor(CHANNEL_MAP, true, true),
+            descriptor(RESAMPLE, true, true),
+            descriptor(CAPTURE_MUTE, true, true),
+            descriptor(MONITOR, true, false),
+        ]
+    }
+
+    fn descriptor(name: &str, input: bool, output: bool) -> ModuleDescriptor {
+        let stream = StreamDefinition {
+            type_id: StreamTypeId::new("magnolia.audio.pcm").unwrap(),
+            schema_version: SchemaVersion::new(1, 0),
+            clock: ClockDomain::AudioFrames,
+            format: BTreeMap::from([
+                ("block_frames".to_owned(), "256".to_owned()),
+                ("sample_type".to_owned(), "f32le".to_owned()),
+            ]),
+            delivery: DeliveryPolicy::DropOldest,
+        };
+        let mut ports = Vec::new();
+        if input {
+            ports.push(PortDefinition {
+                id: PortId::new("in").unwrap(),
+                direction: PortDirection::Input,
+                stream: stream.clone(),
+                allow_multiple: false,
+            });
+        }
+        if output {
+            ports.push(PortDefinition {
+                id: PortId::new("out").unwrap(),
+                direction: PortDirection::Output,
+                stream,
+                allow_multiple: false,
+            });
+        }
+        ModuleDescriptor {
+            module_type: ModuleTypeId::new(name).unwrap(),
+            version: SchemaVersion::new(1, 0),
+            execution_lane: ExecutionLane::RealTime,
+            ports,
+            controls: Vec::new(),
+            capabilities: BTreeSet::from(["native-audio".to_owned()]),
+            configuration_schema: json!({
+                "type": "object",
+                "additionalProperties": false
+            }),
+            introduces_delay: false,
+        }
+    }
+}
+
+/// Registry used by the native application composition. Synthetic modules
+/// remain available for deterministic tests and demonstrations.
+#[must_use]
+pub fn production_registry() -> DescriptorRegistry {
+    let mut registry = synthetic::registry();
+    for descriptor in native_audio::descriptors() {
+        registry
+            .register(descriptor)
+            .expect("valid native audio descriptor");
+    }
+    registry
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -817,6 +899,45 @@ mod tests {
             .edges
             .insert(EntityId::from_u128(3), edge(3, 1, 2, Some(4)));
         assert_eq!(registry.validate_graph(&graph), Ok(()));
+    }
+
+    #[test]
+    fn production_registry_validates_the_native_audio_path() {
+        let module_types = [
+            native_audio::PIPEWIRE_INPUT,
+            native_audio::FORMAT_CONVERT,
+            native_audio::CHANNEL_MAP,
+            native_audio::RESAMPLE,
+            native_audio::CAPTURE_MUTE,
+            native_audio::MONITOR,
+        ];
+        let mut graph = WorkspaceGraph::default();
+        for (index, module_type) in module_types.iter().enumerate() {
+            let id = EntityId::from_u128(index as u128 + 1);
+            graph
+                .modules
+                .insert(id, instance(index as u128 + 1, module_type));
+        }
+        for index in 0..module_types.len() - 1 {
+            let id = EntityId::from_u128(index as u128 + 100);
+            graph.edges.insert(
+                id,
+                Edge {
+                    id,
+                    from: PortRef {
+                        module_id: EntityId::from_u128(index as u128 + 1),
+                        port_id: PortId::new("out").unwrap(),
+                    },
+                    to: PortRef {
+                        module_id: EntityId::from_u128(index as u128 + 2),
+                        port_id: PortId::new("in").unwrap(),
+                    },
+                    capacity: None,
+                },
+            );
+        }
+
+        assert_eq!(production_registry().validate_graph(&graph), Ok(()));
     }
 
     #[test]

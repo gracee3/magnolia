@@ -14,14 +14,17 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use futures::{SinkExt, StreamExt};
-use magnolia_application::{ApplicationService, InMemoryPersistence};
-use magnolia_domain::{synthetic, EntityId, RuntimeEpochId, TargetGraphRevision};
+use magnolia_application::{
+    ActivationRequest, ApplicationService, InMemoryPersistence, RuntimeControl, RuntimeEvent,
+    RuntimePort,
+};
+use magnolia_domain::{production_registry, EntityId, RuntimeEpochId, TargetGraphRevision};
 use magnolia_protocol::{
     encode_telemetry_postcard, ConnectResponse, ControlClientMessage, ControlServerMessage,
     TelemetryClientMessage, TelemetryServerMessage, TranscriptSegment, TransportErrorCode,
     PROTOCOL_VERSION,
 };
-use magnolia_runtime::{MockRuntime, MockRuntimeError};
+use magnolia_runtime::{MockRuntime, MockRuntimeError, NativeRuntime};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -40,7 +43,35 @@ use tokio::{
 };
 use tower_http::services::{ServeDir, ServeFile};
 
-type NativeService = ApplicationService<InMemoryPersistence, MockRuntime>;
+type NativeService = ApplicationService<InMemoryPersistence, RuntimeBackend>;
+
+enum RuntimeBackend {
+    Native(NativeRuntime),
+    Mock(MockRuntime),
+}
+
+impl RuntimePort for RuntimeBackend {
+    fn enqueue_activation(&mut self, request: ActivationRequest) {
+        match self {
+            Self::Native(runtime) => runtime.enqueue_activation(request),
+            Self::Mock(runtime) => runtime.enqueue_activation(request),
+        }
+    }
+
+    fn enqueue_control(&mut self, control: RuntimeControl) {
+        match self {
+            Self::Native(runtime) => runtime.enqueue_control(control),
+            Self::Mock(runtime) => runtime.enqueue_control(control),
+        }
+    }
+
+    fn poll_event(&mut self) -> Option<RuntimeEvent> {
+        match self {
+            Self::Native(runtime) => runtime.poll_event(),
+            Self::Mock(runtime) => runtime.poll_event(),
+        }
+    }
+}
 
 const DEFAULT_LAUNCH_TTL: Duration = Duration::from_secs(5 * 60);
 const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(12 * 60 * 60);
@@ -107,6 +138,7 @@ pub struct MagnoliaHost {
     shutdown: watch::Sender<bool>,
     server_task: JoinHandle<Result<(), std::io::Error>>,
     transcript_task: JoinHandle<()>,
+    runtime_task: JoinHandle<()>,
 }
 
 impl MagnoliaHost {
@@ -131,11 +163,15 @@ impl MagnoliaHost {
             SessionAuthority::new(configuration.launch_token_ttl, configuration.session_ttl)?;
         let launch_url = format!("{origin}/#token={}", authority.launch_token());
         let runtime_epoch = RuntimeEpochId::new();
-        let runtime = MockRuntime::new();
+        let mock_runtime = configuration.test_mode.then(MockRuntime::new);
+        let runtime = mock_runtime.clone().map_or_else(
+            || RuntimeBackend::Native(NativeRuntime::new()),
+            RuntimeBackend::Mock,
+        );
         let service = ApplicationService::new(
             InMemoryPersistence::default(),
-            runtime.clone(),
-            synthetic::registry(),
+            runtime,
+            production_registry(),
             runtime_epoch,
         )?;
         let telemetry = TelemetryHub::default();
@@ -146,7 +182,7 @@ impl MagnoliaHost {
             origin: Arc::<str>::from(origin.clone()),
             authority,
             service: service.clone(),
-            runtime,
+            runtime: mock_runtime,
             telemetry,
             auto_activate: configuration.auto_activate,
             test_authority: test_authority.clone(),
@@ -165,10 +201,11 @@ impl MagnoliaHost {
                 .await
         });
         let transcript_task = tokio::spawn(run_synthetic_transcript(
-            service,
+            service.clone(),
             runtime_epoch,
             shutdown.subscribe(),
         ));
+        let runtime_task = tokio::spawn(run_runtime_pump(service, shutdown.subscribe()));
 
         let (browser, browser_error) = if configuration.launch_browser {
             match BrowserProcess::launch(&launch_url, configuration.chromium.as_deref()) {
@@ -191,6 +228,7 @@ impl MagnoliaHost {
             shutdown,
             server_task,
             transcript_task,
+            runtime_task,
         })
     }
 
@@ -217,6 +255,9 @@ impl MagnoliaHost {
         self.transcript_task
             .await
             .map_err(|error| HostError::Task(error.to_string()))?;
+        self.runtime_task
+            .await
+            .map_err(|error| HostError::Task(error.to_string()))?;
         self.server_task
             .await
             .map_err(|error| HostError::Task(error.to_string()))??;
@@ -229,7 +270,7 @@ struct HostState {
     origin: Arc<str>,
     authority: SessionAuthority,
     service: NativeService,
-    runtime: MockRuntime,
+    runtime: Option<MockRuntime>,
     telemetry: TelemetryHub,
     auto_activate: bool,
     test_authority: Option<String>,
@@ -493,10 +534,11 @@ async fn handle_control_message(
             if state.auto_activate
                 && receipt.accepted()
                 && receipt.operation_id.is_some()
-                && state
-                    .runtime
-                    .complete_target_success(receipt.target_graph_revision)
-                    .is_ok()
+                && state.runtime.as_ref().is_some_and(|runtime| {
+                    runtime
+                        .complete_target_success(receipt.target_graph_revision)
+                        .is_ok()
+                })
             {
                 let _ = state.service.pump_runtime_events();
             }
@@ -864,6 +906,23 @@ async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
     }
 }
 
+async fn run_runtime_pump(service: NativeService, mut shutdown: watch::Receiver<bool>) {
+    let mut ticker = interval(Duration::from_millis(10));
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            _ = ticker.tick() => {
+                let _ = service.pump_runtime_events();
+            }
+        }
+    }
+}
+
 fn random_token() -> Result<String, HostError> {
     let mut bytes = [0_u8; 32];
     getrandom::fill(&mut bytes).map_err(|error| HostError::Entropy(error.to_string()))?;
@@ -875,6 +934,7 @@ struct TestStatus {
     projection: magnolia_protocol::RuntimeProjection,
     pending_activations: usize,
     observed_activations: usize,
+    observed_controls: usize,
     telemetry: TelemetryStatus,
 }
 
@@ -885,8 +945,18 @@ async fn test_status(State(state): State<HostState>, headers: HeaderMap) -> Resp
     match (state.service.snapshot(), state.telemetry.status()) {
         (Ok(projection), Ok(telemetry)) => Json(TestStatus {
             projection,
-            pending_activations: state.runtime.pending_requests().len(),
-            observed_activations: state.runtime.observed_requests().len(),
+            pending_activations: state
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.pending_requests().len()),
+            observed_activations: state
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.observed_requests().len()),
+            observed_controls: state
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.observed_controls().len()),
             telemetry,
         })
         .into_response(),
@@ -924,19 +994,18 @@ async fn test_runtime(
     if !test_authorized(&state, &headers) {
         return StatusCode::NOT_FOUND.into_response();
     }
+    let Some(runtime) = state.runtime.as_ref() else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
     let completed = match request.action {
-        RuntimeTestAction::SucceedNext => state.runtime.complete_next_success(),
-        RuntimeTestAction::FailNext => state
-            .runtime
-            .complete_next_failure("synthetic_activation", "induced activation failure"),
+        RuntimeTestAction::SucceedNext => runtime.complete_next_success(),
+        RuntimeTestAction::FailNext => {
+            runtime.complete_next_failure("synthetic_activation", "induced activation failure")
+        }
         RuntimeTestAction::SucceedTarget => request
             .target_revision
             .ok_or(MockRuntimeError::NoPendingActivation)
-            .and_then(|target| {
-                state
-                    .runtime
-                    .complete_target_success(TargetGraphRevision::new(target))
-            }),
+            .and_then(|target| runtime.complete_target_success(TargetGraphRevision::new(target))),
         RuntimeTestAction::Pump => {
             let pump = state.service.pump_runtime_events();
             return match pump {
