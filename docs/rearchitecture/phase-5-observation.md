@@ -1,6 +1,6 @@
 # Phase 5 observation, recording, and replay
 
-Status: promotion candidate on 2026-08-28.
+Status: promotion-ready candidate on 2026-08-28.
 
 ## Implemented topology
 
@@ -38,10 +38,6 @@ finalization, corruption rejection, incomplete recovery, and repeated replay
 hash comparisons passed. Physical microphone samples were analyzed live but
 were never supplied to the recording worker or written to disk.
 
-These measurements are development evidence, not the promotion result. Phase 5
-remains a candidate until the same clean exact head passes the default 1,800
-second `./scripts/verify-phase-5-live.sh` and complete `./scripts/verify.sh`.
-
 The first default-duration candidate run reached 84,451 callbacks and 337,804
 analyzed blocks with zero allocation, deallocation, drop, or ring faults;
 callback p99/p99.9 were 0.20/0.24 ms and analyzer p95 was 0.125 ms. Promotion was
@@ -51,8 +47,19 @@ in-flight subscription during an unrelated rerun, allowing its stale completion
 to release the replacement. The repair advances generations only at visibility
 boundaries and prevents stale completions from releasing a currently desired
 lease. A short post-repair gate passed ten consecutive Diagnose/Transcribe
-transitions. The full default-duration gate must be repeated at the repaired
-exact head; the rejected run is evidence, not acceptance.
+transitions. The rejected run is retained as evidence, not acceptance.
+
+At repaired exact head `501da3e`, the complete `./scripts/verify.sh` gate and
+default 1,800-second `./scripts/verify-phase-5-live.sh` gate passed. The accepted
+live tier again observed 84,451 callbacks and 337,804 analyzer blocks with zero
+callback allocations/deallocations, drops, or ring faults. Callback p99/p99.9
+were 0.20/0.23 ms, maximum callback time was 0.486 ms, and analyzer p95 was
+0.075 ms. The seeded replay reproduced PCM, timeline, controls, analyzer, and
+telemetry hashes. Native meter, waveform, spectrum, diagnostics, ten consecutive
+Diagnose/Transcribe transitions, close/reopen, process/node/profile teardown,
+and user-session default/mute/volume equality all passed. Physical microphone
+samples were not recorded. The documentation-only evidence commit must pass the
+same complete and live gates before promotion; no source correction is pending.
 
 ## Deferred boundary
 
